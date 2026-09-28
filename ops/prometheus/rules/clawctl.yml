@@ -1,0 +1,229 @@
+# clawctl 的判決，寫成 Prometheus alerting rule。
+#
+# 這一份是**遷移的樣本**，不是全部。目的是先驗一件事：
+# internal/state 那 758 行的措辭紀律，搬進 annotation 之後撐不撐得住。
+#
+# ⚠⚠ 搬家時最容易掉在地上的東西（PRODUCT.md 地基二）：
+#
+#   1. 「沒有回報」≠「一切正常」。一個空的、乾淨的、沒有壞消息的答案，
+#      第一個要懷疑的是你有沒有問對地方。annotation 裡永遠不准出現
+#      「健康」「一切正常」「沒有問題」—— 我們只知道「沒看到」。
+#   2. 「看不到」≠「不存在」。
+#   3. 自證不算數：狀態只能來自「剛剛真的跑完一次」或「由一支跟被測對象
+#      無關的程式去驗」。`up` 剛好滿足第二條 —— 它是 Prometheus 量的，
+#      不是機器自稱的。這比我們原本的 push 模型更站得住。
+#
+# 沒有搬進來的（**刻意的**，不是忘了）：
+#   - 事件流判決（baseline_hash_mismatch 那組）還在 clawctl 裡，
+#     因為 clawctl 還沒把 finding 吐成 metric。那是下一步。
+
+groups:
+  - name: clawctl-roster
+    interval: 60s
+    rules:
+      # ── 分母 ───────────────────────────────────────────────────
+      # 這一條就是 SPEC §7.2 說「Prometheus 回答不了」的那個問題。
+      # 它回答得了，而且不用我們寫任何程式：名冊在 fleet.json，
+      # 抓不到就是 up == 0。
+      - alert: MachineInRosterNotAnswering
+        expr: up{job="node"} == 0
+        for: 10m
+        labels:
+          severity: warning
+          source: prometheus
+        annotations:
+          summary: '{{ $labels.machine }} 在名冊上，但抓不到'
+          description: >-
+            fleet.json 裡宣告了 {{ $labels.machine }}，Prometheus 連續 10 分鐘
+            抓不到它的 :9100。這**只說明抓不到**，不說明它壞了 ——
+            可能是 node_exporter 沒裝、tailnet 斷了、或那台根本還沒開機。
+            要知道它到底怎麼了，得去看它，而不是看這則告警。
+
+      # ── 這一條在守 scrape 設定本身 ─────────────────────────────
+      #
+      # ⚠⚠ honor_labels 預設是 false，所以 target label 撞到 metric 自己的
+      # label 時，**metric 那個會被改名成 exported_xxx**。這不是錯誤、
+      # 不會有 log、不會影響抓取 —— 它只是安靜地把資料標成別人的。
+      #
+      # 2026-09-05 實地發生：clawctl-hub 那個 job 上多加了一個
+      # machine: samplehub1，於是 Prometheus 裡**每一台**機器的判決都自稱
+      # 是 samplehub1，真名被擠進 exported_machine。告警照常觸發、
+      # 數量全對、promtool SUCCESS —— 只有機器名全錯。
+      #
+      # ⚠ node_uname_info 是**已知且良性**的撞名（它自己的 machine 是
+      #   CPU 架構），所以排除掉。排除清單長長了就要停下來想一下：
+      #   那代表有人在靠這個機制而不是在避開它。
+      - alert: LabelCollisionDetected
+        expr: |
+          count by (__name__, job) (
+            {exported_machine!="", __name__!="node_uname_info"}
+          )
+        for: 5m
+        labels:
+          severity: warning
+          source: prometheus
+        annotations:
+          summary: '{{ $labels.__name__ }} 被 scrape 設定改名了（job={{ $labels.job }}）'
+          description: >-
+            這個指標自己帶的 machine label 被 target label 蓋掉，真值跑到
+            exported_machine 去了。⚠ 這代表**這個指標上所有的機器名都是錯的**，
+            而它不會讓任何東西壞掉 —— 告警照常觸發、數量照常正確、
+            只是每一則都指著錯的機器。去看 prometheus.yml 裡那個 job 的
+            static_configs / file_sd 是不是加了不該加的 label。
+
+      # ── agent 的心跳（clawctl 自己的資料）─────────────────────
+      # ⚠ 這一條跟上面那條問的是**不同的問題**，不要合併：
+      #   up==0        → Prometheus 抓不到那台的作業系統指標
+      #   checkin 過期 → 那台的 clawctl-agent 沒在往 Hub 送
+      # 兩個可以各自成立。機器活著但 agent 死了，上面那條會綠。
+      - alert: ClawctlAgentCheckinStale
+        expr: clawctl_machine_last_checkin_age_seconds > 1800
+        for: 5m
+        labels:
+          severity: warning
+          source: clawctl
+        annotations:
+          summary: '{{ $labels.machine }} 的 agent 已經 {{ $value | humanizeDuration }} 沒回報'
+          description: >-
+            agent 是每 10 分鐘一輪，超過 30 分鐘沒送就是它自己出事了。
+            ⚠ 這條沉默**不代表**那台機器沒事 —— 它只代表 Hub 這邊沒收到東西。
+
+      # ── 兩邊資料第一次真的互相幫忙 ────────────────────────────
+      # 這是整個搬家的理由：把「AI agent 的事實」跟「作業系統的事實」
+      # 放進同一個 TSDB，才問得出「它為什麼沒回報」。
+      # 現在這是兩個平行宇宙，這個問題問不出來。
+      #
+      # ⚠⚠ join 靠的是兩邊都有 machine 這個 label。
+      #    node_uname_info 自己也有一個 machine，那是 CPU 架構 ——
+      #    靠 honor_labels: false 把它擠成 exported_machine 才不會撞。
+      #    見 prometheus.yml 裡的警告。
+      - alert: AgentSilentWhileMachineIsFine
+        expr: |
+          clawctl_machine_last_checkin_age_seconds > 1800
+            and on (machine) up{job="node"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          source: joined
+        annotations:
+          summary: '{{ $labels.machine }} 機器活著，但 clawctl-agent 不說話'
+          description: >-
+            node_exporter 抓得到（所以機器開著、網路通、tailnet 沒斷），
+            但 clawctl-agent 超過 30 分鐘沒回報。**問題在 agent 自己**，
+            不在機器或網路 —— 這是原本兩套分開時問不出來的那一句。
+
+      # ── 推出去的東西有沒有落地 ────────────────────────────────
+      #
+      # ⚠⚠ 這兩條的存在理由跟其他規則不同：它們守的不是機器，是**部署這件事**。
+      #     2026-09-03：部署腳本回報成功，三台上各多了一個不受 systemd 管的
+      #     第二個 agent，跑了六個多小時，兩個都誠實地送心跳，每一盞燈都是綠的。
+      #     ops/ansible/verify.sh 是推完當下的一次性驗收；這兩條是往後每天問。
+
+      - alert: FleetIsOnMoreThanOneAgentVersion
+        # count by (version) 得到「每個版本有幾台」，外面再 count 一次
+        # 得到「一共有幾個版本」。1 = 全機隊同一版。
+        expr: count(count by (version) (clawctl_agent_info)) > 1
+        # ⚠ 2h 不是猶豫，是換版本來就要時間：serial: 1、四台、每台重開加驗證。
+        #   換到一半發這個沒有用。它要抓的是**換到一半然後忘了**。
+        for: 2h
+        labels: { severity: warning, source: clawctl }
+        annotations:
+          summary: '機隊分裂成 {{ $value }} 個 agent 版本'
+          description: >-
+            版本不一致代表某一台的推沒有落地。從版本字串上看不出哪一台有哪個修正 ——
+            2026-09-03 全機隊都是 f83eadd-dirty，而修掉那個 CLI bug 的 commit 是
+            08119ac，最後只能靠實際餵它一個認不得的參數才知道誰有。
+            對答案：./ops/ansible/verify.sh
+
+      - alert: MachineReportsButHasNoAgentVersion
+        # ⚠⚠ 這一條抓的是「安靜地不存在」那一類，跟
+        #     MachineReportsButNothingIsDeclaredForIt 是同一個形狀的洞：
+        #     一台沒有版本的機器，**不會**讓上面那條 FleetIsOnMoreThanOneAgentVersion
+        #     的數字變大 —— 它不是「另一個版本」，它是沒有版本。
+        #     所以上面那條全綠不代表全機隊都推到了。這條才問得出來。
+        #
+        # ⚠ 指標刻意不吐 version=""（見 cmd/clawctl-hub/metrics.go）。
+        #   如果吐了，這一條就永遠不會 fire，而儀表板上會多一列
+        #   有機器名、版本欄空白的 —— 那長得像一個答案。
+        expr: |
+          count by (machine) (clawctl_machine_last_checkin_age_seconds)
+            unless
+          count by (machine) (clawctl_agent_info)
+        for: 30m
+        labels: { severity: warning, source: clawctl }
+        annotations:
+          summary: '{{ $labels.machine }} 有在報到，但沒有回報 agent 版本'
+          description: >-
+            這台的 agent 舊到不送 agent_version 這個欄位（或送了空字串）。
+            推到它身上的東西無法驗收 —— 不是「推失敗了」，是「問不出來」。
+            先推一次新的：./ops/ansible/run.sh agent.yml --limit {{ $labels.machine }}
+
+      # ── 還原演練（PHASES.md D 表最後一列）─────────────────────
+      #
+      # 「90 天沒做還原演練，不敢動 Hub。不敢動的監控 = 沒有監控。」
+      # 一份從來沒被打開過的備份跟一份壞的備份，在目錄裡長得一模一樣。
+      # clawctl-hub restore-drill 會真的去開最新那份、讀名冊、蓋章；
+      # 這條線就是那個章。
+      #
+      # ⚠ absent() 那一半是重點：從來沒做過的時候**沒有這條線**，
+      #   而「沒有線」比「線很舊」更該亮 —— 它代表沒有人證明過備份打得開。
+      - alert: RestoreDrillOverdue
+        expr: |
+          (time() - clawctl_restore_drill_timestamp_seconds > 90 * 86400)
+          or absent(clawctl_restore_drill_timestamp_seconds)
+        for: 1h
+        labels:
+          severity: info
+          source: clawctl
+        annotations:
+          summary: '還原演練過期了（限 90 天），或從來沒做過'
+          description: >-
+            跑 clawctl-hub restore-drill。它會把最新那份備份抄到暫存目錄、
+            用正式的程式打開、讀名冊、跟正式庫對一下，通過就蓋章。
+            不碰正式庫、不碰備份檔本身。幾秒鐘。
+            ⚠ 這條亮著的時候，upgrade-hub.sh 的 --rollback 是一個沒有人驗證過的承諾。
+
+  # ⚠⚠ 這一組在 2026-09-06 之前寫不出來，因為材料只有一半。
+  #
+  #   在那之前 agent 只收「上一次跑完是何時」。於是 sampleagent4 的「22 小時
+  #   沒跑」跟 sampleagent3 的「73 天沒跑」在這裡長得是同一種安靜 ——
+  #   而前者是四個每天跑一次的工作剛好還沒到點，後者是**根本沒有人
+  #   交代它做事**。兩者要做的事完全相反。
+  #
+  #   補上分母（宣告了幾個、幾個啟用）之後才分得開：
+  #     samplehub1 15 個啟用／14 分鐘前　　sampleagent2 9 個／29 分鐘前
+  #     sampleagent4   4 個啟用／22 小時前　　sampleagent3 0 個／72.8 天前
+  - name: clawctl-openclaw-cron
+    interval: 60s
+    rules:
+      # 「該跑的時間過了，而且沒有追上」。
+      #
+      # ⚠ 這條**沒有自己挑門檻**。截止時間是排程器自己在 nextRunAtMs
+      #   裡宣告的 —— 我們只是問「那個時刻過了嗎，而且它有沒有把它往前推」。
+      #   一個健康的排程器跑完就會推進 nextRunAtMs，於是這個數字回到 0。
+      #   這跟被刪掉的 CredentialExpiringSoon 的差別就在這裡：那條是我們
+      #   替一張 8 小時的票挑了「6 小時內過期」，於是它永遠亮著。
+      #
+      # ⚠ for: 2h 不是保守，是因為量測是每 10 分鐘一次，而一個剛到點、
+      #   正在跑、還沒推進 nextRunAtMs 的工作在這裡就是 overdue=1。
+      #   真的停掉的排程器會一直 overdue，跑得動的不會撐過兩小時。
+      #
+      # ⚠⚠ 這條線的歷史只有幾個小時（指標是今天才有的）。實測四台在
+      #   max_over_time(...[12h]) 全部是 0，所以它現在不是一盞永遠亮的燈。
+      #   **但如果哪天發現某種工作的 nextRunAtMs 是懶更新的，它會變成
+      #   永遠亮 —— 那時候要做的是刪掉這條，不是把它靜音。**
+      - alert: CronJobsPastDueAndNotCatchingUp
+        expr: clawctl_openclaw_cron_jobs_overdue > 0
+        for: 2h
+        labels:
+          severity: warning
+          source: clawctl
+        annotations:
+          summary: '{{ $labels.machine }} 有 {{ $value }} 個排程工作過了該跑的時間，兩小時沒追上'
+          description: >-
+            這個時刻是 OpenClaw 的排程器自己宣告的（nextRunAtMs），不是我們挑的門檻。
+            它過了而且沒有被往前推，代表**排程器沒有在跑那幾個工作**。
+            去那台看 openclaw 的 gateway 還在不在、cron 那一段有沒有在動。
+            ⚠ 這條**不管**「一個工作都沒宣告」那種安靜 —— 那是 sampleagent3 的情況，
+            由 MachineReportsButNothingIsDeclaredForIt 接手，而且那是要人去
+            決定「這台該不該有工作」，不是程式能替他回答的。

@@ -1,0 +1,66 @@
+{{define "machine_timeline.html"}}{{template "head" .}}
+{{$p := .MachineTimeline}}
+{{$r := $p.Result}}
+
+<div class="page-heading">
+  <div>
+    <h1>{{$r.DisplayName}} 事件時間軸</h1>
+    <p>名冊、健康判定、工作單與操作員動作，照時間排成一條。</p>
+    <p class="small"><a href="{{$p.MachineHref}}">回到這台的詳細資料</a></p>
+  </div>
+  <div class="command-bar" aria-label="事件時間軸命令列">
+    <a class="button secondary" href="{{$p.ExportHref}}">匯出</a>
+  </div>
+</div>
+
+<div class="panel" style="margin-bottom:18px">
+  <form method="get" action="{{$p.MachineHref}}/timeline" class="action-form" aria-label="事件時間軸範圍">
+    <label><span class="field-label">報告期間</span>
+      <select name="days">
+        {{range $p.WindowOptions}}<option value="{{.Days}}" {{if .Selected}}selected{{end}}>最近 {{.Days}} 天</option>{{end}}
+      </select>
+    </label>
+    <button type="submit">套用</button>
+  </form>
+</div>
+
+<h2 id="timeline-sources" class="section-anchor" tabindex="-1">這條時間軸讀了什麼</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>來源</th><th>列數</th><th>讀的是什麼</th></tr></thead>
+<tbody>
+{{range $r.Sources}}
+<tr>
+  <td>{{.Label}}</td>
+  <td>{{.Count}}</td>
+  <td class="small">{{.Evidence}}{{if not .Complete}}<div class="sub"><span class="st amber">沒讀完</span> {{.NextStep}}</div>{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">
+  {{$r.Window.Days}} 天內共 <strong>{{$r.Total}}</strong> 列。
+  {{if $r.Complete}}每一個來源都讀完了這段期間。{{else}}有來源沒讀完這段期間，總數會少算。{{end}}
+</p>
+
+<h2 id="timeline" class="section-anchor" tabindex="-1">事件</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>時間</th><th>來源</th><th>發生了什麼</th></tr></thead>
+<tbody>
+{{range $r.Entries}}
+<tr>
+  <td class="small mono">{{.At.Local.Format "2006-01-02 15:04:05"}}</td>
+  <td class="small">{{timelineSource .Source}}</td>
+  <td class="small">{{if .Href}}<a href="{{.Href}}">{{.Summary}}</a>{{else}}{{.Summary}}{{end}}{{if .Detail}}<div class="sub">{{.Detail}}</div>{{end}}</td>
+</tr>
+{{end}}
+{{if not $r.Entries}}
+<tr><td colspan="3" class="small dim">這段期間 Hub 沒有記下這台的任何事件。</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+{{template "foot" .}}{{end}}

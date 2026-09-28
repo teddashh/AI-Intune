@@ -1,0 +1,21 @@
+{{define "enrollment_limit_review.html"}}{{template "head" .}}
+{{$p := .EnrollmentLimitReview}}
+<div class="page-heading"><div><h1>確認註冊上限</h1><p>{{$p.Headline}}</p></div></div>
+{{if $p.AlreadyOver}}<div class="caveat"><b>這個上限比名冊上現在的台數小。</b> 它不會退役任何一台機器；在退役到 {{$p.MaxMachines}} 台以下之前，開不了新的 enroll 票。</div>{{end}}
+<div class="panel">
+  <div class="metric-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+    <div class="metric-card"><div class="metric-label">現在的上限</div><div class="metric-value">{{if $p.Current.Set}}{{$p.Current.MaxMachines}}{{else}}沒有上限{{end}}</div><div class="metric-note">改過 {{$p.Current.Revision}} 次</div></div>
+    <div class="metric-card"><div class="metric-label">改成</div><div class="metric-value">{{if $p.Set}}{{$p.MaxMachines}}{{else}}沒有上限{{end}}</div><div class="metric-note">套用後生效</div></div>
+    <div class="metric-card"><div class="metric-label">名冊上</div><div class="metric-value">{{$p.Current.InDenominator}}</div><div class="metric-note">已退役 {{$p.Current.Retired}} 台，不算</div></div>
+  </div>
+  <p><b>理由：</b>{{.EnrollmentLimitReason}}</p>
+  <form method="post" action="/machines/enrollment/limits" style="margin-top:18px">
+    {{if $p.Set}}<input type="hidden" name="max_machines" value="{{$p.MaxMachines}}">{{else}}<input type="hidden" name="clear" value="1">{{end}}
+    <input type="hidden" name="expected_revision" value="{{$p.Current.Revision}}">
+    <input type="hidden" name="preview_digest" value="{{$p.PreviewDigest}}">
+    <input type="hidden" name="reason" value="{{.EnrollmentLimitReason}}">
+    <input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+    <div class="command-bar" style="margin-top:14px"><button type="submit">{{if $p.Set}}把上限設成 {{$p.MaxMachines}} 台{{else}}取消註冊上限{{end}}</button><a class="button secondary" href="/machines/enrollment">取消</a></div>
+  </form>
+</div>
+{{template "foot" .}}{{end}}

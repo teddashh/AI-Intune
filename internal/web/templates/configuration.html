@@ -1,0 +1,127 @@
+{{define "configuration.html"}}{{template "head" .}}
+{{$c := .Configuration}}
+<div class="page-heading"><div>
+  <h1>裝置組態</h1>
+  <p>設定原則決定每台代理程式多久報到一次、多久量測一次工作負載。</p>
+</div></div>
+
+<div class="metric-grid">
+  <div class="metric-card">
+    <div class="metric-label">已套用</div>
+    <div class="metric-value">{{$c.Applied}}</div>
+    <div class="metric-note metric-state"><span class="dot green" aria-hidden="true"></span>回報的設定就是指派的設定</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">下次報到時套用</div>
+    <div class="metric-value">{{$c.Pending}}</div>
+    <div class="metric-note metric-state"><span class="dot blue" aria-hidden="true"></span>還在跑同一個原則的舊 revision</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">未回報</div>
+    <div class="metric-value">{{$c.Unreported}}</div>
+    <div class="metric-note metric-state"><span class="dot grey" aria-hidden="true"></span>沒有可比對的回報</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">不符</div>
+    <div class="metric-value">{{$c.Mismatch}}</div>
+    <div class="metric-note metric-state"><span class="dot red" aria-hidden="true"></span>回報的設定不是本 Hub 指派的</div>
+  </div>
+</div>
+
+<h2 id="policies" class="section-anchor" tabindex="-1">設定原則</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<caption class="sr-only">已發佈的設定原則</caption>
+<thead><tr>
+  <th>原則</th><th style="width:110px">revision</th><th style="width:120px">報到間隔</th>
+  <th style="width:130px">量測間隔</th><th style="width:110px">指派範圍</th><th style="width:160px">發佈時間</th>
+  <th style="min-width:330px">動作</th>
+</tr></thead>
+<tbody>
+{{range $c.Policies}}
+  <tr>
+    <td class="name"><span class="mono">{{.PolicyID}}</span><span class="sub">共 {{.RevisionCount}} 個 revision</span></td>
+    <td class="mono">{{.Revision}}</td>
+    <td>{{.Settings.CheckinIntervalSeconds}} 秒</td>
+    <td>{{.Settings.ObservationIntervalSeconds}} 秒</td>
+    <td>{{.Assignments}}</td>
+    <td class="small">{{.PublishedAt.Local.Format "2006-01-02 15:04"}}</td>
+    <td>
+      {{if $.Access.CanAdmin}}
+      <form class="action-form" method="post" action="/machines/configuration/assignment-preview" style="margin:0">
+        <input type="hidden" name="policy_id" value="{{.PolicyID}}">
+        <input type="hidden" name="policy_revision" value="{{.Revision}}">
+        <label><span class="field-label">指派對象</span>
+          <select name="scope" aria-label="指派範圍">
+            <option value="machine">裝置</option>
+            <option value="channel">通道</option>
+          </select>
+        </label>
+        <label><span class="field-label">對象識別碼</span>
+          <input type="text" name="scope_id" placeholder="machine ID 或 canary / stable" autocomplete="off" required aria-required="true">
+        </label>
+        <label><span class="field-label">理由</span>
+          <input type="text" name="reason" placeholder="為什麼要改這一群的節奏" autocomplete="off" required aria-required="true">
+        </label>
+        <button type="submit">預覽指派</button>
+      </form>
+      {{end}}
+    </td>
+  </tr>
+{{else}}
+  <tr><td colspan="7" class="empty">目前每台都跑預設值：報到 {{$c.Defaults.CheckinIntervalSeconds}} 秒、量測 {{$c.Defaults.ObservationIntervalSeconds}} 秒。</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+{{if .Access.CanAdmin}}
+<h2 id="publish" class="section-anchor" tabindex="-1">發佈設定原則</h2>
+<div class="panel">
+  <p style="margin-top:0">同一個識別碼填入新的值會產生下一個 revision；填入目前的值不會產生新的 revision。</p>
+  <form class="form-grid" method="post" action="/machines/configuration/policy-preview">
+    <label><span class="field-label">原則識別碼</span>
+      <input type="text" name="policy_id" value="{{$c.NextPolicy}}" placeholder="例如 fast-fleet" autocomplete="off" required aria-required="true">
+    </label>
+    <label><span class="field-label">報到間隔（秒）</span>
+      <input type="number" name="checkin_interval_seconds" min="30" max="3600" value="{{$c.Defaults.CheckinIntervalSeconds}}" required aria-required="true">
+    </label>
+    <label><span class="field-label">量測間隔（秒）</span>
+      <input type="number" name="observation_interval_seconds" min="60" max="86400" value="{{$c.Defaults.ObservationIntervalSeconds}}" required aria-required="true">
+    </label>
+    <label><span class="field-label">理由</span>
+      <input type="text" name="reason" placeholder="為什麼要改節奏" autocomplete="off" required aria-required="true">
+    </label>
+    <button type="submit">預覽發佈</button>
+  </form>
+</div>
+{{end}}
+
+<h2 id="devices" class="section-anchor" tabindex="-1">裝置回報</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<caption class="sr-only">每台裝置的設定來源與回報狀態</caption>
+<thead><tr>
+  <th>裝置</th><th style="width:120px">來源</th><th style="width:180px">原則</th>
+  <th style="width:110px">報到間隔</th><th style="width:120px">量測間隔</th>
+  <th style="width:200px">狀態</th><th style="width:150px">最後回報</th>
+</tr></thead>
+<tbody>
+{{range $c.Machines}}
+  <tr>
+    <td class="name"><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a><span class="sub mono">{{.MachineID}}</span></td>
+    <td>{{.SourceLabel}}{{if .Channel}}<div class="small dim mono">{{.Channel}}</div>{{end}}</td>
+    <td>{{if .PolicyID}}<span class="mono">{{.PolicyID}}</span> <span class="dim">rev {{.Revision}}</span>{{else}}<span class="dim">—</span>{{end}}</td>
+    <td>{{.Checkin}} 秒</td>
+    <td>{{.Observation}} 秒</td>
+    <td><span class="st {{.Tone}}"><span class="dot {{.Tone}}" aria-hidden="true"></span>{{.Label}}</span></td>
+    <td class="small">{{with .ReportedAt}}{{.Local.Format "2006-01-02 15:04"}}{{else}}<span class="dim">—</span>{{end}}</td>
+  </tr>
+{{else}}
+  <tr><td colspan="7" class="empty">名冊是空的。</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+{{template "foot" .}}{{end}}

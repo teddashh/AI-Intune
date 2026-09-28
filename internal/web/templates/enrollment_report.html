@@ -1,0 +1,96 @@
+{{define "enrollment_report.html"}}{{template "head" .}}
+{{$p := .EnrollmentReport}}
+{{$r := $p.Report}}
+
+<div class="page-heading">
+  <div>
+    <h1>註冊報告</h1>
+    <p>說好要納管的機器，來了沒有。開一張票就是一個宣告，這一頁把每一個宣告攤開來講。</p>
+  </div>
+  <div class="command-bar" aria-label="註冊報告命令列">
+    <a class="button secondary" href="{{$p.ExportHref}}">匯出</a>
+  </div>
+</div>
+
+<section class="metric-grid" aria-label="註冊摘要">
+  <article class="metric-card">
+    <div class="metric-label">分母</div>
+    <div class="metric-value">{{$r.Denominator}}</div>
+    <div class="metric-note">名冊上未退役的機器</div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">已到</div>
+    <div class="metric-value">{{$r.Arrived}} / {{$r.Denominator}}</div>
+    <div class="metric-note">
+      <span class="metric-state"><span class="dot {{if eq $r.Arrived $r.Denominator}}green{{else}}amber{{end}}" aria-hidden="true"></span>
+      {{if eq $r.Arrived $r.Denominator}}分母裡每一台都報到過{{else}}有機器從來沒有報到過{{end}}</span>
+    </div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">還沒到</div>
+    <div class="metric-value">{{$r.Owed}}</div>
+    <div class="metric-note">已退役 {{$r.Retired}} 台，不算分母</div>
+  </article>
+</section>
+
+{{if $p.Owed}}
+<h2 id="owed" class="section-anchor" tabindex="-1">還沒到的機器</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>機器</th><th>走到哪一步</th><th>宣告納管</th><th>票</th><th>下一步</th></tr></thead>
+<tbody>
+{{range $p.Owed}}
+<tr>
+  <td><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a></td>
+  <td class="small">{{.StageTitle}}<div class="sub">{{.Meaning}}</div></td>
+  <td class="small mono">{{.DeclaredAt.Local.Format "2006-01-02 15:04"}}<div class="sub">等了 {{dur .WaitedFor}}</div></td>
+  <td class="small mono">{{if .TicketExpiresAt}}{{.TicketExpiresAt.Local.Format "2006-01-02 15:04"}} 到期{{else}}—{{end}}</td>
+  <td class="small">{{.NextStep}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{else}}
+<h2 id="owed" class="section-anchor" tabindex="-1">還沒到的機器</h2>
+<p class="empty">分母裡的每一台都報到過。</p>
+{{end}}
+
+<h2 id="stages" class="section-anchor" tabindex="-1">名冊上的每一步</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>走到哪一步</th><th>機器</th><th>這是什麼</th><th>下一步</th></tr></thead>
+<tbody>
+{{range $p.Stages}}
+<tr>
+  <td>{{.Title}}</td>
+  <td>{{.Count}}</td>
+  <td class="small">{{.Meaning}}</td>
+  <td class="small">{{.NextStep}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">離開分母只有一條路：退役。撤票、票過期都不會讓一列名冊消失——「你說要納管、但它沒來」是事實的一部分。</p>
+
+<h2 id="register" class="section-anchor" tabindex="-1">名冊全部 {{$r.Registered}} 列</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>機器</th><th>走到哪一步</th><th>算分母</th><th>宣告納管</th><th>兌換票</th><th>最後一次報到</th></tr></thead>
+<tbody>
+{{range $r.Rows}}
+<tr>
+  <td><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a></td>
+  <td class="small">{{.StageTitle}}</td>
+  <td class="small">{{if .InDenominator}}是{{else}}否{{end}}</td>
+  <td class="small mono">{{.DeclaredAt.Local.Format "2006-01-02 15:04"}}</td>
+  <td class="small mono">{{if .EnrolledAt}}{{.EnrolledAt.Local.Format "2006-01-02 15:04"}}{{else}}—{{end}}</td>
+  <td class="small mono">{{if .LastCheckinReceivedAt}}{{.LastCheckinReceivedAt.Local.Format "2006-01-02 15:04"}}{{else}}從未報到{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+{{template "foot" .}}{{end}}

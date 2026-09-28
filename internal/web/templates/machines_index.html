@@ -1,0 +1,73 @@
+{{define "machines-index.html"}}
+{{$view := .MachineList}}
+<div class="section-title">
+  <h2 id="machines" class="section-anchor" tabindex="-1">所有機器</h2>
+  <p class="dim small">符合 filter {{$view.Result.MatchedTotal}} / registry ceiling 內 {{$view.Result.Total}} 台</p>
+</div>
+
+<form method="get" action="/machines" class="panel" style="padding:12px 14px;margin-bottom:14px" aria-label="機器篩選">
+  <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:end">
+    <label class="small">machine_id<br><input name="machine_id" value="{{$view.MachineID}}" size="24"></label>
+    <label class="small">顯示名稱（精確）<br><input name="display_name" value="{{$view.DisplayName}}" size="20"></label>
+    <label class="small">Lifecycle<br><select name="lifecycle">
+      <option value="any" {{if eq $view.Lifecycle "any"}}selected{{end}}>全部</option>
+      <option value="active" {{if eq $view.Lifecycle "active"}}selected{{end}}>Active</option>
+      <option value="retired" {{if eq $view.Lifecycle "retired"}}selected{{end}}>Retired</option>
+    </select></label>
+    <label class="small">Reporting<br><select name="reporting">
+      <option value="any" {{if eq $view.Reporting "any"}}selected{{end}}>全部</option>
+      <option value="true" {{if eq $view.Reporting "true"}}selected{{end}}>正在回報</option>
+      <option value="false" {{if eq $view.Reporting "false"}}selected{{end}}>未回報</option>
+      <option value="unknown" {{if eq $view.Reporting "unknown"}}selected{{end}}>Unknown / retired</option>
+    </select></label>
+    <label class="small">Channel<br><select name="channel">
+      <option value="any" {{if eq $view.Channel "any"}}selected{{end}}>全部</option>
+      <option value="none" {{if eq $view.Channel "none"}}selected{{end}}>未指派</option>
+      <option value="canary" {{if eq $view.Channel "canary"}}selected{{end}}>Canary</option>
+      <option value="stable" {{if eq $view.Channel "stable"}}selected{{end}}>Stable</option>
+    </select></label>
+    <label class="small">每頁<br><input type="number" name="limit" min="1" max="100" value="{{$view.Limit}}" style="width:72px"></label>
+    <button type="submit">套用</button>
+    {{if $view.HasFilters}}<a href="/machines#machines">清除</a>{{end}}
+  </div>
+  <fieldset style="border:0;padding:8px 0 0;margin:0">
+    <legend class="small dim">State（可複選；不選即全部）</legend>
+    <div style="display:flex;flex-wrap:wrap;gap:12px">
+      {{range $view.States}}<label class="small"><input type="checkbox" name="state" value="{{.Value}}" {{if .Selected}}checked{{end}}> {{.Label}}</label>{{end}}
+    </div>
+  </fieldset>
+</form>
+
+<div class="panel" style="padding:4px 6px">
+<table>
+<thead><tr>
+  <th style="width:220px">機器</th><th style="width:120px">Lifecycle / state</th>
+  <th style="width:105px">Expected</th><th style="width:115px">Reporting</th>
+  <th style="width:110px">Channel</th><th>Hub 收到的最新證據</th>
+</tr></thead>
+<tbody>
+{{range $view.Result.Items}}
+<tr>
+  <td class="name"><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a><span class="sub mono">{{.MachineID}}</span>
+    {{range .Issues}}<span class="sub st amber">{{.}}</span>{{end}}
+  </td>
+  <td>{{if .RetiredAt}}<span class="st dim">Retired</span>{{else if .State}}<span class="st">{{.State}}</span>{{else}}Unknown{{end}}</td>
+  <td>{{if .Expected}}是{{else}}否{{end}}</td>
+  <td>{{triBool .Reporting}}</td>
+  <td>{{if .Channel}}{{.Channel}}{{else}}未指派{{end}} <span class="sub">rev {{.ChannelRevision}}</span></td>
+  <td class="small dim">
+    check-in：{{if .LastCheckinReceivedAt}}{{ago .LastCheckinReceivedAt}}{{else}}unknown{{end}}<br>
+    observation：{{if .LastObservationReceivedAt}}{{ago .LastObservationReceivedAt}}{{else}}unknown{{end}}
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="6" class="empty">目前 filter 沒有符合的機器。</td></tr>
+{{end}}
+</tbody>
+</table>
+<div style="padding:8px 4px;display:flex;gap:12px;align-items:center">
+  {{if $view.FirstPageHref}}<a href="{{$view.FirstPageHref}}">回第一頁</a>{{end}}
+  {{if $view.NextHref}}<a href="{{$view.NextHref}}">下一頁 →</a>{{end}}
+</div>
+</div>
+{{end}}

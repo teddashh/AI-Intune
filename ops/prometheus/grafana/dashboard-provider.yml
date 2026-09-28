@@ -1,0 +1,14 @@
+# → /etc/grafana/provisioning/dashboards/clawctl.yml
+apiVersion: 1
+
+providers:
+  - name: clawctl
+    type: file
+    # 這一頁的定義在 git 裡，不在 Grafana 的資料庫裡。
+    # allowUiUpdates: false ⇒ 在瀏覽器上改了會被下一次載入蓋掉，
+    # 這是刻意的：儀表板跟指標必須一起 review、一起 commit。
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

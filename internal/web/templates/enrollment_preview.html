@@ -1,0 +1,38 @@
+{{define "enrollment_preview.html"}}{{template "head" .}}
+{{with .EnrollPreview}}
+<h1>確認 {{.Name}} 的 enroll 票</h1>
+
+<div class="panel">
+  <p style="margin-top:0"><b>建立前預覽</b></p>
+  <dl class="facts">
+    <dt>名冊名稱</dt><dd>{{.Name}}</dd>
+    <dt>有效時間</dt><dd>{{.TTL}}（現在確認的話約在 {{.ExpiresAt}} 過期）</dd>
+    <dt>理由</dt><dd>{{if .Reason}}{{.Reason}}{{else}}<span class="dim">沒有填</span>{{end}}</dd>
+  </dl>
+</div>
+
+<div class="caveat">
+  {{if .CreatesExpectedMachine}}
+  <b>確認後，{{.Name}} 會立刻寫進名冊並算進分母。</b>
+  初始狀態為「從未報到」。
+  {{else}}
+  <b>不可建立名冊成員。</b>
+  {{end}}
+</div>
+
+<div class="panel">
+  <p style="margin-top:0"><b>明文 token 建立後只顯示一次。</b></p>
+  {{if .RevocationKeepsRegistryRow}}
+  <p class="small dim">撤銷影響：ticket 失效；名冊、分母與 credential 不變。移出分母：退役機器。</p>
+  {{end}}
+  {{if .CreatesExpectedMachine}}<form method="post" action="/enrollments">
+    <input type="hidden" name="name" value="{{.Name}}">
+    <input type="hidden" name="reason" value="{{.Reason}}">
+    <input type="hidden" name="preview_digest" value="{{.PreviewDigest}}">
+    <input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+    <button type="submit">確認並建立一次性 enroll 票</button>
+    <a href="/machines/enrollment" style="margin-left:12px">取消，回機器註冊</a>
+  </form>{{end}}
+</div>
+{{end}}
+{{template "foot" .}}{{end}}

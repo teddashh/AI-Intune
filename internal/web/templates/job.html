@@ -1,0 +1,134 @@
+{{define "job.html"}}{{template "head" .}}
+{{$v := .Job}}
+
+<div class="page-heading"><div>
+  <h1>工作單 <span class="mono">{{$v.Summary.JobID}}</span></h1>
+  <p><a href="/machines/{{$v.Summary.MachineID}}">{{$v.Summary.DisplayName}}</a> · revision {{$v.Summary.Revision}} · <span class="{{jobStateClass $v.Summary.State}}">{{$v.Summary.State}}</span></p>
+</div></div>
+
+<div id="job-overview" class="panel section-anchor" tabindex="-1">
+  <table><tbody>
+    <tr><th style="width:190px">機器</th><td><a href="/machines/{{$v.Summary.MachineID}}">{{$v.Summary.DisplayName}}</a> <span class="mono dim">{{$v.Summary.MachineID}}</span></td></tr>
+    <tr><th>desired</th><td class="mono">{{$v.Summary.DesiredID}}</td></tr>
+    <tr><th>資源</th><td class="mono">{{$v.Summary.ResourceKind}}/{{$v.Summary.ResourceID}}</td></tr>
+    <tr><th>revision</th><td>{{$v.Summary.Revision}}</td></tr>
+    <tr><th>狀態</th><td><span class="{{jobStateClass $v.Summary.State}}">{{$v.Summary.State}}</span></td></tr>
+    <tr><th>租約</th><td>{{jobLeaseLabel $v.Summary.LeaseStatus $v.Summary.LeaseExpiresAt $v.Evidence.EvaluatedAt}}</td></tr>
+    <tr><th>irreversible</th><td>{{if $v.Summary.Irreversible}}true{{else}}false{{end}}</td></tr>
+    <tr><th>execution_timeout</th><td>{{$v.Summary.ExecutionTimeoutSeconds}} 秒</td></tr>
+    <tr><th>建立時間</th><td>{{$v.Summary.CreatedAt.Local.Format "2006-01-02 15:04:05"}}</td></tr>
+    <tr><th>終態時間</th><td>{{timeOrDash $v.Summary.TerminalAt}}</td></tr>
+    <tr><th>artifact digest</th><td class="mono">{{with $v.Summary.ArtifactDigest}}{{deref .}} <span class="dim">({{$v.Summary.ArtifactDigestStatus}})</span>{{else}}<span class="dim">未記錄 ({{$v.Summary.ArtifactDigestStatus}})</span>{{end}}</td></tr>
+  </tbody></table>
+  {{if eq $v.Summary.State "succeeded"}}
+    <p class="st green">已保存的驗證均通過</p>
+  {{else if eq $v.Summary.State "failed"}}
+    {{if $v.Rollback}}
+      {{if $v.Rollback.Passed}}<p class="st green">最後 rollback 驗證通過</p>
+      {{else}}<p class="st amber">最後 rollback 驗證失敗</p>{{end}}
+    {{else if $v.Evidence.Verifications.Truncated}}<p class="st amber">最新 100 筆驗證結果裡沒有看到退回證據；更早的結果未顯示</p>
+    {{else}}<p class="st amber">沒有退回的證據</p>{{end}}
+  {{else if eq $v.Summary.State "manual_intervention"}}
+    {{if $v.NoEvidence}}<p class="st red">尚無終態驗證證據</p>
+    {{else if $v.StageOnly}}<p class="st red">目前只有 stage 驗證</p>
+    {{else}}<p class="st red">沒有回退證據</p>{{end}}
+  {{else if eq $v.Summary.State "lease_expired"}}
+    <p class="st amber">租約已過期</p>
+  {{else if eq $v.Summary.State "rejected"}}
+    {{with $v.Evidence.Rejection}}
+      {{if not .PayloadDecodable}}<p class="st grey">拒絕事件 payload 無法解析</p>
+      {{else if .Code.Text}}
+        <p class="st grey">拒絕碼 {{.Code.Text}}{{if .Code.Truncated}}（已截斷至 {{jobEvidenceLimitLabel .Code.MaxBytes}}；帳本原文 {{.Code.Bytes}} bytes）{{end}}{{if evidenceReplaced .Code.Issues}}（含已替換的控制／非法字元）{{end}}{{if not .CodeKnown}}（未知拒絕碼）{{end}}；來源 {{.Producer.DisplayName}}{{if .HasDetail}}；detail{{if evidenceVerbatim .Detail}}（原文）{{end}}：{{else}}；detail —{{end}}</p>
+        {{if .HasDetail}}<pre class="copy">{{.Detail.Text}}</pre>{{if .Detail.Truncated}}<p class="small dim">（已截斷至 {{jobEvidenceLimitLabel .Detail.MaxBytes}}；帳本原文 {{.Detail.Bytes}} bytes）</p>{{end}}{{if evidenceReplaced .Detail.Issues}}<p class="small dim">（含已替換的控制／非法字元）</p>{{end}}{{end}}
+      {{else}}<p class="st grey">拒絕碼與 detail 都沒留</p>{{end}}
+    {{else}}{{if $v.Evidence.Events.Truncated}}<p class="st grey">最新 100 筆事件裡沒有看到拒絕碼；更早的事件未顯示</p>
+    {{else}}<p class="st grey">拒絕碼與 detail 都沒留</p>{{end}}{{end}}
+  {{end}}
+</div>
+
+<h2 id="desired-state" class="section-anchor" tabindex="-1">desired spec{{if evidenceVerbatim $v.Evidence.Desired.Spec}}（原文）{{end}}</h2>
+<div class="panel"><pre class="copy">{{$v.Evidence.Desired.Spec.Text}}</pre>{{if $v.Evidence.Desired.Spec.Truncated}}<p class="small dim">（已截斷至 {{jobEvidenceLimitLabel $v.Evidence.Desired.Spec.MaxBytes}}；帳本原文 {{$v.Evidence.Desired.Spec.Bytes}} bytes）</p>{{end}}{{if evidenceReplaced $v.Evidence.Desired.Spec.Issues}}<p class="small dim">（含已替換的控制／非法字元）</p>{{end}}</div>
+
+<h2 id="job-events" class="section-anchor" tabindex="-1">事件</h2>
+<div class="panel" style="padding:4px 6px">
+{{if $v.Evidence.Events.Items}}
+<table>
+<thead><tr><th>seq</th><th>phase</th><th>來源</th><th>occurred_at</th><th>received_at（Hub）</th></tr></thead>
+<tbody>
+{{range $v.Evidence.Events.Items}}
+  <tr><td>{{.Seq}}</td><td class="mono">{{.ReportedPhase.Text}}{{if .ReportedPhase.Truncated}} <span class="small dim">（已截斷至 {{jobEvidenceLimitLabel .ReportedPhase.MaxBytes}}；帳本原文 {{.ReportedPhase.Bytes}} bytes）</span>{{end}}{{if evidenceReplaced .ReportedPhase.Issues}} <span class="small dim">（含已替換的控制／非法字元）</span>{{end}}</td><td>{{.Producer.DisplayName}}</td><td class="mono small">{{.OccurredAt.Local.Format "2006-01-02 15:04:05"}}</td><td class="mono small">{{.ReceivedAt.Local.Format "2006-01-02 15:04:05"}}</td></tr>
+{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">這張工作單沒有事件。</p>{{end}}
+{{if $v.Evidence.Events.Truncated}}<p class="small dim">只顯示 seq 最大的 100 筆，並按 seq 由小到大顯示。</p>{{end}}
+</div>
+
+<h2 id="job-verifications" class="section-anchor" tabindex="-1">驗證證據</h2>
+{{range $v.Evidence.Verifications.Items}}
+<div class="panel" style="margin-bottom:12px">
+  <p style="margin-top:0"><span class="{{if .Passed}}st green{{else}}st amber{{end}}">{{if .Passed}}✓{{else}}✗{{end}} {{.RuleID.Text}}</span>{{if .RuleID.Truncated}} <span class="small dim">（已截斷至 {{jobEvidenceLimitLabel .RuleID.MaxBytes}}；帳本原文 {{.RuleID.Bytes}} bytes）</span>{{end}}{{if evidenceReplaced .RuleID.Issues}} <span class="small dim">（含已替換的控制／非法字元）</span>{{end}} <span class="dim small">reported_verified_at（agent） {{.ReportedVerifiedAt.Local.Format "2006-01-02 15:04:05"}}；received_at（Hub） {{if .ReceivedAt}}{{.ReceivedAt.Local.Format "2006-01-02 15:04:05"}}{{else}}未記錄{{end}}</span></p>
+  <p class="small dim">producer {{.Producer.Kind}} / {{.Producer.ProducerID}}；role {{.Producer.EvidenceRole}}；authority {{.Producer.Authority}}；provenance {{if .Producer.ProvenanceRecorded}}recorded{{else}}未記錄{{end}}</p>
+  <table><tbody>
+    <tr><th style="width:190px">command</th><td><code>{{.Command.Text}}</code>{{if .Command.Truncated}} <span class="small dim">（已截斷至 {{jobEvidenceLimitLabel .Command.MaxBytes}}；帳本原文 {{.Command.Bytes}} bytes）</span>{{end}}{{if evidenceReplaced .Command.Issues}} <span class="small dim">（含已替換的控制／非法字元）</span>{{end}}</td></tr>
+    <tr><th>exit code</th><td>{{intOrDash .ExitCode}}</td></tr>
+    <tr><th>stdout excerpt</th><td><pre class="copy">{{.StdoutExcerpt.Text}}</pre>{{if .StdoutExcerpt.Truncated}}<span class="small dim">（已截斷至 {{jobEvidenceLimitLabel .StdoutExcerpt.MaxBytes}}；帳本原文 {{.StdoutExcerpt.Bytes}} bytes）</span>{{end}}{{if evidenceReplaced .StdoutExcerpt.Issues}} <span class="small dim">（含已替換的控制／非法字元）</span>{{end}}</td></tr>
+    <tr><th>stderr excerpt</th><td><pre class="copy">{{.StderrExcerpt.Text}}</pre>{{if .StderrExcerpt.Truncated}}<span class="small dim">（已截斷至 {{jobEvidenceLimitLabel .StderrExcerpt.MaxBytes}}；帳本原文 {{.StderrExcerpt.Bytes}} bytes）</span>{{end}}{{if evidenceReplaced .StderrExcerpt.Issues}} <span class="small dim">（含已替換的控制／非法字元）</span>{{end}}</td></tr>
+  </tbody></table>
+</div>
+{{else}}
+<div class="panel"><p class="empty">這張工作單沒有驗證證據。</p></div>
+{{end}}
+{{if $v.Evidence.Verifications.Truncated}}<p class="small dim">依 agent 回報時間顯示最近 100 筆。</p>{{end}}
+
+{{with $v.Evidence.Independent}}
+<h2 id="job-independent" class="section-anchor" tabindex="-1">跨故障域證據</h2>
+<div class="panel" style="margin-bottom:12px">
+  <p style="margin-top:0"><span class="{{independentVerdictClass .Verdict}}">{{.Verdict}}</span> {{independentVerdictLabel .Verdict}}</p>
+  <p class="small dim">{{.Total}} 筆；可用 producer {{.LiveProducers}}；工作單 artifact digest {{if .ArtifactDigest}}<code>{{.ArtifactDigest}}</code>{{else}}未記錄{{end}}；預期 OpenClaw 版本 {{if .ExpectedVersion}}<code>{{.ExpectedVersion}}</code>{{else}}不適用{{end}}</p>
+</div>
+<div class="panel" style="margin-bottom:12px">
+  <p style="margin-top:0">派工</p>
+  {{if .Assignments}}
+  <table><thead><tr><th style="width:190px">verifier</th><th style="width:170px">failure domain</th><th style="width:150px">狀態</th><th>時間</th></tr></thead><tbody>
+  {{range .Assignments}}
+    <tr>
+      <td>{{.DisplayName.Text}}</td>
+      <td>{{.FailureDomain.Text}}</td>
+      <td><span class="{{assignmentStateClass .State}}">{{assignmentStateLabel .State}}</span></td>
+      <td class="small dim">指派於 {{.AssignedAt.Local.Format "2006-01-02 15:04:05"}}{{if .ReportedAt}}；回報於 {{.ReportedAt.Local.Format "2006-01-02 15:04:05"}}{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}
+  <p class="empty">還沒有 verifier 被指派來看這張工作單。</p>
+  {{end}}
+  {{if $v.EligibleVerifiers}}
+  <form method="post" action="/jobs/{{$v.Evidence.JobID}}/verifier-assignment-preview" style="margin-top:14px">
+    <label><span class="field-label">指派 verifier</span>
+      <select name="verifier_id" required>
+        {{range $v.EligibleVerifiers}}<option value="{{.VerifierID}}">{{.DisplayName}}（failure domain {{.FailureDomain}}）</option>{{end}}
+      </select></label>
+    <label><span class="field-label">理由</span><input name="reason" required autocomplete="off" maxlength="500"></label>
+    <div class="command-bar" style="margin-top:12px"><button type="submit">預覽派工</button></div>
+  </form>
+  {{end}}
+</div>
+{{range .Items}}
+<div class="panel" style="margin-bottom:12px">
+  <p style="margin-top:0"><span class="{{if .Passed}}st green{{else}}st amber{{end}}">{{if .Passed}}✓{{else}}✗{{end}} {{.RuleID.Text}}</span>{{if .RuleID.Truncated}} <span class="small dim">（已截斷至 {{jobEvidenceLimitLabel .RuleID.MaxBytes}}；帳本原文 {{.RuleID.Bytes}} bytes）</span>{{end}}{{if evidenceReplaced .RuleID.Issues}} <span class="small dim">（含已替換的控制／非法字元）</span>{{end}} <span class="dim small">verified_at（verifier） {{.ReportedVerifiedAt.Local.Format "2006-01-02 15:04:05"}}；received_at（Hub） {{.ReceivedAt.Local.Format "2006-01-02 15:04:05"}}</span></p>
+  <p class="small dim">producer {{.Producer.Kind}} / {{.Producer.DisplayName.Text}}；failure domain {{.Producer.FailureDomain.Text}}；state {{.Producer.State}}；role {{.Producer.EvidenceRole}}；authority {{.Producer.Authority}}</p>
+  <table><tbody>
+    <tr><th style="width:190px">command</th><td><code>{{.Command.Text}}</code>{{if .Command.Truncated}} <span class="small dim">（已截斷至 {{jobEvidenceLimitLabel .Command.MaxBytes}}；帳本原文 {{.Command.Bytes}} bytes）</span>{{end}}{{if evidenceReplaced .Command.Issues}} <span class="small dim">（含已替換的控制／非法字元）</span>{{end}}</td></tr>
+    <tr><th>exit code</th><td>{{intOrDash .ExitCode}}</td></tr>
+    <tr><th>observed digest</th><td>{{if .DigestReported}}<code>{{.ObservedDigest}}</code> {{if .DigestMatchesJob}}<span class="st green">與工作單相同</span>{{else}}<span class="st amber">與工作單不同</span>{{end}}{{else}}未回報{{end}}</td></tr>
+	<tr><th>observed version</th><td>{{if .VersionReported}}<code>{{.ObservedVersion}}</code> {{if .VersionMatchesJob}}<span class="st green">與工作單相同</span>{{else if $v.Evidence.Independent.ExpectedVersion}}<span class="st amber">與工作單不同（預期 {{$v.Evidence.Independent.ExpectedVersion}}）</span>{{end}}{{else}}未回報{{if and $v.Evidence.Independent.ExpectedVersion (eq .RuleID.Text "openclaw.current_release")}} <span class="st amber">（預期 {{$v.Evidence.Independent.ExpectedVersion}}）</span>{{end}}{{end}}</td></tr>
+    <tr><th>stdout excerpt</th><td><pre class="copy">{{.StdoutExcerpt.Text}}</pre>{{if .StdoutExcerpt.Truncated}}<span class="small dim">（已截斷至 {{jobEvidenceLimitLabel .StdoutExcerpt.MaxBytes}}；帳本原文 {{.StdoutExcerpt.Bytes}} bytes）</span>{{end}}{{if evidenceReplaced .StdoutExcerpt.Issues}} <span class="small dim">（含已替換的控制／非法字元）</span>{{end}}</td></tr>
+    <tr><th>stderr excerpt</th><td><pre class="copy">{{.StderrExcerpt.Text}}</pre>{{if .StderrExcerpt.Truncated}}<span class="small dim">（已截斷至 {{jobEvidenceLimitLabel .StderrExcerpt.MaxBytes}}；帳本原文 {{.StderrExcerpt.Bytes}} bytes）</span>{{end}}{{if evidenceReplaced .StderrExcerpt.Issues}} <span class="small dim">（含已替換的控制／非法字元）</span>{{end}}</td></tr>
+  </tbody></table>
+</div>
+{{end}}
+{{if .Truncated}}<p class="small dim">依 Hub 收到時間顯示最近 100 筆。</p>{{end}}
+{{end}}
+
+{{template "foot" .}}{{end}}

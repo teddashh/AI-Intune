@@ -1,0 +1,26 @@
+# 什麼時候去看一次有沒有被指名。
+#
+# 派工是 operator 手動下的，不常有；沒有單的時候這支程式只做一次
+# HTTP GET 就結束，所以間隔短一點的成本幾乎是零，而它換到的是
+# 「按下派工之後多久看得到證據」。15 分鐘是這個取捨。
+#
+# ⚠ 用 OnCalendar 而不是 OnUnitActiveSec：Persistent= 只對 calendar
+# timer 有效。配 monotonic timer 時它會被安靜地忽略，而 `list-timers`
+# 的 NEXT 會是空的——機器睡過一晚錯過的那一次不會補跑，
+# 那張派工就永遠停在「等它回報」。
+#
+# ⚠ RandomizedDelaySec 是為了不要四台（將來）在同一秒一起 ssh 進同一台。
+
+[Unit]
+Description=Run the clawctl verifier every 15 minutes
+Documentation=https://github.com/teddashh/AI-Intune
+
+[Timer]
+OnCalendar=*:0/15
+RandomizedDelaySec=60
+Persistent=true
+AccuracySec=30s
+Unit=clawctl-verifier.service
+
+[Install]
+WantedBy=timers.target

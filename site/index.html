@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111d19">
+    <meta name="description" content="AI-Intune is an evidence-first control plane for Linux machines running AI agents and coding tools.">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="AI-Intune — Control every AI machine from one place">
+    <meta property="og:description" content="Enroll, deploy, verify, and audit a Linux AI fleet from one control plane.">
+    <meta property="og:url" content="https://teddashh.github.io/AI-Intune/">
+    <meta name="twitter:card" content="summary">
+    <link rel="canonical" href="https://teddashh.github.io/AI-Intune/">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+    <title>AI-Intune — Control every AI machine from one place</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareSourceCode",
+        "name": "AI-Intune",
+        "codeRepository": "https://github.com/teddashh/AI-Intune",
+        "license": "https://www.apache.org/licenses/LICENSE-2.0",
+        "programmingLanguage": "Go",
+        "runtimePlatform": "Linux",
+        "description": "An evidence-first control plane for Linux machines running AI agents and coding tools."
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">
+      <span class="lang-en">Skip to content</span>
+      <span class="lang-zh">跳至內容</span>
+    </a>
+
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="#top" aria-label="AI-Intune home">
+          <img src="logo.svg" alt="">
+          <span>AI-Intune</span>
+        </a>
+
+        <button class="menu-button" type="button" aria-expanded="false" aria-controls="site-navigation">
+          <span class="lang-en">Menu</span>
+          <span class="lang-zh">選單</span>
+        </button>
+
+        <nav class="site-nav" id="site-navigation" aria-label="Primary navigation">
+          <a href="#workflow">
+            <span class="lang-en">How it works</span>
+            <span class="lang-zh">運作方式</span>
+          </a>
+          <a href="#capabilities">
+            <span class="lang-en">Capabilities</span>
+            <span class="lang-zh">核心能力</span>
+          </a>
+          <a href="#architecture">
+            <span class="lang-en">Architecture</span>
+            <span class="lang-zh">架構</span>
+          </a>
+          <a href="#start">
+            <span class="lang-en">Get started</span>
+            <span class="lang-zh">開始使用</span>
+          </a>
+
+          <div class="language-switch" aria-label="Language">
+            <button type="button" data-language="en" aria-pressed="true">EN</button>
+            <button type="button" data-language="zh" aria-pressed="false">繁中</button>
+          </div>
+
+          <a class="github-link" href="https://github.com/teddashh/AI-Intune" aria-label="AI-Intune on GitHub">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .7a11.5 11.5 0 0 0-3.64 22.4c.58.1.79-.25.79-.56v-2.24c-3.22.7-3.9-1.37-3.9-1.37-.52-1.34-1.28-1.7-1.28-1.7-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.57-.29-5.28-1.29-5.28-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.16 1.18a10.96 10.96 0 0 1 5.76 0c2.2-1.49 3.16-1.18 3.16-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.42-2.72 5.39-5.3 5.68.42.36.79 1.07.79 2.16v3.21c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .7Z"/></svg>
+            <span>GitHub</span>
+          </a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="hero-copy">
+          <div class="eyebrow">
+            <span class="lang-en">Evidence-first fleet control</span>
+            <span class="lang-zh">以證據為核心的機隊管理</span>
+          </div>
+          <h1 class="lang-en">Know what every AI machine is <em>actually</em> doing.</h1>
+          <h1 class="lang-zh">真正掌握每一台 AI 機器的<em>實際狀態</em>。</h1>
+          <p class="lang-en">AI-Intune enrolls, deploys, verifies, and audits Linux machines running AI agents and coding tools—through one focused control plane.</p>
+          <p class="lang-zh">AI-Intune 透過單一控制平臺，註冊、部署、驗證並稽核每一台執行 AI agent 與 coding tools 的 Linux 機器。</p>
+          <div class="button-row">
+            <a class="button button-primary" href="https://github.com/teddashh/AI-Intune">
+              <span class="lang-en">View on GitHub →</span>
+              <span class="lang-zh">前往 GitHub →</span>
+            </a>
+            <a class="button button-secondary" href="#workflow">
+              <span class="lang-en">See the workflow</span>
+              <span class="lang-zh">查看完整流程</span>
+            </a>
+          </div>
+          <div class="hero-notes" aria-label="Project attributes">
+            <span>Linux-first</span>
+            <span class="lang-en">Outbound-only agents</span>
+            <span class="lang-zh">Agent 僅主動連出</span>
+            <span class="lang-en">Apache 2.0</span>
+            <span class="lang-zh">Apache 2.0 授權</span>
+          </div>
+        </div>
+
+        <div class="receipt-wrap" aria-label="Example verified deployment receipt">
+          <div class="receipt">
+            <div class="receipt-top">
+              <span class="lang-en">Deployment receipt</span>
+              <span class="lang-zh">部署收據</span>
+              <span class="live-dot">
+                <span class="lang-en">Verified</span>
+                <span class="lang-zh">已驗證</span>
+              </span>
+            </div>
+            <div class="receipt-body">
+              <div class="machine-name">fresh-machine-01</div>
+              <div class="machine-meta">linux / amd64 · openclaw-standard@1</div>
+              <div class="execution-list">
+                <div class="execution-row">
+                  <span class="execution-check">✓</span>
+                  <span>
+                    <strong class="lang-en">Agent enrolled</strong>
+                    <strong class="lang-zh">Agent 已註冊</strong>
+                    <small>identity + job channel</small>
+                  </span>
+                  <span class="execution-time">00:04</span>
+                </div>
+                <div class="execution-row">
+                  <span class="execution-check">✓</span>
+                  <span>
+                    <strong class="lang-en">Node runtime verified</strong>
+                    <strong class="lang-zh">Node runtime 已驗證</strong>
+                    <small>sha256 · exact version</small>
+                  </span>
+                  <span class="execution-time">00:18</span>
+                </div>
+                <div class="execution-row">
+                  <span class="execution-check">✓</span>
+                  <span>
+                    <strong class="lang-en">OpenClaw verified</strong>
+                    <strong class="lang-zh">OpenClaw 已驗證</strong>
+                    <small>adapter/openclaw:v1</small>
+                  </span>
+                  <span class="execution-time">00:31</span>
+                </div>
+              </div>
+              <div class="receipt-footer">
+                <span class="lang-en">Machine managed</span>
+                <span class="lang-zh">機器已納管</span>
+                <span>3 / 3</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="problem-band">
+        <div class="section">
+          <div>
+            <div class="section-kicker">
+              <span class="lang-en">The problem</span>
+              <span class="lang-zh">真正的問題</span>
+            </div>
+            <h2 id="problem-title" class="lang-en">AI work fails quietly.</h2>
+            <h2 id="problem-title-zh" class="lang-zh">AI 工作最常安靜地失敗。</h2>
+            <p class="lang-en">A living process is not a healthy agent. A completed command is not a successful deployment. AI-Intune turns claims into inspectable evidence.</p>
+            <p class="lang-zh">Process 還活著，不代表 agent 正常；指令執行完，不代表部署成功。AI-Intune 把每一個成功宣告都變成可檢查的證據。</p>
+          </div>
+          <blockquote class="problem-quote lang-en">The useful question is not “did the command run?” It is “what proves the machine reached the intended state?”</blockquote>
+          <blockquote class="problem-quote lang-zh">真正有用的問題不是「指令有沒有跑」，而是「什麼證明機器已經到達預期狀態？」</blockquote>
+        </div>
+      </section>
+
+      <section class="section" id="workflow">
+        <div class="section-heading">
+          <div>
+            <div class="section-kicker">
+              <span class="lang-en">One path to managed</span>
+              <span class="lang-zh">一條完整納管路徑</span>
+            </div>
+            <h2 id="workflow-title" class="lang-en">From a fresh machine to verified state.</h2>
+            <h2 id="workflow-title-zh" class="lang-zh">從新機器一路到完成驗證。</h2>
+          </div>
+          <p class="lang-en">Install the Hub once. Every new endpoint follows the same repeatable enrollment and profile-assignment workflow.</p>
+          <p class="lang-zh">主控端只需安裝一次。之後每一台新端點都走相同、可重複的註冊與 profile 指派流程。</p>
+        </div>
+
+        <div class="flow-grid">
+          <article class="flow-card">
+            <div class="flow-number">01</div>
+            <h3 class="lang-en">Install the Hub</h3>
+            <h3 class="lang-zh">安裝主控端</h3>
+            <p class="lang-en">Build the static Hub and architecture-specific Agent bundles, then bind the control plane to the tailnet.</p>
+            <p class="lang-zh">建立靜態 Hub 與分架構 Agent bundle，並將控制平臺綁定在 tailnet。</p>
+          </article>
+          <article class="flow-card">
+            <div class="flow-number">02</div>
+            <h3 class="lang-en">Enroll one machine</h3>
+            <h3 class="lang-zh">註冊一台機器</h3>
+            <p class="lang-en">A one-time token and self-contained bundle install Tailscale, the Agent, rootless Podman, fixed app services, identity, and the job channel.</p>
+            <p class="lang-zh">一次性 token 與自含 bundle 會安裝 Tailscale、Agent、rootless Podman、固定 app services、機器身分與工作通道。</p>
+          </article>
+          <article class="flow-card">
+            <div class="flow-number">03</div>
+            <h3 class="lang-en">Assign a profile</h3>
+            <h3 class="lang-zh">指派機器 Profile</h3>
+            <p class="lang-en">Select OpenClaw or Hermes. The resolver adds exact dependencies and can replace the machine's current primary runtime.</p>
+            <p class="lang-zh">選擇 OpenClaw 或 Hermes；resolver 會補齊精確依賴，也能取代機器目前的 primary runtime。</p>
+          </article>
+          <article class="flow-card">
+            <div class="flow-number">04</div>
+            <h3 class="lang-en">Verify the result</h3>
+            <h3 class="lang-zh">驗證最終結果</h3>
+            <p class="lang-en">The Agent verifies artifact bytes, exact versions, activation, and runtime health before the Hub marks the assignment complete.</p>
+            <p class="lang-zh">Agent 會驗證 artifact bytes、精確版本、啟用狀態與 runtime 健康，Hub 才會將指派標記為完成。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="capabilities" id="capabilities">
+        <div class="section">
+          <div class="section-heading">
+            <div>
+              <div class="section-kicker">
+                <span class="lang-en">Control-plane essentials</span>
+                <span class="lang-zh">控制平臺核心能力</span>
+              </div>
+              <h2 id="capabilities-title" class="lang-en">Built for facts, not hopeful green lights.</h2>
+              <h2 id="capabilities-title-zh" class="lang-zh">管理的是事實，不是令人安心的綠燈。</h2>
+            </div>
+            <p class="lang-en">Every visible state connects back to machine identity, immutable desired state, execution, verification, and audit evidence.</p>
+            <p class="lang-zh">每一個畫面上的狀態，都能追溯到機器身分、不可變 desired state、執行結果、驗證與稽核證據。</p>
+          </div>
+
+          <div class="capability-grid">
+            <article class="capability-card">
+              <div class="capability-icon">01</div>
+              <h3 class="lang-en">Fleet truth</h3>
+              <h3 class="lang-zh">機隊真實狀態</h3>
+              <p class="lang-en">A named machine roster, check-in ledger, health facts, credential state, change reports, and evidence drill-downs.</p>
+              <p class="lang-zh">具名機器清單、check-in ledger、健康資訊、憑證狀態、變更報告與逐層證據檢視。</p>
+            </article>
+            <article class="capability-card">
+              <div class="capability-icon">02</div>
+              <h3 class="lang-en">Content-addressed Store</h3>
+              <h3 class="lang-zh">內容定址的 Store</h3>
+              <p class="lang-en">Artifacts are admitted by exact SHA-256 and size, then bound to immutable manifests and typed Agent adapters.</p>
+              <p class="lang-zh">Artifact 以精確 SHA-256 與大小收錄，再綁定至不可變 manifest 與具型別的 Agent adapter。</p>
+            </article>
+            <article class="capability-card">
+              <div class="capability-icon">03</div>
+              <h3 class="lang-en">Dependency-aware profiles</h3>
+              <h3 class="lang-zh">理解依賴的 Profile</h3>
+              <p class="lang-en">Profiles select exact apps. The Hub resolves runtimes, platform support, conflicts, and a stable execution order.</p>
+              <p class="lang-zh">Profile 選定精確 app；Hub 解析 runtime、平臺支援、衝突與穩定執行順序。</p>
+            </article>
+            <article class="capability-card">
+              <div class="capability-icon">04</div>
+              <h3 class="lang-en">Controlled execution</h3>
+              <h3 class="lang-zh">受控執行</h3>
+              <p class="lang-en">Leased jobs, prerequisite edges, time bounds, retries, deterministic failure propagation, and ordered revisions.</p>
+              <p class="lang-zh">具 lease 的 job、前置依賴、時間界線、重試、確定性的失敗傳遞與 revision 順序。</p>
+            </article>
+            <article class="capability-card">
+              <div class="capability-icon">05</div>
+              <h3 class="lang-en">Verified outcomes</h3>
+              <h3 class="lang-zh">已驗證的結果</h3>
+              <p class="lang-en">Success means the expected files, exact version, activation target, and runtime checks all passed—not merely that a command exited.</p>
+              <p class="lang-zh">成功代表預期檔案、精確版本、啟用目標與 runtime 檢查全部通過，而不只是指令離開。</p>
+            </article>
+            <article class="capability-card">
+              <div class="capability-icon">06</div>
+              <h3 class="lang-en">Auditable operations</h3>
+              <h3 class="lang-zh">可稽核的操作</h3>
+              <p class="lang-en">Preview/apply digests, idempotency receipts, append-only assignment history, and recovery records make each change traceable.</p>
+              <p class="lang-zh">Preview/apply digest、冪等收據、append-only 指派歷史與 recovery record，讓每次變更都可追溯。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="architecture">
+        <div class="section-heading">
+          <div>
+            <div class="section-kicker">
+              <span class="lang-en">Architecture</span>
+              <span class="lang-zh">系統架構</span>
+            </div>
+            <h2 id="architecture-title" class="lang-en">Small enough to own. Strict enough to trust.</h2>
+            <h2 id="architecture-title-zh" class="lang-zh">規模足以掌握，規則足以信任。</h2>
+          </div>
+          <p class="lang-en">One Go Hub, one static Go Agent per endpoint, SQLite as the control ledger, and Tailscale as the private network and operator identity boundary.</p>
+          <p class="lang-zh">一個 Go Hub、每端點一個靜態 Go Agent、SQLite 控制 ledger，以及作為私有網路與 operator 身分邊界的 Tailscale。</p>
+        </div>
+
+        <div class="architecture-shell">
+          <div class="architecture-map">
+            <div class="map-label">
+              <span class="lang-en">Desired state → evidence</span>
+              <span class="lang-zh">Desired state → 證據</span>
+            </div>
+            <div class="map-flow">
+              <div class="map-node">
+                <strong class="lang-en">Operator</strong>
+                <strong class="lang-zh">管理者</strong>
+                <span>Web console</span>
+                <span>Strict CLI / API</span>
+              </div>
+              <div class="map-arrow">→</div>
+              <div class="map-node map-node--hub">
+                <strong>clawctl-hub</strong>
+                <span>Machine inventory</span>
+                <span>Catalog + profiles</span>
+                <span>Desired state + jobs</span>
+                <span>Receipts + audit</span>
+              </div>
+              <div class="map-arrow">→</div>
+              <div class="map-node">
+                <strong>clawctl-agent</strong>
+                <span>Outbound polling</span>
+                <span>Typed adapters</span>
+                <span>Local verification</span>
+              </div>
+            </div>
+            <div class="map-return">
+              <span class="lang-en">facts · claims · verification · immutable receipts ←</span>
+              <span class="lang-zh">facts · claims · 驗證 · 不可變收據 ←</span>
+            </div>
+          </div>
+
+          <aside class="principles-panel">
+            <h3 class="lang-en">The management boundary is a product feature.</h3>
+            <h3 class="lang-zh">清楚的管理邊界，本身就是產品能力。</h3>
+            <ul class="principle-list">
+              <li class="lang-en">Endpoints open no inbound control port</li>
+              <li class="lang-zh">端點不開放任何 inbound 控制 port</li>
+              <li class="lang-en">OAuth tokens and API keys stay endpoint-local</li>
+              <li class="lang-zh">OAuth token 與 API key 留在端點本機</li>
+              <li class="lang-en">The Hub never proxies AI model traffic</li>
+              <li class="lang-zh">Hub 不代理任何 AI model 流量</li>
+              <li class="lang-en">Package jobs select typed adapters, not arbitrary shell</li>
+              <li class="lang-zh">套件 job 選擇 typed adapter，不下發任意 shell</li>
+              <li class="lang-en">Mutations are previewed, confirmed, idempotent, and audited</li>
+              <li class="lang-zh">變更皆經 preview、確認、冪等處理與稽核</li>
+            </ul>
+          </aside>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="store-strip">
+          <div>
+            <div class="section-kicker">
+              <span class="lang-en">Standard Store</span>
+              <span class="lang-zh">標準 Store</span>
+            </div>
+            <h2 id="store-title" class="lang-en">Choose the app. Resolve the machine.</h2>
+            <h2 id="store-title-zh" class="lang-zh">選好應用，系統補齊整台機器。</h2>
+            <p class="lang-en">The built-in catalog deploys Node runtime, OpenClaw, and Hermes on Linux amd64 and arm64. OpenClaw resolves its exact Node dependency; Hermes resolves its exact official OCI image. Switching profiles stops and disables the old runtime, verifies the new one, and restores the prior runtime if verification fails.</p>
+            <p class="lang-zh">內建 catalog 可在 Linux amd64 與 arm64 部署 Node runtime、OpenClaw 與 Hermes。OpenClaw 會解析精確 Node 依賴；Hermes 會解析精確官方 OCI image。切換 profile 時會停止並停用舊 runtime、驗證新 runtime；驗證失敗則恢復原本的 runtime。</p>
+          </div>
+          <div class="package-stack" aria-label="Example resolved profile">
+            <div class="package-card">
+              <div class="package-icon">O</div>
+              <div>
+                <strong>OpenClaw</strong>
+                <small>app · openclaw/v1</small>
+              </div>
+              <span class="package-status">
+                <span class="lang-en">Selected</span>
+                <span class="lang-zh">已選擇</span>
+              </span>
+            </div>
+            <div class="package-card">
+              <div class="package-icon">N</div>
+              <div>
+                <strong>Node runtime</strong>
+                <small>runtime · node-runtime/v1</small>
+              </div>
+              <span class="package-status">
+                <span class="lang-en">Resolved</span>
+                <span class="lang-zh">已解析</span>
+              </span>
+            </div>
+            <div class="package-card">
+              <div class="package-icon">H</div>
+              <div>
+                <strong>Hermes</strong>
+                <small>alternative · hermes-agent/v1</small>
+              </div>
+              <span class="package-status">
+                <span class="lang-en">Switchable</span>
+                <span class="lang-zh">可切換</span>
+              </span>
+            </div>
+            <div class="package-card">
+              <div class="package-icon">A</div>
+              <div>
+                <strong>clawctl-agent</strong>
+                <small>management base · static Go</small>
+              </div>
+              <span class="package-status">
+                <span class="lang-en">Enrolled</span>
+                <span class="lang-zh">已註冊</span>
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="quickstart" id="start">
+        <div class="section">
+          <div>
+            <div class="section-kicker">
+              <span class="lang-en">Start here</span>
+              <span class="lang-zh">從這裡開始</span>
+            </div>
+            <h2 id="start-title" class="lang-en">Bring up your control plane.</h2>
+            <h2 id="start-title-zh" class="lang-zh">建立你的控制平臺。</h2>
+            <p class="lang-en">The repository includes tested installers for the Hub and Agent, architecture-specific bootstrap bundles, systemd units, and the complete operator documentation.</p>
+            <p class="lang-zh">Repository 已包含經測試的 Hub 與 Agent 安裝器、分架構 bootstrap bundle、systemd unit 與完整 operator 文件。</p>
+            <div class="button-row">
+              <a class="button button-primary" href="https://github.com/teddashh/AI-Intune#build-and-test">
+                <span class="lang-en">Open quick start →</span>
+                <span class="lang-zh">開啟快速開始 →</span>
+              </a>
+              <a class="button button-secondary" href="https://github.com/teddashh/AI-Intune#operating-model">
+                <span class="lang-en">Read the docs</span>
+                <span class="lang-zh">閱讀完整文件</span>
+              </a>
+            </div>
+          </div>
+
+          <div class="steps">
+            <article class="setup-step">
+              <h3 class="lang-en">Build the Hub and Agent bundles</h3>
+              <h3 class="lang-zh">建立 Hub 與 Agent bundles</h3>
+              <p><code>make hub agent-bundles</code></p>
+            </article>
+            <article class="setup-step">
+              <h3 class="lang-en">Install the Hub on its tailnet address</h3>
+              <h3 class="lang-zh">將 Hub 安裝在它的 tailnet 位址</h3>
+              <p><code>./ops/install-hub.sh --listen 100.x.y.z:8787 …</code></p>
+            </article>
+            <article class="setup-step">
+              <h3 class="lang-en">Create enrollment in the Web console</h3>
+              <h3 class="lang-zh">在 Web console 建立 enrollment</h3>
+              <p><code>/machines/enrollment</code> · token + verified bundle</p>
+            </article>
+            <article class="setup-step">
+              <h3 class="lang-en">Run the bundle and assign a profile</h3>
+              <h3 class="lang-zh">執行 bundle 並指派 profile</h3>
+              <p><code>./install-agent.sh --hub http://100.x.y.z:8787</code></p>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <div>
+          <div class="footer-brand">
+            <img src="logo.svg" alt="">
+            <span>AI-Intune</span>
+          </div>
+          <p class="lang-en">Evidence-first control for Linux AI fleets. © <span data-year></span> AI-Intune contributors.</p>
+          <p class="lang-zh">以證據為核心的 Linux AI 機隊管理。© <span data-year></span> AI-Intune contributors.</p>
+        </div>
+        <div class="footer-links">
+          <a href="https://github.com/teddashh/AI-Intune">GitHub</a>
+          <a href="https://github.com/teddashh/AI-Intune#operating-model">
+            <span class="lang-en">Documentation</span>
+            <span class="lang-zh">文件</span>
+          </a>
+          <a href="https://github.com/teddashh/AI-Intune/blob/main/LICENSE">Apache 2.0</a>
+        </div>
+      </div>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>

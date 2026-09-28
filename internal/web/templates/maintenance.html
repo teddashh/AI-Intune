@@ -1,0 +1,68 @@
+{{define "maintenance.html"}}{{template "head" .}}
+{{$m := .Maintenance}}
+<div class="page-heading">
+  <div><h1>維護</h1><p>檢視資料保留與還原演練的目前狀態。</p></div>
+</div>
+
+<div class="metric-grid">
+  <div class="metric-card"><div class="metric-label">觀測資料</div><div class="metric-value" style="font-size:25px">{{$m.Observations}}</div><div class="metric-note">超過期限才進入清理範圍</div></div>
+  <div class="metric-card"><div class="metric-label">機器心跳</div><div class="metric-value" style="font-size:25px">{{$m.Checkins}}</div><div class="metric-note">每台最新一筆永遠保留</div></div>
+  <div class="metric-card"><div class="metric-label">票的占用帳</div><div class="metric-value" style="font-size:25px">{{$m.Occupancy}}</div><div class="metric-note">保留年度趨勢所需資料</div></div>
+  <div class="metric-card"><div class="metric-label">Retention revision</div><div class="metric-value">{{$m.Status.Revision}}</div><div class="metric-note">每次完成清理後遞增</div></div>
+</div>
+
+<h2>資料保留政策</h2>
+<div class="panel">
+  <div class="panel-title"><h2>清理狀態</h2><span class="small dim">評估 {{$m.Status.EvaluatedAt.Local.Format "2006-01-02 15:04:05"}}</span></div>
+  <p><b>上次清理：</b>{{$m.LastRun}}</p>
+  <p>清理只處理觀測、心跳、票占用與 canary silent failure。名冊、一般稽核記錄、狀態歷史、credential ledger 與 workload coverage 不會被這項政策刪除。</p>
+  <p>每一個 machine／evidence group 的最新一筆都會保留，即使它早於保留期限。</p>
+  {{if .Access.CanAdmin}}
+  <form method="post" action="/tenant/maintenance/retention/prune-preview" class="action-form">
+    <label><span class="field-label">清理理由</span><input name="reason" required maxlength="500" autocomplete="off" placeholder="例如：例行資料保留維護"></label>
+    <button type="submit">預覽清理範圍</button>
+  </form>
+  {{end}}
+</div>
+
+<h2>還原演練</h2>
+<div class="panel">
+  <div class="panel-title"><h2>備份驗證</h2><span class="small dim">不會替換正式資料庫</span></div>
+  {{if not $m.Restore.Known}}
+    <p><span class="st amber">狀態無法取得</span> — 目前無法讀取完成紀錄。</p>
+  {{else if not $m.Restore.Done}}
+    <p><span class="st amber">尚無完成紀錄</span> — 目前沒有可顯示的還原演練結果。</p>
+  {{else if $m.Restore.Overdue}}
+    <p><span class="st red">已超過 90 天</span> — 上次完成於 {{$m.Restore.At.Local.Format "2006-01-02 15:04"}}，距今 {{$m.Restore.Days}} 天。</p>
+  {{else}}
+    <p><span class="st green">90 天內已完成</span> — 上次完成於 {{$m.Restore.At.Local.Format "2006-01-02 15:04"}}，距今 {{$m.Restore.Days}} 天。</p>
+  {{end}}
+  <p>演練會固定最新備份的檔案身分與 SHA-256，在私有暫存副本上開啟資料庫並核對機器名冊；正式資料庫與備份原檔都不會被修改。</p>
+  {{if $m.RestoreActive}}
+    <p><span class="st blue">正在執行</span> — 已有還原演練排隊或驗證中。請在下方查看目前 operation。</p>
+  {{else if .Access.CanAdmin}}
+    <form method="post" action="/tenant/maintenance/restore-drill-preview" class="action-form">
+      <label><span class="field-label">演練理由</span><input name="reason" required maxlength="500" autocomplete="off" placeholder="例如：季度備份復原驗證"></label>
+      <button type="submit">預覽最新備份</button>
+    </form>
+  {{end}}
+</div>
+
+<h2>最近的還原演練</h2>
+{{if $m.RestoreOperations.Items}}
+<div class="panel" style="padding:0;overflow:hidden">
+  <table><thead><tr><th>Operation</th><th>備份</th><th>狀態</th><th>階段</th><th>建立時間</th><th></th></tr></thead><tbody>
+  {{range $m.RestoreOperations.Items}}<tr>
+    <td class="mono">{{short .OperationID 12}}</td>
+    <td>{{.Backup.Name}}<span class="small dim" style="display:block">{{bytes .Backup.SizeBytes}}</span></td>
+    <td><span class="{{restoreDrillStateClass .State}}">{{restoreDrillStateLabel .State}}</span></td>
+    <td>{{restoreDrillPhaseLabel .Phase}}</td>
+    <td>{{.CreatedAt.Local.Format "2006-01-02 15:04:05"}}</td>
+    <td><a href="/tenant/maintenance/restore-drills/{{.OperationID}}">查看</a></td>
+  </tr>{{end}}
+  </tbody></table>
+</div>
+{{else}}
+<p class="empty">尚無還原演練 operation。</p>
+{{end}}
+{{template "foot" .}}{{end}}

@@ -1,0 +1,140 @@
+{{define "enrollment.html"}}{{template "head" .}}
+
+<div class="page-heading" id="enrollment-overview">
+  <div>
+    <h1>裝置註冊</h1>
+    <p>建立註冊票證、下載代理程式安裝套件，並將新裝置加入管理。</p>
+  </div>
+  <div class="command-bar" aria-label="頁面動作">
+    <a class="button secondary" href="/machines#machines">查看所有裝置</a>
+  </div>
+</div>
+
+{{if .AgentBundles}}
+<h2 id="agent-bootstrap" class="section-anchor">代理程式安裝套件</h2>
+<div class="panel">
+  <table>
+    <thead><tr><th>架構</th><th>版本</th><th>大小</th><th>SHA-256</th><th>下載</th></tr></thead>
+    <tbody>{{range .AgentBundles}}
+    <tr>
+      <td class="mono">linux/{{.Arch}}</td>
+      <td class="mono">{{.Version}}</td>
+      <td>{{bytes .SizeBytes}}</td>
+      <td class="mono small" style="overflow-wrap:anywhere">{{.SHA256}}</td>
+      <td><a class="button secondary" href="{{.URL}}">下載 {{.Arch}}</a></td>
+    </tr>
+    {{end}}</tbody>
+  </table>
+</div>
+{{end}}
+
+<h2 id="enrollment-limit" class="section-anchor">註冊上限</h2>
+{{$limit := .EnrollmentLimit}}
+<div class="panel">
+  <p style="margin-top:0"><span class="dot {{if and $limit.State.Set $limit.State.AtLimit}}amber{{else}}green{{end}}" aria-hidden="true"></span> {{$limit.Headline}}</p>
+  {{if $limit.NextStep}}<p class="small">{{$limit.NextStep}}</p>{{end}}
+  {{if .Access.CanAdmin}}
+  <form class="enrollment-form" method="post" action="/machines/enrollment/limit-preview">
+    <label><span class="field-label">最多納管幾台</span>
+      <input type="number" name="max_machines" min="0" max="10000" step="1"
+             value="{{if $limit.State.Set}}{{$limit.State.MaxMachines}}{{end}}"
+             placeholder="留空代表不改" style="width:100%;padding:6px" autocomplete="off">
+    </label>
+    <label><span class="field-label">理由</span>
+      <input type="text" name="reason" placeholder="為什麼改上限"
+             style="width:100%;padding:6px" autocomplete="off" required aria-required="true">
+    </label>
+    <button type="submit" style="padding:6px 12px">預覽上限影響</button>
+  </form>
+  {{if $limit.State.Set}}
+  <form class="enrollment-form" method="post" action="/machines/enrollment/limit-preview">
+    <input type="hidden" name="clear" value="1">
+    <label><span class="field-label">取消上限的理由</span>
+      <input type="text" name="reason" placeholder="為什麼不再限制台數"
+             style="width:100%;padding:6px" autocomplete="off" required aria-required="true">
+    </label>
+    <button type="submit" style="padding:6px 12px">預覽取消上限</button>
+  </form>
+  {{end}}
+  {{end}}
+</div>
+
+<h2 id="create-enrollment" class="section-anchor">建立 enroll 票</h2>
+<div class="panel">
+  <p class="small dim" style="margin-top:0">Enroll 票效期 2 小時，只能使用一次。</p>
+  {{if and $limit.State.Set $limit.State.AtLimit}}
+  <p><span class="st amber">已達註冊上限</span> —— {{$limit.NextStep}}</p>
+  {{end}}
+  {{if .Access.CanAdmin}}
+  <form class="enrollment-form" method="post" action="/enrollments/preview">
+    <label><span class="field-label">機器名稱</span>
+      <input type="text" name="name" value="{{.EnrollmentName}}" placeholder="要納管的機器叫什麼"
+             style="width:100%;padding:6px" autocomplete="off" required aria-required="true">
+    </label>
+    <label><span class="field-label">理由（選填）</span>
+      <input type="text" name="reason" placeholder="為什麼要納管"
+             style="width:100%;padding:6px" autocomplete="off">
+    </label>
+    <button type="submit" style="padding:6px 12px">預覽 enroll 票影響</button>
+  </form>
+  {{end}}
+</div>
+
+<h2 id="tailnet-candidates" class="section-anchor">Tailnet 上尚未納管</h2>
+<div class="panel">
+{{if not .Tailnet.Available}}
+  <p><span class="st amber">Tailnet 清單無法取得</span> —— {{.Tailnet.Unavailable}}</p>
+{{else}}
+  {{if .Tailnet.Unenrolled}}
+  <p>Tailscale 上看得到 <b>{{len .Tailnet.Unenrolled}}</b> 台不在名冊裡的機器：</p>
+  <table>
+    <thead><tr><th>tailnet 名稱</th><th>位址</th><th>OS</th><th>現在</th><th>最後看到</th></tr></thead>
+    <tbody>{{range .Tailnet.Unenrolled}}
+    <tr>
+      <td>{{.Hostname}}</td><td class="mono">{{.IP}}</td><td>{{.OS}}</td>
+      <td>{{if .Online}}<span class="st green">online</span>{{else}}<span class="dim">offline</span>{{end}}</td>
+      <td class="dim small">{{if .LastSeen.IsZero}}—{{else}}{{.LastSeen.Format "2006-01-02 15:04"}}{{end}}</td>
+    </tr>
+    {{end}}</tbody>
+  </table>
+  {{if $.Access.CanAdmin}}{{range .Tailnet.Unenrolled}}
+  <form class="enrollment-form" method="post" action="/enrollments/preview">
+    <label><span class="sr-only">名冊名稱（目前 {{.Hostname}}）</span>
+      <input type="text" name="name" value="{{.Hostname}}"
+             autocomplete="off" required aria-required="true">
+    </label>
+    <label><span class="sr-only">納管理由（選填）</span>
+      <input type="text" name="reason" placeholder="為什麼要納管（可以不填）"
+             autocomplete="off">
+    </label>
+    <button type="submit" style="padding:6px 12px">預覽 {{.Hostname}} 的開票影響</button>
+  </form>
+  {{end}}{{end}}
+  {{else}}
+  <p class="empty">Tailscale 上看得到的機器，名冊裡都有。</p>
+  {{end}}
+
+  {{if .Tailnet.Ignored}}
+  <p class="dim small">已忽略 {{.Tailnet.Ignored}} 台。</p>
+  {{end}}
+
+  {{if .Tailnet.RetiredButOnline}}
+  <h3>已退役但 Tailnet 仍在線</h3>
+  <p><span class="st amber">兩份資料互相矛盾</span> —— 名冊說已退役，Tailscale 仍看得到：</p>
+  <table>
+    <thead><tr><th>機器</th><th>tailnet 名稱</th><th>位址</th><th>退役時間</th></tr></thead>
+    <tbody>{{range .Tailnet.RetiredButOnline}}
+    <tr>
+      <td><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a></td>
+      <td>{{.Peer.Hostname}}</td><td class="mono">{{.Peer.IP}}</td>
+      <td class="dim small">{{if .RetiredAt.IsZero}}—{{else}}{{.RetiredAt.Local.Format "2006-01-02 15:04"}}{{end}}</td>
+    </tr>
+    {{end}}</tbody>
+  </table>
+  <p class="dim small">點選機器可預覽恢復管理。</p>
+  {{end}}
+
+{{end}}
+</div>
+
+{{template "foot" .}}{{end}}

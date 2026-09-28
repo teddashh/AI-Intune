@@ -1,0 +1,77 @@
+{{define "machine_data.html"}}{{template "head" .}}
+{{$p := .MachineData}}
+{{$r := $p.Result}}
+
+<div class="page-heading">
+  <div>
+    <h1>{{$r.DisplayName}} 的資料</h1>
+    <p>Hub 現在替這台機器留著什麼，逐類的列數與最舊的一列。</p>
+    <p class="small"><a href="{{$p.MachineHref}}">回到這台的詳細資料</a> ·
+      <a href="/tenant/data">每一類各是什麼</a></p>
+  </div>
+  <div class="command-bar" aria-label="資料揭露命令列">
+    <a class="button secondary" href="{{$p.ExportHref}}">匯出</a>
+  </div>
+</div>
+
+<section class="metric-grid" aria-label="這台的留存量">
+  <article class="metric-card">
+    <div class="metric-label">列數</div>
+    <div class="metric-value">{{$r.Rows}}</div>
+    <div class="metric-note">{{if $r.Retired}}已退役，不會再有新的一列{{else}}還在報到，會繼續增加{{end}}</div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">會被保留期清掉</div>
+    <div class="metric-value">{{len $p.Timed}}</div>
+    <div class="metric-note">其餘 {{len $p.Kept}} 類裡的列留著</div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">含自由文字</div>
+    <div class="metric-value">{{len $p.FreeText}}</div>
+    <div class="metric-note">其餘每一格都是 Hub 自己的詞彙</div>
+  </article>
+</section>
+
+<h2 id="holdings" class="section-anchor" tabindex="-1">逐類的留存量</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>類別</th><th>列數</th><th>最舊</th><th>最新</th><th>留多久</th></tr></thead>
+<tbody>
+{{range $r.Categories}}
+<tr>
+  <td>{{.Category.Title}}<div class="sub small">{{.Category.SourceSentence}}</div></td>
+  <td>{{.Rows}}{{if .Undated}}<div class="sub small">{{.Undated}} 列沒有 Hub 收到的時刻</div>{{end}}</td>
+  <td class="small mono">{{if .Oldest}}{{.Oldest.Local.Format "2006-01-02 15:04:05"}}{{else}}<span class="dim">—</span>{{end}}</td>
+  <td class="small mono">{{if .Newest}}{{.Newest.Local.Format "2006-01-02 15:04:05"}}{{else}}<span class="dim">—</span>{{end}}</td>
+  <td class="small">{{.Category.RetentionSentence}}{{if .CutoffAt}}<div class="sub">現在會清掉 {{.CutoffAt.Local.Format "2006-01-02 15:04"}} 以前收到的列</div>{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">
+  {{if $r.Undated}}其中 <strong>{{$r.Undated}}</strong> 列沒有 Hub 收到的時刻，它們仍然留著，只是排不進最舊 / 最新。{{else}}每一列都帶著 Hub 收到它的時刻。{{end}}
+</p>
+
+<h2 id="free-text" class="section-anchor" tabindex="-1">自由文字</h2>
+{{if $p.FreeText}}
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>類別</th><th>是什麼</th><th>列數</th></tr></thead>
+<tbody>
+{{range $p.FreeText}}
+<tr>
+  <td>{{.Category.Title}}</td>
+  <td class="small">{{.Category.FreeText}}</td>
+  <td>{{.Rows}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">其餘每一格都是 Hub 自己的詞彙，長度與取值都受控。</p>
+{{else}}
+<div class="panel"><p class="small dim">這台機器的每一格都是 Hub 自己的詞彙。</p></div>
+{{end}}
+
+{{template "foot" .}}{{end}}

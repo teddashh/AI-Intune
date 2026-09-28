@@ -1,0 +1,35 @@
+{{define "compliance_assignment_review.html"}}{{template "head" .}}
+{{$r := .ComplianceAssignmentReview}}{{$p := $r.Preview}}
+<div class="page-heading"><div>
+  <h1>確認 {{$r.ScopeLabel}} {{$p.ScopeID}} 的合規性條件</h1>
+  {{if $p.Unchanged}}
+  <p>這個對象已經用 {{$p.PolicyID}} rev {{$p.Revision}} 判決；指派不會改變任何判決。</p>
+  {{else}}
+  <p>{{$p.AffectedMachines}} 台裝置會立刻改用 {{$p.PolicyID}} rev {{$p.Revision}} 判決。</p>
+  {{end}}
+</div></div>
+
+<div class="panel">
+<table><tbody>
+  <tr><th style="width:270px">對象</th><td>{{$r.ScopeLabel}} <span class="mono">{{$p.ScopeID}}</span></td></tr>
+  <tr><th>目前條件</th><td>{{if $p.CurrentPolicyID}}<span class="mono">{{$p.CurrentPolicyID}}</span> rev {{$p.CurrentRevision}}{{else}}未指派{{end}}</td></tr>
+  <tr><th>指派條件</th><td><span class="mono">{{$p.PolicyID}}</span> rev {{$p.Revision}}</td></tr>
+  <tr><th>規則</th><td>{{range $p.Rules}}<div>{{.Label}}{{with .Bound}} <span class="dim">{{.}}</span>{{end}}</div>{{end}}</td></tr>
+  <tr><th>不符合時</th><td>{{range $p.Actions}}<div>{{.Label}} <span class="dim">{{.Grace}}</span><span class="sub">{{.Effect}}</span></div>{{else}}<span class="dim">只回報，不改變任何裝置拿得到什麼</span>{{end}}</td></tr>
+  <tr><th>影響裝置</th><td>{{$p.AffectedMachines}} 台</td></tr>
+  <tr><th>規則身分</th><td class="mono small">{{$p.Digest}}</td></tr>
+  <tr><th>理由</th><td>{{$r.Reason}}</td></tr>
+</tbody></table>
+<form method="post" action="/machines/compliance/assignments" style="margin-top:18px">
+  <input type="hidden" name="scope" value="{{$p.Scope}}">
+  <input type="hidden" name="scope_id" value="{{$p.ScopeID}}">
+  <input type="hidden" name="policy_id" value="{{$p.PolicyID}}">
+  <input type="hidden" name="policy_revision" value="{{$p.Revision}}">
+  <input type="hidden" name="preview_digest" value="{{$p.PreviewDigest}}">
+  <input type="hidden" name="idempotency_key" value="{{$r.IdempotencyKey}}">
+  <input type="hidden" name="reason" value="{{$r.Reason}}">
+  <label><span class="field-label">輸入 {{$p.ScopeID}} 確認</span><input name="confirm_scope_id" required autocomplete="off"></label>
+  <div class="command-bar" style="margin-top:14px"><button type="submit">指派 {{$p.PolicyID}} rev {{$p.Revision}}</button><a class="button secondary" href="/machines/compliance#policies">取消</a></div>
+</form>
+</div>
+{{template "foot" .}}{{end}}

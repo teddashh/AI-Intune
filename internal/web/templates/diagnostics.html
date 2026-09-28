@@ -1,0 +1,27 @@
+{{define "diagnostics.html"}}{{template "head" .}}
+<div class="page-heading"><div>
+  <h1>診斷</h1>
+  <p>驗證工作單的領取、事件與結果回報。</p>
+</div></div>
+
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>機器</th><th>狀態</th>{{if .Access.CanOperate}}<th>診斷</th>{{end}}</tr></thead>
+<tbody>
+{{range .Diagnostics.Rows}}
+<tr>
+  <td><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a><div class="mono small dim">{{.MachineID}}</div></td>
+  <td><span class="st">{{.State}}</span></td>
+  {{if $.Access.CanOperate}}<td>
+    <form class="action-form" method="post" action="/machines/{{.MachineID}}/diagnostic-noop-preview">
+      <label><span class="field-label">逾時（秒）</span><input type="number" name="timeout" min="1" max="3600" value="600" required aria-required="true"></label>
+      <label><span class="field-label">理由</span><input type="text" name="reason" autocomplete="off" required aria-required="true"></label>
+      <button type="submit">預覽</button>
+    </form>
+  </td>{{end}}
+</tr>
+{{else}}<tr><td colspan="3" class="empty">沒有可診斷的機器。</td></tr>{{end}}
+</tbody>
+</table>
+</div>
+{{template "foot" .}}{{end}}

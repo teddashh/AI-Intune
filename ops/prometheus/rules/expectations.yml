@@ -1,0 +1,188 @@
+# 期望的判決，寫成 Prometheus 規則。
+#
+# 這一份是 internal/state 那套判斷的第二個副本 —— 刻意的。
+# 兩套現在並行跑：clawctl 自己還在判、還在送早報，這裡只進 Prometheus。
+# 目的是比較，不是取代。要砍哪一邊等看得出來哪一邊清楚再說。
+#
+# ⚠⚠ clawctl 的紀律是「`why` 原封不動出現在總覽、詳細頁與早報的理由那一行」。
+# 那句話**有**跟過來，走的是 info metric：
+#
+#     clawctl_expectation_info{machine,unit,artifact,why} 1
+#
+# 規則用 `* on(...) group_left(why)` 把它接上事實，annotation 裡就寫得出
+# `{{ $labels.why }}` —— 人原本寫的那句話，不是我編的通用句子。
+#
+# ⚠ 這代表宣告還是**只有一份**（expectations.json）。這份規則檔描述的是
+#   機制（怎麼比、比什麼），理由永遠來自宣告那一側。改 why 不用動這裡。
+#
+# ⚠ 我一開始沒放 why，理由寫「塞 label 會炸基數」—— 那是錯的。
+#   基數爆炸講的是值域不受控的 label（沒人宣告過的事件名那種），
+#   不是長字串。一條宣告只有一個 why。
+
+groups:
+  - name: clawctl-expectations
+    interval: 60s
+    rules:
+      # ── 哨兵自己還活著嗎 ─────────────────────────────────────────
+      # ⚠ 門檻是 clawctl_artifact_max_age_seconds，不是寫死的數字 ——
+      #   人在 expectations.json 裡宣告的值跟事實一起被吐出來，所以
+      #   一條規則就蓋住整個機隊，加機器不用改這裡。
+      #   （samplehub1/sampleagent2/sampleagent4 現在都是 5400，因為 watcher.sh 只保證
+      #     每小時一次心跳；照「保證」定不是照「現在」定。）
+      - alert: ArtifactOlderThanDeclared
+        expr: |
+          (
+            clawctl_artifact_age_seconds
+              > on (machine_id, machine, unit, artifact) clawctl_artifact_max_age_seconds
+          )
+          * on (machine_id, machine, unit, artifact) group_left(why)
+            clawctl_expectation_info
+        for: 10m
+        labels:
+          severity: warning
+          source: clawctl
+        annotations:
+          summary: '{{ $labels.machine }} 的 {{ $labels.unit }} 停止產出了'
+          description: >-
+            {{ $labels.artifact }} 沒更新，超過宣告的容忍上限。
+            宣告時人寫的理由：{{ $labels.why }}
+
+      - alert: DeclaredArtifactMissing
+        expr: clawctl_artifact_present == 0
+        for: 10m
+        labels:
+          severity: warning
+          source: clawctl
+        annotations:
+          summary: '{{ $labels.machine }} 宣告的產出物不見了'
+          description: >-
+            {{ $labels.artifact }} 有宣告但檔案不在。
+            ⚠ 這比「檔案很舊」更嚴重，因為連舊的證據都沒有了。
+
+      # ── 它活著的時候喊了什麼 ────────────────────────────────────
+      # ⚠ 只做這一條就退回成 PRODUCT.md 地基二否決掉的關鍵字表 ——
+      #   最痛的那種錯，定義上事件流裡什麼都沒有，那時候只有上面那條會說話。
+      #   兩條是一組，不要單獨關掉任何一條。
+      #
+      # ⚠ clawctl_event_partial=1 的時候計數是**下界**，但 `> 0` 不受影響
+      #   （下界大於 0 就是真的大於 0）。任何寫成 `> N` 的規則才要先看 partial。
+      - alert: NotOKEventSeen
+        expr: |
+          (clawctl_event_count > 0)
+          * on (machine_id, machine, unit, artifact) group_left(why)
+            clawctl_expectation_info
+        for: 5m
+        labels:
+          severity: warning
+          source: clawctl
+        annotations:
+          summary: '{{ $labels.machine }}：{{ $labels.event }} ×{{ $value }}'
+          description: >-
+            {{ $labels.unit }} 在宣告的窗口內回報了 {{ $labels.event }} {{ $value }} 次。
+            這個名字是人在 expectations.json 的 not_ok 裡宣告過的，
+            不是掃 log 掃出來的關鍵字。
+            宣告時人寫的理由：{{ $labels.why }}
+
+      # ⚠⚠ 這一條是整組裡最重要的。
+      # ts_field / type_field 寫錯的時候，上面那條 NotOKEventSeen 會**永遠是 0** ——
+      # 而 0 看起來跟「一切正常」完全一樣。一個安靜的哨兵跟一個沒事的機隊，
+      # 在圖上長得一模一樣。
+      - alert: EventRuleIsSilentlyBroken
+        expr: clawctl_event_malformed_lines > 0
+        for: 10m
+        labels:
+          severity: warning
+          source: clawctl
+        annotations:
+          summary: '{{ $labels.machine }} 的事件流解不開 {{ $value }} 行'
+          description: >-
+            欄位名可能寫錯了（expectations.json 的 ts_field / type_field）。
+            ⚠ 這會讓 NotOKEventSeen 永遠不觸發，而那看起來跟一切正常一樣。
+
+      # ── 沒有人在看 ──────────────────────────────────────────────
+      # ⚠ 0 條宣告是一個合法的狀態（剛裝好、還沒宣告任何東西），
+      #   但它跟「期望檔載入失敗」長得一樣 —— 而後者 2026-09-04 真的
+      #   在 cmdReport / cmdMachines 上發生過，畫面上什麼都不缺。
+      #   所以這裡寧可在剛裝好的時候吵一次，也不要讓那種失敗是安靜的。
+      - alert: NothingIsBeingWatched
+        expr: clawctl_expectations_loaded == 0
+        for: 30m
+        labels:
+          severity: info
+          source: clawctl
+        annotations:
+          summary: clawctl 沒有在量任何產出物
+          description: >-
+            一條產出物宣告都沒有。可能是還沒宣告（正常），也可能是
+            CLAWCTL_EXPECTATIONS 沒設或期望檔載入失敗（不正常）——
+            這兩者從這個數字分不出來，要去看設定檔本身。
+
+      # ⚠⚠ 上面那條是**全域**的（hub 到底有沒有載到東西），它擋不住
+      #   「hub 載了 4 條，但其中一台機器一條都沒分到」。
+      #   2026-09-05 實測：sampleagent3 的 clawctl-agent 活著、有在報到、
+      #   node_exporter up=1，而它的宣告數是 0 —— clawctl 對它全綠，
+      #   因為根本沒問它任何事。這是分母問題往下一層：
+      #   Prometheus 的 `up` 給了「機器名冊」的分母，
+      #   但「哪些機器有被宣告過」在那之前沒有任何分母。
+      #   ⚠ 刻意用「有報到過」當左邊，所以 sampleagent1 不會打中 ——
+      #     它沒有 agent，那是 MachineInRosterNotAnswering 的事，不是這條。
+      - alert: MachineReportsButNothingIsDeclaredForIt
+        expr: |
+          count by (machine) (clawctl_machine_last_checkin_age_seconds)
+            unless
+          count by (machine) (clawctl_expectation_info)
+        for: 30m
+        labels:
+          severity: warning
+          source: clawctl
+        annotations:
+          summary: '{{ $labels.machine }} 有在報到，但沒有任何一條宣告在看它'
+          description: >-
+            這台機器的 agent 活著、資料進得來，但沒有人宣告過它「應該在做什麼」。
+            ⚠ 所以它在 clawctl 上是綠的 —— 那個綠代表「沒有人問」，不代表「沒事」。
+            去 expectations.json 幫它宣告一條，或想清楚為什麼它不需要。
+
+      # ── 憑證 ────────────────────────────────────────────────────
+      # ⚠ 判斷在這裡，不在 metrics。/metrics 只吐事實：剩幾秒（負值＝已過期）、
+      #   這種票的名目壽命、Hub 看著它期間它自己續了幾次。
+      #
+      # ⚠⚠ 「過期」對短命的票是正常生命週期的一部分。claude 的 access token
+      #   壽命 8 小時、grok 6 小時，機器閒置就會過期，下次用到自己續回來。
+      #   2026-09-05 的紀錄：這條規則原本是 `< 0` 就發，於是 samplehub1/claude、
+      #   samplehub1/grok、sampleagent2/claude 一天各燒兩輪、每輪一小時、然後自己熄掉 ——
+      #   同一天 CredentialExpiringSoon（六小時內過期）在 samplehub1 上幾乎整天亮著，
+      #   因為一張 8 小時的票**永遠**在六小時內過期。那正是 SPEC §4.3 刪掉
+      #   expires_soon 的理由，只是這次長在規則這一側。
+      #
+      #   所以寬限 = 一個壽命，上限一天（codex 10 天的票不能給 10 天）：
+      #   過期不到一個壽命 → 還沒被用到；過了一個壽命還沒續 → 續不回來，要人。
+      #   跟 internal/state 的 CredGrace 是同一條規則。
+      #   算不出壽命的票（沒有 lifetime 那一行）沒有寬限：不知道它怎麼續，
+      #   就不假設它會續。
+      - alert: CredentialExpired
+        expr: |
+          (
+            clawctl_credential_expiry_seconds
+              < -clamp_max(clawctl_credential_lifetime_seconds, 86400)
+          )
+          or
+          (
+            clawctl_credential_expiry_seconds < 0
+              unless clawctl_credential_lifetime_seconds
+          )
+        for: 5m
+        labels:
+          severity: warning
+          source: clawctl
+        annotations:
+          summary: '{{ $labels.machine }} 的 {{ $labels.provider }} 登入過期，而且沒有自己續回來'
+          description: >-
+            過期 {{ $value | humanizeDuration }} 了，超過這種票的一個壽命（上限一天）——
+            閒置的票會在下次使用時自己續，這張沒有。要重新登入。
+            ⚠ 這台機器看起來可以連、agent 也在回報 —— 它只是做不了事。
+            這正是 osquery / node_exporter 看不到的那一格。
+
+      # ⚠ 原本這裡有一條 CredentialExpiringSoon（六小時內過期，info）。
+      #   2026-09-06 拿掉了：一張壽命 8 小時的票在它整個生命週期的 3/4 裡
+      #   都「六小時內過期」，這條規則對它就是永遠亮著。永遠亮的燈不是燈。
+      #   要看「快到期」，Grafana 上那格 clawctl_credential_expiry_seconds 就是。

@@ -1,0 +1,93 @@
+# clawctl-hub —— 中控台
+#
+# ⚠ Hub 不可以裝在被它管的機器上。
+#
+# 這是預設會犯的錯：大家都會裝在最熟的那台。然後那台死掉時，你同時失去了
+# 服務、以及「知道服務死了」的能力。Hub 如果出現在自己的名冊裡而且
+# expected=true，Dashboard 會常駐警告。
+#
+# ⚠ Hub 說自己健康不算數。死人之鐘（healthchecks.io 或等價物）必須在
+# Hub 之外，由它監看每日推播有沒有準時送到。
+
+[Unit]
+Description=clawctl hub (fleet console)
+Documentation=https://github.com/teddashh/AI-Intune
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+
+# 監聽位址與推播指令放在設定檔裡，不寫死在 unit。
+#
+# ⚠ 下面的 127.0.0.1 是安全的 fail-closed placeholder，不是可用的 operator
+# 設定。新版 Hub 會在開 DB 之前拒絕 loopback；install-hub.sh 會把明確的
+# tailnet IP 與 CLAWCTL_OPERATOR_CAPABILITY_PREFIX 寫進 hub.env。
+#
+# ⚠ 不要用 0.0.0.0。Machine plane 是 per-machine bearer，operator plane 則是
+# destination-scoped Tailscale LocalAPI app capability；兩者都以「單一明確
+# tailnet listener」為部署前提。新版 binary 會在開 DB 前拒絕 wildcard、
+# LAN/public IP、hostname 與 loopback。
+#
+# 這個檔案不存在時 unit 不會暴露 console，而會以清楚的 auth config error 重啟。
+EnvironmentFile=-%h/.config/clawctl/hub.env
+Environment=CLAWCTL_LISTEN=127.0.0.1:8787
+Environment=CLAWCTL_OPERATOR_CAPABILITY_PREFIX=
+# Clear the user-manager ambient value unless the managed EnvironmentFile
+# explicitly sets it. Otherwise preflight and the restarted service can see
+# different public origins even though they use the same unit and env file.
+Environment=CLAWCTL_PUBLIC_URL=
+Environment=CLAWCTL_REPORT_AT=08:00
+# ⚠ 這個章只在早報**真的送達之後**才蓋，而且只有 daily 那一種。
+# 外部死人之鐘讀它的副本 —— 見 ops/deadman.sh 開頭那段為什麼不能用 cron 蓋章。
+Environment=CLAWCTL_REPORT_STAMP=%h/.local/share/clawctl/last-report.stamp
+
+# 外部死人之鐘的 push URL（healthchecks.io、自架 healthchecks、Uptime Kuma、cronitor）。
+#
+# ⚠ 為什麼有了 report-stamp 還要這個：deadman.sh 住在 sampleagent2，
+# 它擋得住 samplehub1 掛掉，但擋不住 sampleagent2 自己掛掉，也擋不住整個機隊一起掛掉
+# （停電、網路、雲端商出事）。這一條完全在機隊之外。兩條不是重複，是不同的失效面。
+#
+# ⚠ URL 本身就是憑證 —— 誰知道它誰就能讓死人之鐘閉嘴。所以放在
+# EnvironmentFile（0600）裡，不寫在這個檔案裡，也不會被印進 log。
+#
+# ⚠ 早報送不出去時會 ping <url>/fail（healthchecks 慣例）。
+# Uptime Kuma 那種帶 query string 的 URL 推不出這個端點，
+# 要立即告警請另外設 CLAWCTL_REPORT_PING_FAIL_URL —— 開機時 log 會講清楚是哪一種。
+#   CLAWCTL_REPORT_PING_URL=https://hc-ping.com/<uuid>
+#   CLAWCTL_REPORT_PING_FAIL_URL=
+# ⚠ service 必須把 ledger 釘在 upgrade-hub.sh snapshot/restore 的同一條路徑。
+# defaultDB() 仍讓 CLI 使用同一個預設；但 service 不可讓 EnvironmentFile 或
+# user-manager ambient 的 CLAWCTL_DB 把 live writer 悄悄導去另一個檔案。
+ExecStart=%h/.local/bin/clawctl-hub \
+    --db %h/.local/share/clawctl/clawctl.sqlite \
+    --listen ${CLAWCTL_LISTEN} \
+    --report-at ${CLAWCTL_REPORT_AT} \
+    --report-stamp ${CLAWCTL_REPORT_STAMP}
+Restart=always
+RestartSec=5
+WatchdogSec=90
+KillMode=control-group
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.local/share/clawctl
+PrivateTmp=true
+# ⚠ 這裡刻意**沒有** PrivateDevices=true。
+#
+# 它看起來是免費的加固，實際上會讓整個 unit 起不來：PrivateDevices 隱含
+# CapabilityBoundingSet=~CAP_MKNOD，而一個非特權的 systemd --user manager
+# 沒有權限動 capability bounding set。結果是：
+#
+#     Failed to drop capabilities: Operation not permitted
+#     Failed at step CAPABILITIES ... status=218/CAPABILITIES
+#
+# 這個 bug 只有在真的用 systemd 裝一次才會出現 —— 手動跑 binary 是好的，
+# 單元測試也全過。同理不要加 ProtectKernelTunables / ProtectKernelModules /
+# ProtectClock，它們全都隱含 capability 操作。
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=default.target

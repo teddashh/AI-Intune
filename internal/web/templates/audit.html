@@ -1,0 +1,141 @@
+{{define "audit.html"}}{{template "head" .}}
+<div class="page-heading"><div>
+  <h1>稽核記錄{{if .Audit.MachineID}}：{{.Audit.MachineID}}{{end}}</h1>
+  <p>控制面寫入嘗試、可得來源與結果。</p>
+  {{if .Audit.MachineID}}<p class="small">目前只看這台機器（<span class="mono">{{.Audit.MachineID}}</span>）。<a href="/audit">清除篩選</a></p>
+  {{else if .Audit.HasFilters}}<p class="small">目前套用了精確篩選。<a href="/audit">清除篩選</a></p>{{end}}
+</div></div>
+
+<div class="panel">
+<form method="get" action="/audit" aria-label="稽核記錄篩選">
+  <div class="form-grid">
+    <label><span class="field-label">Machine ID</span>
+      <input name="machine_id" value="{{.Audit.MachineID}}" placeholder="精確 machine_id">
+    </label>
+    <label><span class="field-label">結果</span>
+      <select name="outcome">
+        <option value="" {{if not .Audit.Outcome}}selected{{end}}>全部</option>
+        <option value="ok" {{if eq .Audit.Outcome "ok"}}selected{{end}}>ok</option>
+        <option value="failed" {{if eq .Audit.Outcome "failed"}}selected{{end}}>failed</option>
+      </select>
+    </label>
+    <label><span class="field-label">Principal</span>
+      <input name="principal" value="{{.Audit.Principal}}" placeholder="精確 principal">
+    </label>
+    <label><span class="field-label">Capability</span>
+      <input name="capability" value="{{.Audit.Capability}}" placeholder="精確 capability">
+    </label>
+    <label><span class="field-label">Source kind</span>
+      <input name="source_kind" value="{{.Audit.SourceKind}}" placeholder="例如 operator-api">
+    </label>
+    <label><span class="field-label">Request 關聯</span>
+      <input name="correlation" value="{{.Audit.Correlation}}" placeholder="idempotency key / digest">
+    </label>
+    <label><span class="field-label">From</span>
+      <input name="from" value="{{.Audit.From}}" placeholder="2026-09-08T12:00:00Z">
+    </label>
+    <label><span class="field-label">To</span>
+      <input name="to" value="{{.Audit.To}}" placeholder="2026-09-08T13:00:00Z">
+    </label>
+    <label><span class="field-label">Operator denials</span>
+      <select name="denials">
+        <option value="sampled" {{if eq .Audit.Denials "sampled"}}selected{{end}}>sampled（最新 50 筆）</option>
+        <option value="all" {{if eq .Audit.Denials "all"}}selected{{end}}>all（全部 persisted rows）</option>
+      </select>
+    </label>
+    <label><span class="field-label">每頁筆數</span>
+      <input name="limit" type="number" min="1" max="100" value="{{.Audit.Limit}}">
+    </label>
+  </div>
+  <fieldset style="margin:14px 0 10px">
+    <legend class="field-label">Actions（可複選）</legend>
+    <div style="display:flex;flex-wrap:wrap;gap:8px 16px">
+      {{range .Audit.Actions}}<label class="small mono"><input type="checkbox" name="action" value="{{.Value}}" {{if .Selected}}checked{{end}}> {{.Value}}</label>{{end}}
+    </div>
+  </fieldset>
+  <button type="submit">套用篩選</button>
+  {{if .Audit.HasFilters}} <a href="/audit" style="margin-left:10px">清除篩選</a>{{end}}
+</form>
+</div>
+
+<div class="panel">
+<p class="small" style="margin:0">
+  本次精確篩選在 denial 採樣前符合 <b>{{.Audit.Result.MatchedTotal}}</b> 筆，採樣後可見
+  <b>{{.Audit.Result.Total}}</b> 筆；成功 {{.Audit.Result.Succeeded}}、失敗 {{.Audit.Result.Failed}}、
+  結果無法判讀 {{.Audit.Result.UnknownOutcome}}。
+  Operator denials：符合 {{.Audit.Result.Denials.Matched}}、納入 {{.Audit.Result.Denials.Included}}、省略 {{.Audit.Result.Denials.Omitted}}。
+  <span class="dim">依 writer sequence 由新到舊；creation ceiling {{.Audit.Result.CreationCeiling}}，schema v{{.Audit.Result.SchemaVersion}}。</span>
+</p>
+</div>
+
+{{if .Audit.Result.Items}}
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr>
+  <th style="width:72px">序號</th>
+  <th style="width:150px">時間</th>
+  <th style="width:110px">動作</th>
+  <th style="width:130px">結果</th>
+  <th>對象</th>
+  <th>理由</th>
+  <th style="width:260px">Request 關聯</th>
+  <th style="width:310px">授權與請求來源</th>
+</tr></thead>
+<tbody>
+{{range .Audit.Result.Items}}
+  <tr>
+    <td class="small mono">{{.AuditID}}</td>
+    <td class="small mono">{{with .At}}{{.Local.Format "01-02 15:04:05"}}{{else}}<b>時間無法判讀</b>{{end}}</td>
+    <td class="small mono">{{if .Action}}{{.Action}}{{else}}<b>動作無法判讀</b>{{end}}</td>
+    <td class="small">
+      {{if .IsOperatorReplay}}
+        {{if .Succeeded}}回放（未重做）{{else if .Failed}}<b>回放（原判決）</b>{{else}}<b>回放（結果無法判讀）</b>{{end}}
+      {{else if .Succeeded}}做了{{else if .Failed}}<b>沒做成</b>{{else}}<b>結果無法判讀</b>{{end}}
+    </td>
+    <td class="mono small">{{if .Subject}}{{.Subject}}{{else}}<b>對象無法判讀</b>{{end}}</td>
+    <td class="small">{{if .Reason}}{{.Reason}}{{else}}<span class="dim">（沒填）</span>{{end}}
+      {{if .Detail}}<br><span class="dim small">{{.Detail}}</span>{{end}}
+      {{if .Issues}}<br><b>ledger issues</b> <span class="mono">{{range $i, $issue := .Issues}}{{if $i}}, {{end}}{{$issue}}{{end}}</span>{{end}}
+      {{if .AlteredFields}}<br><span class="dim">安全輸出已替換／截短：<span class="mono">{{range $i, $field := .AlteredFields}}{{if $i}}, {{end}}{{$field}}{{end}}</span></span>{{end}}
+    </td>
+    <td class="small dim" style="overflow-wrap:anywhere">
+      {{if .IdempotencyKey}}key <span class="mono">{{.IdempotencyKey}}</span>
+      {{else if .RequestDigest}}key — <span class="small">未提供</span>
+      {{else if .IsOperatorTransportRejection}}key — <span class="small">未提供</span>
+      {{else}}— <span class="small">未記錄</span>{{end}}
+      {{if .RequestDigest}}<br>digest <span class="mono">{{.RequestDigest}}</span>
+      {{else if .IsOperatorTransportRejection}}<br><span class="small">digest —</span>{{end}}
+    </td>
+    <td class="small dim">
+      {{if .AuthDecision}}
+        <b>授權判決</b> <span class="mono">{{.AuthDecision}}</span>
+        {{if .AuthSubject}}<br><span class="mono">{{.AuthSubject}}</span>{{end}}
+        {{if .AuthNodeID}}<br>node <span class="mono">{{.AuthNodeID}}</span>{{end}}
+        {{if .AuthCapability}}<br>cap <span class="mono">{{.AuthCapability}}</span>{{end}}
+        {{if .AuthMethod}}<br>via <span class="mono">{{.AuthMethod}}</span>{{end}}
+      {{else if .IsRateLimitedDenial}}
+        <span class="dim">多筆 denial 已聚合；授權逐筆結果未保留</span>
+      {{else if .BoundaryDecision}}
+        <span class="dim">授權判決：未評估；請求在邊界拒絕</span>
+      {{else if .IsDirectDBSource}}
+        <span class="dim">來源：direct-db-cli</span>
+      {{else}}
+        <span class="dim">授權證據：未記錄</span>
+      {{end}}
+      {{if .BoundaryDecision}}<br><b>邊界判決</b> <span class="mono">{{.BoundaryDecision}}</span>{{end}}
+      {{if .SourceKind}}<br>adapter <span class="mono">{{.SourceKind}}</span>{{end}}
+      <br><b>傳輸來源</b> {{.WhoLabel}}{{if .UserAgent}}<br><span class="mono">UA {{.UserAgent}}</span>{{end}}
+    </td>
+  </tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<div style="display:flex;gap:12px;align-items:center;margin:12px 0">
+  {{if .Audit.FirstPageHref}}<a href="{{.Audit.FirstPageHref}}">回到這次查詢的第一頁</a>{{end}}
+  {{if .Audit.NextHref}}<a href="{{.Audit.NextHref}}">下一頁（較舊的 writer sequence）</a>{{end}}
+</div>
+{{else}}
+<p class="empty">{{if .Audit.MachineID}}這台機器還沒有任何一筆。{{else if .Audit.HasFilters}}沒有符合目前精確篩選的紀錄。{{else}}還沒有任何一筆。{{end}}</p>
+{{end}}
+{{template "foot" .}}{{end}}

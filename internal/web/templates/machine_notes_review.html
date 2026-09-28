@@ -1,0 +1,31 @@
+{{define "machine_notes_review.html"}}{{template "head" .}}
+{{$p := .MachineNotesPreview}}
+<div class="page-heading"><div>
+  <h1>確認名冊備註 {{$p.DisplayName}}</h1>
+  <p>只更新 Hub 名冊中的人工備註；機器設定與 agent 不變。</p>
+</div></div>
+
+<div class="panel">
+<table>
+  <tbody>
+    <tr><th>Machine ID</th><td class="mono">{{$p.MachineID}}</td></tr>
+    <tr><th>裝置</th><td>{{$p.DisplayName}}</td></tr>
+    <tr><th>目前備註</th><td>{{if $p.CurrentNotes}}{{$p.CurrentNotes}}{{else}}（無備註）{{end}}</td></tr>
+    <tr><th>新備註</th><td>{{if $p.Notes}}{{$p.Notes}}{{else}}（清除備註）{{end}}</td></tr>
+    <tr><th>影響</th><td>Hub 名冊備註會變更；machine ID、機器設定與 agent 不變。</td></tr>
+    <tr><th>理由</th><td>{{.MachineNotesReason}}</td></tr>
+  </tbody>
+</table>
+<form method="post" action="/machines/{{$p.MachineID}}/notes" style="margin-top:18px">
+  <input type="hidden" name="notes" value="{{$p.Notes}}">
+  <input type="hidden" name="preview_digest" value="{{$p.PreviewDigest}}">
+  <input type="hidden" name="reason" value="{{.MachineNotesReason}}">
+  <input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+  <label><span class="field-label">確認目前名稱</span>
+    <input type="text" name="confirm_display_name" placeholder="輸入 {{$p.DisplayName}}"
+           autocomplete="off" required aria-required="true">
+  </label>
+  <div class="command-bar" style="margin-top:14px"><button type="submit">{{if $p.Notes}}更新名冊備註{{else}}清除名冊備註{{end}}</button><a class="button secondary" href="/machines/{{$p.MachineID}}?section=actions#actions">取消</a></div>
+</form>
+</div>
+{{template "foot" .}}{{end}}

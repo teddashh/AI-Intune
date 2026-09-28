@@ -1,0 +1,83 @@
+{{define "jobs.html"}}{{template "head" .}}
+{{$p := .JobList}}
+
+<div id="agent-overview" class="page-heading section-anchor" tabindex="-1"><div>
+  <h1>代理程式活動</h1>
+  <p>檢視代理程式在受管理裝置上的執行狀態、事件與驗證結果。</p>
+</div></div>
+
+<form class="panel action-form" method="get" action="/jobs" aria-label="篩選工作單">
+  <label><span class="field-label">machine ID</span>
+    <input name="machine_id" value="{{$p.MachineID}}" placeholder="全部機器" autocomplete="off">
+  </label>
+  <label><span class="field-label">狀態</span>
+    <select name="state" multiple size="5" aria-describedby="job-state-filter-help">
+      {{range $p.States}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+    <span id="job-state-filter-help" class="small dim">不選就是全部；可選多個。</span>
+  </label>
+  <label><span class="field-label">deployment ID</span>
+    <input name="deployment_id" value="{{$p.DeploymentID}}" placeholder="全部部署" autocomplete="off">
+  </label>
+  <label><span class="field-label">resource kind</span>
+    <input name="resource_kind" value="{{$p.ResourceKind}}" placeholder="全部類型" autocomplete="off">
+  </label>
+  <label><span class="field-label">resource ID</span>
+    <input name="resource_id" value="{{$p.ResourceID}}" placeholder="全部資源" autocomplete="off">
+  </label>
+  <label><span class="field-label">每頁</span>
+    <input type="number" name="limit" min="1" max="100" value="{{$p.Limit}}" inputmode="numeric">
+  </label>
+  <button type="submit">套用篩選</button>
+  {{if $p.Filtered}}<a class="button secondary" href="/jobs">清除篩選</a>{{end}}
+</form>
+
+<section id="job-state-counts" class="section-anchor" tabindex="-1" aria-labelledby="job-state-counts-title">
+  <div class="section-title">
+    <h2 id="job-state-counts-title">狀態摘要</h2>
+    <p class="active-filter">Hub 評估時間 {{$p.Result.EvaluatedAt.Local.Format "2006-01-02 15:04:05"}}</p>
+  </div>
+  <div class="panel" style="padding:4px 6px">
+    <table>
+      <thead><tr>{{range $p.Result.StateCounts}}<th>{{.State}}</th>{{end}}</tr></thead>
+      <tbody><tr>{{range $p.Result.StateCounts}}<td>{{.Count}}</td>{{end}}</tr></tbody>
+    </table>
+  </div>
+</section>
+
+<div class="section-title">
+  <h2 id="job-ledger" class="section-anchor" tabindex="-1">工作單帳本</h2>
+  <p class="active-filter">符合 {{$p.Result.Total}} 張；本頁 {{len $p.Result.Items}} 張</p>
+</div>
+<div class="panel" style="padding:4px 6px">
+{{if $p.Result.Items}}
+<table>
+<thead><tr>
+  <th>job</th><th>機器</th><th>資源 / revision</th><th>狀態 / 租約</th>
+  <th>建立 / 終態</th><th>事件</th><th>驗證</th><th>deployment</th>
+</tr></thead>
+<tbody>
+{{range $p.Result.Items}}
+<tr>
+  <td class="mono"><a href="/jobs/{{.JobID}}">{{short .JobID 8}}</a><br><span class="small dim" title="{{.DesiredID}}">desired {{short .DesiredID 8}}</span></td>
+  <td class="name"><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a><span class="sub mono">{{.MachineID}}</span></td>
+  <td><span class="mono">{{.ResourceKind}}/{{.ResourceID}}</span><br><span class="small dim">revision {{.Revision}} · timeout {{.ExecutionTimeoutSeconds}} 秒 · irreversible={{.Irreversible}}</span><br>{{with .ArtifactDigest}}<span class="small mono dim" title="{{deref .}}">digest {{short (deref .) 18}}</span>{{else}}<span class="small dim">digest 未記錄</span>{{end}} <span class="small dim">({{.ArtifactDigestStatus}})</span></td>
+  <td><span class="{{jobStateClass .State}}">{{.State}}</span><br><span class="small dim">{{jobLeaseLabel .LeaseStatus .LeaseExpiresAt $p.Result.EvaluatedAt}}</span></td>
+  <td class="small"><span class="mono">{{.CreatedAt.Local.Format "01-02 15:04:05"}}</span><br><span class="dim">{{timeOrDash .TerminalAt}}</span></td>
+  <td>{{.EventCount}}{{with .LastEventReceivedAt}}<br><span class="small dim">最後 {{.Local.Format "01-02 15:04:05"}}</span>{{end}}</td>
+  <td>{{.VerificationPassed}} / {{.VerificationTotal}} 通過{{if .VerificationFailed}}<br><span class="st amber">{{.VerificationFailed}} 失敗</span>{{end}}</td>
+  <td>{{with .DeploymentID}}<a class="mono" href="/deployments/{{deref .}}">{{short (deref .) 8}}</a>{{else}}<span class="dim">—</span>{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<p class="empty">{{if $p.Filtered}}目前篩選沒有符合的工作單。{{else}}還沒有任何工作單。{{end}}</p>
+{{end}}
+</div>
+
+{{if $p.NextURL}}
+<p class="command-bar"><a class="button secondary" rel="next" href="{{$p.NextURL}}">下一頁</a></p>
+{{end}}
+
+{{template "foot" .}}{{end}}

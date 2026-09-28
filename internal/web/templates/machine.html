@@ -1,0 +1,861 @@
+{{define "machine.html"}}{{template "head" .}}
+{{$md := .MachineDetail}}{{$m := .Machine}}{{$c := .MachineConnect}}{{$mon := $md.Monitor}}
+
+<div class="page-heading section-anchor" id="machine-overview" tabindex="-1"><div>
+  {{if $m.RetiredAt}}
+  <h1>{{$m.DisplayName}} —— 已退役</h1>
+  <p>{{$m.RetiredAt.Local.Format "2006-01-02 15:04"}} 退出管理分母；退役前觀測已保留。</p>
+  {{else}}
+  <h1><span class="dot {{color $md.Judgement.State}}" aria-hidden="true"></span>{{$m.DisplayName}} —— {{label $md.Judgement.State}}</h1>
+  <p>{{$md.Judgement.Reason.Text}} · channel：{{if $m.Channel}}{{$m.Channel}}{{else}}未指派{{end}}</p>
+  {{end}}
+  {{if $md.Checkins.Truncated}}<p class="small dim">{{$.CheckinWindowText}}內超過 {{$md.Disclosure.CheckinLimit}} 筆心跳。已取回最近 {{$md.Disclosure.CheckinLimit}} 筆，狀態條畫出其中最近 {{len $.Strip}} 筆。</p>{{end}}
+  {{if $md.Checkins.Invalid}}<p class="small dim">已取回的心跳裡有 {{$md.Checkins.Invalid}} 筆無效，沒有畫進狀態條。</p>{{end}}
+</div></div>
+
+{{if $md.Judgement.Findings.Total}}
+<h2>{{if $m.RetiredAt}}保留觀測的診斷{{else}}發現{{end}}</h2>
+<div class="panel">
+  {{if $m.RetiredAt}}<p class="small dim" style="margin-top:0">依退役前保留資料重算。</p>{{end}}
+  {{if $md.Judgement.Findings.Truncated}}<p class="small dim" style="margin-top:0">顯示前 {{$md.Disclosure.FindingLimit}} 筆診斷。</p>{{end}}
+  {{if $md.Judgement.Findings.Invalid}}<p class="small dim" style="margin-top:0">{{$md.Judgement.Findings.Invalid}} 筆診斷無效。</p>{{end}}
+  <ul class="findings">
+  {{range $md.Judgement.Findings.Items}}
+    <li>
+      <span class="dot {{sevColor .Severity}}" style="margin-top:9px" aria-hidden="true"></span>
+      <span class="sr-only">嚴重度：{{sevLabel .Severity}}。</span>
+      <span class="who">{{.Kind}}</span>
+      <span>{{.Message.Text}}{{if .Advisory}} <span class="dim small">（不影響狀態）</span>{{end}}</span>
+    </li>
+  {{end}}
+  </ul>
+</div>
+{{end}}
+
+<h2 id="monitor" class="section-anchor" tabindex="-1">心跳</h2>
+<div class="panel">
+  {{if .Strip}}
+    <div class="strip" aria-hidden="true">
+      {{range .Strip}}<i class="{{.Class}}" style="height:{{.Height}}px"></i>{{end}}
+    </div>
+    <div class="small dim" style="margin-top:6px">
+      最近 {{len .Strip}} 次心跳，最舊的在左邊。格子的高度是「距離上一次多久」。
+      圖例：{{range .StripTiers}}<i class="swatch {{.Class}}" aria-hidden="true"></i>{{.Meaning}}{{end}}
+    </div>
+    <details class="small" style="margin-top:8px">
+      <summary>以文字查看每次心跳</summary>
+      <ol>{{range .Strip}}<li>{{.Title}}，{{.Status}}</li>{{end}}</ol>
+    </details>
+  {{else}}
+    <p class="empty">尚無心跳。</p>
+  {{end}}
+
+  <p class="dim small" style="margin-top:8px">
+  {{if not .Retention.Known}}
+    觀測保留狀態未知。
+  {{else if not .Retention.EverRun}}
+    尚未清理觀測資料。
+  {{else}}
+    上次清理：{{.Retention.LastPrune.Local.Format "2006-01-02 15:04"}}（{{.Retention.Rows}} 列）。
+    {{if .Retention.HasOldest}}
+    最舊保留觀測：<b>{{.Retention.Oldest.Local.Format "2006-01-02 15:04"}}</b>。
+    {{end}}
+  {{end}}
+  </p>
+
+  <table style="margin-top:14px">
+  <tbody>
+    <tr><th style="width:190px">最後一次收到</th><td>
+      {{if $mon.EverCheckedIn}}{{ago (deref $mon.LastCheckinReceivedAt)}}
+        <span class="dim small">（Hub received_at {{$mon.LastCheckinReceivedAt.Local.Format "2006-01-02 15:04:05"}}）</span>
+      {{else}}從未{{end}}
+    </td></tr>
+    <tr><th>約定間隔</th><td>{{dur .MachineMonitorInterval}}</td></tr>
+    {{if and .Schedule.Known (not $m.RetiredAt)}}
+    <tr><th>下一次應該到</th><td>
+      {{.Schedule.DueAt.Local.Format "15:04:05"}}
+      {{if .Schedule.Overdue}} <span class="st amber">已經遲到</span>{{end}}
+    </td></tr>
+    <tr><th>幾點會判失聯</th><td>
+      {{.Schedule.UnreachableAt.Local.Format "15:04:05"}} —— {{.Schedule.CountdownText}}
+    </td></tr>
+    {{end}}
+    <tr><th>時鐘偏移</th><td>
+      {{if .MachineMonitorClockSkew}}{{dur (deref .MachineMonitorClockSkew)}}
+        <span class="dim small">（機器時鐘與 Hub 的差距）</span>{{else}}—{{end}}
+    </td></tr>
+    <tr><th>一小時內不同 agent 啟動身分</th><td>
+      {{if not $mon.DistinctAgentStarts1h}}<span class="dim">未知</span>
+      {{else if ge (deref $mon.DistinctAgentStarts1h) 3}}<span class="st red">{{deref $mon.DistinctAgentStarts1h}} 個</span>
+        <span class="dim small">疑似重啟迴圈</span>
+      {{else}}{{deref $mon.DistinctAgentStarts1h}} 個{{end}}
+    </td></tr>
+    <tr><th>一小時內不同 boot identity</th><td>
+      {{if $mon.DistinctBootIDs1h}}{{deref $mon.DistinctBootIDs1h}}{{else}}<span class="dim">未知</span>{{end}}
+    </td></tr>
+    <tr><th>linger</th><td>
+      {{if $mon.LingerEnabled}}
+        {{if deref $mon.LingerEnabled}}已開啟
+        {{else}}<span class="st amber">未開啟</span>
+          <span class="dim small">登出時 agent 會停止</span>
+        {{end}}
+      {{else}}<span class="dim">未知</span>{{end}}
+    </td></tr>
+    <tr><th>完整觀測最後更新</th><td>
+      {{if $mon.LastObservationReceivedAt}}{{ago (deref $mon.LastObservationReceivedAt)}}
+      {{else}}<span class="dim">從未</span>{{end}}
+    </td></tr>
+    {{with .LatestMachineCheckin}}
+    <tr><th>最新 agent 版本</th><td class="mono">{{with .AgentVersion}}{{.Text}}{{else}}未知{{end}}</td></tr>
+    <tr><th>最新 agent sequence / uptime</th><td class="mono">
+      seq={{with .AgentSeq}}{{deref .}}{{else}}unknown{{end}} · uptime={{with .UptimeSeconds}}{{deref .}}s{{else}}unknown{{end}}
+    </td></tr>
+    <tr><th>最新 boot identity</th><td class="mono">{{with .BootID}}{{.Text}}{{else}}未知{{end}}</td></tr>
+    {{end}}
+  </tbody>
+  </table>
+</div>
+
+<h2 id="properties" class="section-anchor" tabindex="-1">身分</h2>
+<div class="panel">
+  {{if gt $md.IdentityHints.Total 1}}
+  <div class="caveat" style="margin-top:0">
+    <b>這個身分由 {{$md.IdentityHints.Total}} 個 machine-id 使用。</b>
+  </div>
+  {{end}}
+  <table>
+  <thead><tr><th style="width:190px">machine-id</th><th>第一次看到</th><th>最後看到</th><th>次數</th></tr></thead>
+  <tbody>
+  {{range $md.IdentityHints.Items}}
+    <tr>
+      <td class="mono">{{.Hint.Text}}{{if .RegistryDeclared}} <span class="dim small">（名冊登記的）</span>{{end}}</td>
+      <td class="small dim">{{with .FirstSeenAt}}{{ago (deref .)}}{{else}}—{{end}}</td>
+      <td class="small dim">{{with .LastSeenAt}}{{ago (deref .)}}{{else}}—{{end}}</td>
+      <td class="small dim">{{.ObservationCount}}</td>
+    </tr>
+  {{else}}
+    <tr><td colspan="4" class="empty">還沒收到過任何身分資訊。</td></tr>
+  {{end}}
+  </tbody>
+  </table>
+	{{if $md.IdentityHints.Truncated}}<p class="small dim">identity hints 超過上限，只顯示前 {{$md.Disclosure.IdentityHintLimit}} 筆；衝突總數仍是 {{$md.IdentityHints.Total}}。</p>{{end}}
+	{{if $md.IdentityHints.Invalid}}<p class="small dim">另有 {{$md.IdentityHints.Invalid}} 筆 identity hint metadata 無效。</p>{{end}}
+
+  {{if not $md.Identity.Observed}}
+  <p class="empty">還沒收到 identity 觀測。</p>
+  {{else if not $md.Identity.Decoded}}
+  <p class="st amber">Identity 觀測無效。</p>
+  {{else}}
+  {{with $md.Identity.Value}}
+  <table style="margin-top:14px">
+  <tbody>
+    <tr><th style="width:190px">hostname</th><td class="mono">{{.Hostname.Text}}
+      {{if ne .Hostname.Text $m.DisplayName}}<span class="dim small">（顯示名稱：{{$m.DisplayName}}）</span>{{end}}
+    </td></tr>
+    <tr><th>作業系統</th><td class="mono">{{.OS.Text}} {{.Arch.Text}} · {{.Kernel.Text}}</td></tr>
+    <tr><th>執行身分</th><td class="mono">{{.UnixUser.Text}}</td></tr>
+    <tr><th>Tailscale</th><td class="mono">{{with .TailscaleIP}}{{.Text}}{{else}}—{{end}}</td></tr>
+  </tbody>
+  </table>
+  {{end}}
+  {{end}}
+</div>
+
+{{if $md.Resources.Observed}}
+<h2>資源</h2>
+<div class="panel">
+  {{if not $md.Resources.Decoded}}
+  <p class="st amber">收到 resources 觀測，但 payload 解不開。</p>
+  {{else if $md.Resources.Invalid}}
+  <p class="st amber">Resources 觀測無效。</p>
+  {{else}}
+  {{with $md.Resources.Value}}
+  <table><tbody>
+    <tr><th style="width:190px">磁碟</th><td>
+      已用 {{pct .DiskFreeBytes .DiskTotalBytes}}%
+      <span class="dim small">（剩 {{bytes .DiskFreeBytes}} / 共 {{bytes .DiskTotalBytes}}）</span>
+    </td></tr>
+    <tr><th>記憶體</th><td>
+      {{if .MemMeasured}}可用 {{bytes .MemAvailableBytes}} <span class="dim small">/ 共 {{bytes .MemTotalBytes}}</span>
+      {{else}}<span class="dim">未知</span>{{end}}
+    </td></tr>
+    <tr><th>負載</th><td>{{if .Load1m}}{{printf "%.2f" (deref .Load1m)}}{{else}}<span class="dim">未知</span>{{end}} <span class="dim small">/ {{.CPUCount}} 核</span></td></tr>
+  </tbody></table>
+  {{end}}
+  {{end}}
+</div>
+{{end}}
+
+{{$e := .MachineEvidence}}
+<h2 id="apps-and-credentials" class="section-anchor" tabindex="-1">OpenClaw</h2>
+<div class="panel">
+{{if not $e.OpenClaw.Observed}}
+  <p class="empty">還沒收到這台的 OpenClaw 觀測。</p>
+{{else if not $e.OpenClaw.Decoded}}
+  <p class="st amber">OpenClaw 觀測無效。</p>
+{{else}}
+  {{with $e.OpenClaw.ObservedAt}}
+  <p class="small dim" style="margin-top:0">measured_at（agent） {{.MeasuredAt.Local.Format "2006-01-02 15:04:05"}}；received_at（Hub） {{.ReceivedAt.Local.Format "2006-01-02 15:04:05"}}。</p>
+  {{end}}
+  <table><tbody>
+    <tr><th style="width:190px">是否存在</th><td>{{if $e.OpenClaw.Present}}是{{else}}否{{end}}</td></tr>
+    {{with $e.OpenClaw.Reason}}<tr><th>觀測說明</th><td class="small">{{.Text}}</td></tr>{{end}}
+    <tr><th style="width:190px">CLI 版本</th><td class="mono">{{with $e.OpenClaw.CLIVersion}}{{.Text}}{{else}}—{{end}}</td></tr>
+    <tr><th>gateway 版本</th><td class="mono">{{with $e.OpenClaw.GatewayVersion}}{{.Text}}{{else}}—{{end}}</td></tr>
+    <tr><th>upstream 版本</th><td class="mono">{{with $e.OpenClaw.UpstreamVersion}}{{.Text}}{{else}}—{{end}}</td></tr>
+  </tbody></table>
+  {{with $e.OpenClaw.CLIVersionRaw}}<p class="small dim">CLI 版本輸出</p><pre class="copy">{{.Text}}</pre>{{if .Truncated}}<p class="small dim">（已截斷）</p>{{end}}{{end}}
+
+  <h3 style="margin-top:18px">安裝與執行</h3>
+  {{with $e.OpenClaw.Install}}
+  <table><tbody>
+    <tr><th style="width:190px">unit 檔</th><td>
+      {{if .UnitFound}}已找到{{if .DropInCount}}；另有 {{.DropInCount}} 個 drop-in{{end}}
+      {{else}}<span class="dim">沒有找到{{with .UnitReason}}：{{.Text}}{{end}}</span>{{end}}
+    </td></tr>
+    <tr><th>KillMode</th><td class="mono">{{with .KillMode}}{{.Text}}{{else}}—{{end}}</td></tr>
+    <tr><th>重啟計數</th><td>{{with .NRestarts}}{{deref .}}{{else}}沒有量到{{end}}</td></tr>
+    <tr><th>node</th><td>
+      <span class="mono">{{with .NodeVersion}}{{.Text}}{{else}}讀不到版本{{end}}</span>
+      {{with .NodeVersionReason}}<div class="dim small">{{.Text}}</div>{{end}}
+    </td></tr>
+    <tr><th>npm</th><td>
+      {{if .NpmObserved}}已找到{{with .NpmVersion}}；版本 <span class="mono">{{.Text}}</span>{{end}}
+      {{else}}<span class="dim">讀不到</span>{{end}}
+      {{with .NpmReason}}<div class="dim small">{{.Text}}</div>{{end}}
+    </td></tr>
+    <tr><th>跑的目錄</th><td>
+      {{if .RunningDirectoryObserved}}已從 unit 解析{{if .RunningDirectoryExists}}；目錄存在；可寫：{{if .RunningDirectoryWritable}}{{if deref .RunningDirectoryWritable}}是{{else}}否{{end}}{{else}}不知道{{end}}；package.json 版本 {{with .RunningVersion}}{{.Text}}{{else}}不知道{{end}}{{end}}
+      {{else}}<span class="dim">讀不到</span>{{end}}
+      {{with .RunningDirectoryReason}}<div class="dim small">{{.Text}}</div>{{end}}
+    </td></tr>
+    <tr><th>跑著的 process</th><td>
+      {{if .ProcessObserved}}已觀測到{{if .ProcessMatchesUnit}}；與 unit 指向{{if deref .ProcessMatchesUnit}}同一份{{else}}不同份{{end}}{{end}}{{else}}<span class="dim">沒有可信的 process 座標</span>{{end}}
+      {{with .ProcessReason}}<div class="dim small">{{.Text}}</div>{{end}}
+    </td></tr>
+    <tr><th>release 版面</th><td>
+      {{if .ReleaseLayoutObserved}}{{if .ReleasesPresent}}已建立{{else}}尚未建立{{end}}；current link：{{if .CurrentReleaseLinked}}有{{else}}沒有{{end}}{{else}}沒有量到{{end}}
+    </td></tr>
+    <tr><th>release 磁碟剩餘</th><td>
+      {{if .DiskFreeMeasured}}{{bytes .DiskFreeBytes}}{{else}}<span class="dim">讀不到{{with .DiskFreeReason}}：{{.Text}}{{end}}</span>{{end}}
+    </td></tr>
+  </tbody></table>
+
+  {{if .RunningDirectoryWritable}}{{if not (deref .RunningDirectoryWritable)}}
+  <p class="st amber">Gateway 目錄不可寫</p>
+  {{end}}{{end}}
+  {{if .ProcessMatchesUnit}}{{if not (deref .ProcessMatchesUnit)}}
+  <p class="st amber">Unit 與 process 指向不同安裝</p>
+  {{end}}{{end}}
+  {{with .RunningVersion}}{{$runningVersion := .}}{{with $e.OpenClaw.CLIVersion}}{{if ne $runningVersion.Text .Text}}
+  <p class="st amber">CLI {{.Text}}；gateway {{$runningVersion.Text}}</p>
+  {{end}}{{end}}{{end}}
+  {{else}}
+  {{if $e.OpenClaw.InstallInvalid}}<p class="st amber">安裝資訊無效。</p>
+  {{else}}<p class="empty">尚無安裝資訊</p>{{end}}
+  {{end}}
+
+  {{with $e.OpenClaw.DB}}
+  <table style="margin-top:14px"><tbody>
+    <tr><th style="width:190px">狀態資料庫</th><td>
+      {{if .Present}}已找到
+        {{with .Layout}}<span class="dim small">（{{.Text}} 版面）</span>{{end}}
+        {{with .Reason}}<span class="st amber">；讀不到內容：{{.Text}}</span>{{end}}
+      {{else if eq .Support "unsupported"}}
+        <span class="st amber">不支援的資料庫版面</span>
+        <div class="dim small">找到 {{.UnknownLocationCount}} 個 SQLite 檔</div>
+      {{else}}<span class="dim">讀不到{{with .Reason}}：{{.Text}}{{end}}</span>{{end}}
+    </td></tr>
+    <tr><th>最近一次跑完</th><td>
+      {{if .LastTaskEndedAt}}{{ago (deref .LastTaskEndedAt)}}
+        <span class="dim small">（{{timeOrDash .LastTaskEndedAt}}）</span>
+      {{else}}{{with .Reason}}<span class="dim">沒有量到最近一次跑完的時間</span>{{else}}<span class="dim">這個資料庫裡沒有任何跑完的紀錄</span>{{end}}{{end}}
+    </td></tr>
+    <tr><th>排程工作</th><td>
+      {{if .CronJobsTotalMeasured}}
+        宣告了 {{.CronJobsTotal}} 個排程工作{{if .CronJobsEnabledMeasured}}（{{.CronJobsEnabled}} 個啟用）{{end}}
+      {{else}}
+        <span class="dim">讀不到這台宣告了幾個排程工作</span>
+      {{end}}
+      {{if .LastCronRunAt}}，上一次跑完是 {{ago (deref .LastCronRunAt)}}
+        <span class="dim small">（{{timeOrDash .LastCronRunAt}}）</span>
+      {{else}}，{{with .Reason}}<span class="dim">沒有量到排程工作跑完的時間</span>{{else}}<span class="dim">這個資料庫裡沒有排程工作跑完的紀錄</span>{{end}}{{end}}
+      {{if and .CronJobsTotalMeasured (eq .CronJobsTotal 0)}}
+        <div class="st amber" style="margin-top:6px"><b>排程工作 0</b></div>
+      {{end}}
+    </td></tr>
+    <tr><th>task_runs（7 日）</th><td>{{.TaskRunRows}}</td></tr>
+    <tr><th>狀態分佈</th><td class="mono small">
+      {{range .TaskStatuses.Items}}{{.Status.Text}}={{.Count}} {{else}}—{{end}}
+      {{if .TaskStatuses.Truncated}}<span class="dim">（已截斷）</span>{{end}}
+      {{if .TaskStatuses.Invalid}}<span class="dim">（另有 {{.TaskStatuses.Invalid}} 筆無效）</span>{{end}}
+    </td></tr>
+    <tr><th>cron_run_logs</th><td>{{.CronRunLogRows}} 列；<span class="mono small">
+      {{range .CronStatuses.Items}}{{.Status.Text}}={{.Count}} {{else}}沒有狀態分佈{{end}}
+      {{if .CronStatuses.Truncated}}<span class="dim">（已截斷）</span>{{end}}
+      {{if .CronStatuses.Invalid}}<span class="dim">（另有 {{.CronStatuses.Invalid}} 筆無效）</span>{{end}}
+    </span></td></tr>
+    <tr><th>下一次排程</th><td>
+      {{if .CronJobsScheduleMeasured}}
+        {{if .NextCronRunAt}}{{timeOrDash .NextCronRunAt}}{{else}}沒有下一次時間{{end}}；逾期 {{.CronJobsOverdue}} 個
+      {{else}}<span class="dim">沒有量到排程時間與逾期數</span>{{end}}
+    </td></tr>
+    <tr><th>terminal_outcome</th><td>
+      {{.TerminalOutcomePopulated}} 筆有值
+    </td></tr>
+    <tr><th>crash bundle</th><td>{{$e.OpenClaw.CrashBundles}}</td></tr>
+  </tbody></table>
+  {{else}}{{if $e.OpenClaw.DBInvalid}}<p class="st amber">資料庫資訊無效。</p>{{end}}
+  {{end}}
+{{end}}
+</div>
+
+<h2 id="summaries">最近的任務摘要</h2>
+<div class="panel">
+  {{with $e.RunSummaries.ObservedAt}}
+    <p class="small dim">本批轉送的 measured_at（agent） {{.MeasuredAt.Local.Format "2006-01-02 15:04:05"}}；received_at（Hub） {{.ReceivedAt.Local.Format "2006-01-02 15:04:05"}}。</p>
+  {{else}}
+    {{if $e.RunSummaries.Observed}}<p class="small dim">收到 OpenClaw 觀測，但沒有可顯示的轉送時鐘。</p>
+    {{else if $e.OpenClaw.Observed}}<p class="small dim">收到 OpenClaw 觀測，但沒有可讀的資料庫／摘要證據。</p>
+    {{else}}<p class="small dim">還沒收到這台的 OpenClaw 觀測。</p>{{end}}
+  {{end}}
+  {{range $e.RunSummaries.Items}}
+    <blockquote class="summary">
+      <span class="meta">{{if .ReportedAt}}{{.ReportedAt.Local.Format "01-02 15:04"}}{{else}}reported_at 未記錄{{end}} ·
+        {{.JobID.Text}}{{if .JobID.Truncated}}（已截斷）{{end}}{{if evidenceReplaced .JobID.Issues}}（含已替換字元）{{end}} ·
+        status={{.Status.Text}}{{if .Status.Truncated}}（已截斷）{{end}}{{if evidenceReplaced .Status.Issues}}（含已替換字元）{{end}}</span>
+      <div class="small dim">摘要{{if evidenceVerbatim .Summary}}（原文）{{end}}</div>
+      <pre class="copy">{{.Summary.Text}}</pre>
+      {{if .Summary.Truncated}}<p class="small dim">（已截斷至 {{jobEvidenceLimitLabel .Summary.MaxBytes}}；帳本原文 {{.Summary.Bytes}} bytes）</p>{{end}}
+      {{if evidenceReplaced .Summary.Issues}}<p class="small dim">（含已替換的控制／非法字元）</p>{{end}}
+    </blockquote>
+  {{else}}
+    {{if and $e.RunSummaries.Observed (not $e.RunSummaries.DBObserved)}}
+      <p class="empty">本次觀測沒有資料庫區段。</p>
+    {{else}}<p class="empty">沒有摘要可以看。</p>{{end}}
+  {{end}}
+  {{if $e.RunSummaries.Truncated}}<p class="small dim">摘要超過顯示上限；這裡保留 OpenClaw 的原始順序，只顯示前 {{$e.Disclosure.Limit}} 筆。</p>{{end}}
+</div>
+
+<h2>這台實際用掉了誰的額度</h2>
+<div class="panel">
+  {{with $e.Occupancy.ObservedAt}}
+    <p class="small dim">最近一批掃描的 measured_at（agent） {{.MeasuredAt.Local.Format "2006-01-02 15:04:05"}}；received_at（Hub） {{.ReceivedAt.Local.Format "2006-01-02 15:04:05"}}。</p>
+  {{end}}
+  {{if $e.Occupancy.Items}}
+  <table>
+  <thead><tr>
+    <th style="width:150px">供應商</th><th style="width:90px">跑完幾回合</th>
+    <th style="width:140px">最後一次</th><th>是誰在用</th>
+  </tr></thead>
+  <tbody>
+  {{range $e.Occupancy.Items}}
+    <tr>
+      <td><code>{{.Provider.Text}}</code>{{if .Provider.Truncated}}（已截斷）{{end}}{{if evidenceReplaced .Provider.Issues}}（含已替換字元）{{end}}
+        <div class="dim small">{{.Source.Text}}{{if .Source.Truncated}}（已截斷）{{end}}{{if evidenceReplaced .Source.Issues}}（含已替換字元）{{end}}</div></td>
+      <td>{{.Runs}}
+        {{if .Errors}}<div class="st amber small">其中 {{.Errors}} 回合有錯誤</div>{{end}}</td>
+      <td>{{ago .LastRunAt}}<div class="dim small">Hub 最後收到 {{ago .LastReceivedAt}}</div></td>
+      <td>{{range $i, $agent := .Agents}}{{if $i}}、{{end}}{{$agent.Text}}{{if $agent.Truncated}}（已截斷）{{end}}{{if evidenceReplaced $agent.Issues}}（含已替換字元）{{end}}{{else}}上游沒有記錄是哪個 agent{{end}}{{if .AgentsTruncated}} 等 {{.AgentsTotal}} 個{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+  </table>
+
+  {{if $e.Occupancy.ObservationInvalid}}<p class="small dim">占用統計格式無效。</p>
+  {{else if $e.Occupancy.RowsWithoutProvider}}<p class="small dim">{{$e.Occupancy.RowsSeen}} 個回合中，{{$e.Occupancy.RowsWithoutProvider}} 個未記錄供應商。</p>{{end}}
+  {{if $e.Occupancy.Truncated}}<p class="small dim">顯示前 {{$e.Disclosure.Limit}} 組 provider/source。</p>{{end}}
+  {{if $e.Occupancy.Invalid}}<p class="small dim">另有 {{$e.Occupancy.Invalid}} 組資料無效。</p>{{end}}
+  {{else}}
+    <p class="empty">尚無供應商占用紀錄。{{if and $e.Occupancy.Observed (not $e.Occupancy.DBObserved)}}本次觀測沒有資料庫區段。{{end}}</p>
+  {{end}}
+</div>
+
+<h2>登入憑證</h2>
+<div class="panel" style="padding:4px 6px">
+<table>
+<thead><tr>
+  <th style="width:110px">供應商</th><th style="width:190px">狀態</th>
+  <th style="width:170px">怎麼知道的</th>
+  <th style="width:150px">檔案裡的到期時間</th><th style="width:210px">自己續了幾次</th><th>備註</th>
+</tr></thead>
+<tbody>
+{{range $e.Credentials.Items}}
+  <tr>
+    <td>{{.Provider.Text}}{{if .Provider.Truncated}}（已截斷）{{end}}{{if evidenceReplaced .Provider.Issues}}（含已替換字元）{{end}}</td>
+    <td class="st {{credColor .}}">{{credLabel .Status}}</td>
+    <td class="small">
+      {{if .VerifiedAt}}<span class="st green">{{timeOrDash .VerifiedAt}} 驗過</span>
+      {{else}}<span class="st grey">從未驗證</span>{{end}}
+      <div class="dim">{{verifyLabel .VerificationMethod}}</div>
+    </td>
+    <td class="small dim">{{timeOrDash .ExpiresAt}}</td>
+    <td class="small dim">
+      {{if .FileMTime}}檔案 {{timeOrDash .FileMTime}} 寫的{{if .LifetimeSeconds}}，壽命 {{dur (secondsDur .LifetimeSeconds)}}{{end}}<br>
+        {{if .LastRefresh}}上游 last_refresh {{timeOrDash .LastRefresh}}<br>{{end}}
+        {{if .WatchedForSeconds}}看了 {{dur (secondsDur .WatchedForSeconds)}}，自己續了 <b>{{.RefreshesSeen}}</b> 次{{else}}才剛開始看{{end}}
+      {{else}}—<div class="dim">沒有檔案時間可比</div>{{end}}
+      {{if .Peers}}{{with index .Peers 0}}<div>同一家在 {{.DisplayName.Text}}{{if .DisplayName.Truncated}}（已截斷）{{end}}{{if evidenceReplaced .DisplayName.Issues}}（含已替換字元）{{end}} 續了 <b>{{.RefreshesSeen}}</b> 次</div>{{end}}{{end}}
+    </td>
+    <td class="small dim">
+      {{if .ActiveAccountSelected}}目前有選中的帳號（識別碼不揭露）{{if gt .AccountCount 1}}；共 {{.AccountCount}} 個，會被熱抽換{{end}}。{{end}}
+      {{with .Note}}{{.Text}}{{if .Truncated}}（已截斷）{{end}}{{if evidenceReplaced .Issues}}（含已替換字元）{{end}}{{end}}
+      {{with .LastError}}<div class="st amber mono" style="white-space:pre-wrap">{{.Text}}{{if .Truncated}}（已截斷）{{end}}{{if evidenceReplaced .Issues}}（含已替換字元）{{end}}</div>{{end}}
+      <div class="dim">measured_at（agent） {{.MeasuredAt.Local.Format "2006-01-02 15:04:05"}}；received_at（Hub） {{.ReceivedAt.Local.Format "2006-01-02 15:04:05"}}</div>
+    </td>
+  </tr>
+{{else}}
+  <tr><td colspan="6" class="empty">還沒收到憑證觀測。</td></tr>
+{{end}}
+</tbody>
+</table>
+{{if $e.Credentials.Truncated}}<p class="small dim">憑證超過顯示上限，只顯示前 {{$e.Disclosure.Limit}} 家。</p>{{end}}
+{{if $e.Credentials.Invalid}}<p class="small dim">{{$e.Credentials.Invalid}} 筆憑證觀測無效。</p>{{end}}
+</div>
+
+<h2>CLI 工具</h2>
+<div class="panel" style="padding:4px 6px">
+<table>
+<thead><tr><th style="width:110px">工具</th><th style="width:150px">版本</th><th>證據</th></tr></thead>
+<tbody>
+{{range $e.CLITools.Items}}
+  <tr>
+    <td>{{.Name.Text}}</td>
+    <td>
+      {{if not .Present}}<span class="dim">沒有安裝</span>
+      {{else if eq .PresentEvidence "process"}}<span class="st amber">在跑，但不在 PATH 上</span>
+      {{else if .SourcesDisagree}}<span class="st amber">來源互相矛盾</span>
+      {{else if eq .Support "unsupported"}}<span class="st amber">unsupported</span>
+      {{else if and (not .VersionReported) .VersionPackageJSON}}
+        <span class="st amber">檔案說 {{.VersionPackageJSON.Text}}，問它本人沒答</span>
+      {{else}}{{with .VersionReported}}<span class="mono">{{.Text}}</span>{{else}}<span class="mono">未知</span>{{end}}{{end}}
+    </td>
+    <td class="small dim">
+      {{if .SourcesDisagree}}
+        自報 <span class="mono">{{with .VersionReported}}{{.Text}}{{else}}—{{end}}</span>、
+        套件檔 <span class="mono">{{with .VersionPackageJSON}}{{.Text}}{{else}}—{{end}}</span>。
+      {{else if eq .Support "unsupported"}}
+        <span class="st amber"><span class="mono">--version</span> 格式不支援</span>：
+        <span class="mono">{{with .VersionRaw}}{{.Text}}{{else}}（空的）{{end}}</span>
+      {{else if eq .PresentEvidence "process"}}
+        <span class="st amber">process 存在；PATH 無此工具</span>
+      {{else if .OnPath}}PATH 已找到{{end}}
+      {{if eq .DaemonReach "shadowed"}}
+        <br><span class="st amber">登入 PATH 與 clawctl agent 指向不同檔案</span>
+      {{else if eq .DaemonReach "missing"}}
+        <br><span class="dim">clawctl agent PATH 無此工具</span>
+      {{end}}
+      {{if eq .PathSource "daemon"}}
+        <br><span class="dim">量測環境：clawctl agent{{with .PathReason}}；{{.Text}}{{end}}</span>
+      {{end}}
+      {{if eq .RunningRelationship "different"}}
+        <br><span class="st amber">PATH 與執行中的安裝不同</span>
+      {{end}}
+      {{if and .ProcessScan (ne .ProcessScan "complete") .RunningReason}}
+        <br><span class="dim">這台的 process 偵測沒有跑到底：{{.RunningReason.Text}}</span>
+      {{else if .RunningReason}}
+        <br><span class="dim">沒有偵測到在跑的 process：{{.RunningReason.Text}}</span>
+      {{end}}
+      {{with .VersionReason}}<br>{{.Text}}{{end}}
+      <div class="dim">measured_at（agent） {{.MeasuredAt.Local.Format "2006-01-02 15:04:05"}}；received_at（Hub） {{.ReceivedAt.Local.Format "2006-01-02 15:04:05"}}</div>
+    </td>
+  </tr>
+{{else}}
+  <tr><td colspan="3" class="empty">還沒收到工具觀測。</td></tr>
+{{end}}
+</tbody>
+</table>
+{{if $e.CLITools.Truncated}}<p class="small dim">工具超過顯示上限，只顯示前 {{$e.Disclosure.Limit}} 個。</p>{{end}}
+{{if $e.CLITools.Invalid}}<p class="small dim">{{$e.CLITools.Invalid}} 筆工具觀測無效。</p>{{end}}
+</div>
+
+<h2>它該做到什麼</h2>
+<div class="panel">
+{{if $md.Expectations.ReadFailed}}
+  <p class="small st amber">期望設定讀取失敗：<span class="mono">{{$md.Expectations.Error.Text}}</span></p>
+{{else if not $md.Expectations.Configured}}
+  <p class="empty">沒有產出規則。</p>
+{{else if not $md.Expectations.Rules.Total}}
+  <p class="empty">沒有套用到這台機器的產出規則。</p>
+{{else}}
+  <table>
+  <thead><tr>
+    <th style="width:200px">unit</th><th>應該讓這個檔案變新</th>
+    <th style="width:110px">上次更新</th><th style="width:90px">期望</th>
+  </tr></thead>
+  <tbody>
+  {{range $md.Expectations.Rules.Items}}
+    <tr>
+      <td class="mono small">{{.Unit.Text}}</td>
+      <td class="mono small">{{.Artifact.Text}}
+        <div class="dim" style="font-family:inherit">{{.Why.Text}}</div></td>
+      <td class="small">
+        {{$obs := .Observation}}
+        {{if not $obs.Observed}}<span class="dim">還沒量到</span>
+        {{else if $obs.Invalid}}<span class="st amber">量測不一致</span>
+        {{else if not $obs.Decoded}}<span class="st amber">量測解不開</span>
+        {{else if $obs.ReadFailed}}<span class="st amber">看不到</span>
+          {{with $obs.Error}}<div class="mono dim">{{.Text}}</div>{{end}}
+        {{else if not (deref $obs.Exists)}}<span class="st red">不存在</span>
+        {{else if $obs.ModifiedAt}}{{ago (deref $obs.ModifiedAt)}}
+        {{else}}<span class="dim">沒有時間</span>{{end}}
+      </td>
+      <td class="small dim">{{dur (secondsDur .MaxAgeSeconds)}} 內</td>
+    </tr>
+    {{with .Events}}
+    <tr>
+      <td></td>
+      <td colspan="3" class="small" style="border-top:0;padding-top:0">
+        <div style="border-left:2px solid #444;padding-left:10px">
+          <div class="dim">過去 {{dur (secondsDur .WindowSeconds)}}內，由 operator 宣告為「不 OK」的事件：
+            {{range .FailureTypes.Items}}<span class="mono">{{.Text}}</span> {{end}}
+            {{if .FailureTypes.Truncated}}（共 {{.FailureTypes.Total}} 種，只顯示前 {{$md.Disclosure.EventTypeLimit}} 種）{{end}}
+            {{if .FailureTypes.Invalid}}（另有 {{.FailureTypes.Invalid}} 個無效 enum）{{end}}
+          </div>
+          {{if not .Observed}}
+            <span class="dim">尚無事件流觀測。</span>
+          {{else if .Invalid}}
+            <span class="st amber">事件流量測無效。</span>
+          {{else if not .Decoded}}
+            <span class="st amber">事件流量測存在，但 payload 解不開。</span>
+          {{else if .ReadFailed}}
+            <span class="st amber">事件流讀不到</span> {{with .Error}}<span class="mono dim">{{.Text}}</span>{{end}}
+          {{else}}
+            <span class="dim">量到的宣告事件：</span>
+            {{range .Declared.Items}}
+              {{if .Count}}<span class="st red mono">{{.Type.Text}} ×{{.Count}}</span>
+              {{else}}<span class="mono dim">{{.Type.Text}} ×0</span>{{end}}
+              {{if .LastAt}}<span class="dim">（最後 {{ago (deref .LastAt)}}）</span>{{end}}
+            {{end}}
+            {{if .Declared.Truncated}}<span class="dim">（共 {{.Declared.Total}} 種，只顯示前 {{$md.Disclosure.EventTypeLimit}} 種）</span>{{end}}
+            {{if .Declared.Invalid}}<span style="color:var(--warning-text)">{{.Declared.Invalid}} 筆 count 無效。</span>{{end}}
+            {{if .Partial}}
+              <div style="color:var(--warning-text)">事件次數為下界{{if .CoveredFrom}}；涵蓋至 {{ago (deref .CoveredFrom)}}{{end}}。</div>
+            {{end}}
+            {{if .Undeclared.Total}}
+              <div class="dim" style="margin-top:4px">未宣告事件：
+                {{range .Undeclared.Items}}<span class="mono">{{.Type.Text}} ×{{.Count}}</span> {{end}}
+                {{if .Undeclared.Truncated}}<span>（<b>共 {{.Undeclared.Total}} 種</b>，只顯示前 {{$md.Disclosure.EventTypeLimit}} 種）</span>{{end}}
+                {{if .Undeclared.Invalid}}<span style="color:var(--warning-text)">{{.Undeclared.Invalid}} 筆 count 無效。</span>{{end}}
+              </div>
+            {{end}}
+            {{if .Malformed}}
+              <div style="color:var(--warning-text)"><b>{{.Malformed}}</b> 行無法解析。</div>
+            {{end}}
+          {{end}}
+        </div>
+      </td>
+    </tr>
+    {{end}}
+  {{end}}
+  </tbody>
+  </table>
+  {{if $md.Expectations.Rules.Truncated}}<p class="small dim">顯示 {{$md.Expectations.Rules.Total}} 條中的前 {{$md.Disclosure.ExpectationLimit}} 條規則。</p>{{end}}
+  {{if $md.Expectations.Rules.Invalid}}<p class="small dim">{{$md.Expectations.Rules.Invalid}} 條規則無效。</p>{{end}}
+{{end}}
+</div>
+
+<h2 id="jobs" class="section-anchor" tabindex="-1">工作單</h2>
+<div class="panel" style="padding:4px 6px">
+{{if .Jobs}}
+<table>
+<thead><tr><th>job</th><th>revision</th><th>狀態</th><th>建立</th><th>終態</th><th>digest</th></tr></thead>
+<tbody>
+{{range $job := .Jobs}}
+  <tr>
+    <td class="mono"><a href="/jobs/{{.JobID}}">{{short .JobID 8}}</a></td>
+    <td>{{.Revision}}</td>
+    <td><span class="{{jobStateClass .State}}">{{.State}}</span></td>
+    <td class="small dim">{{.CreatedAt.Local.Format "2006-01-02 15:04:05"}}</td>
+    <td class="small dim">{{timeOrDash .TerminalAt}}</td>
+    <td class="mono">{{with .ArtifactDigest}}{{short (deref .) 12}} <span class="dim">({{$job.ArtifactDigestStatus}})</span>{{else}}<span class="dim">{{$job.ArtifactDigestStatus}}</span>{{end}}</td>
+  </tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<p class="empty">這台還沒有任何工作單</p>
+{{end}}
+</div>
+
+<h2>systemd unit</h2>
+<div class="panel" style="padding:4px 6px">
+<table>
+<thead><tr>
+  <th style="width:230px">unit</th><th style="width:120px">狀態</th>
+  <th style="width:150px">最後一次進入 active</th><th>重啟次數</th>
+</tr></thead>
+<tbody>
+{{range $.MachineEvidence.SystemdUnits.Items}}
+  <tr>
+    <td class="mono">{{.Name.Text}}
+      {{if .Name.Truncated}}<span class="small dim">（已截斷）</span>{{end}}
+      {{if evidenceReplaced .Name.Issues}}<span class="small dim">（含已替換字元）</span>{{end}}
+      <div class="small dim" style="font-family:inherit">
+        measured_at（agent）{{.MeasuredAt.Local.Format "2006-01-02 15:04:05"}}；
+        received_at（Hub）{{.ReceivedAt.Local.Format "2006-01-02 15:04:05"}}
+      </div>
+    </td>
+    <td>{{if .Present}}{{.ActiveState.Text}}/{{.SubState.Text}}{{else if .Measured}}<span class="dim">沒有這個 unit</span>{{else}}<span class="dim">沒有量到這個 unit{{with .Reason}}：{{.Text}}{{end}}</span>{{end}}
+      {{if or (evidenceReplaced .ActiveState.Issues) (evidenceReplaced .SubState.Issues)}}<span class="small dim">（含已替換字元）</span>{{end}}
+      {{with .Reason}}{{if evidenceReplaced .Issues}}<span class="small dim">（原因含已替換字元）</span>{{end}}{{end}}
+    </td>
+    <td class="small dim">{{if .ActiveEnterTimestamp}}{{ago (deref .ActiveEnterTimestamp)}}{{else}}—{{end}}</td>
+    <td class="small dim">{{.NRestarts}}</td>
+  </tr>
+  {{$j := index $.MachineJournals .Name.Text}}
+  {{if $j.Unit.Text}}
+  <tr>
+    <td colspan="4" style="padding:2px 8px 10px 8px;border-top:0">
+      {{if $j.ReadFailed}}
+        <span class="small" style="color:var(--warning-text)">Journal 讀取失敗：</span>
+        <pre class="copy">{{$j.Err.Text}}</pre>
+        {{if $j.Err.Truncated}}<span class="small dim">（已截斷至 {{jobEvidenceLimitLabel $j.Err.MaxBytes}}；帳本原文 {{$j.Err.Bytes}} bytes）</span>{{end}}
+        {{if evidenceReplaced $j.Err.Issues}}<span class="small dim">（含已替換的控制／非法字元）</span>{{end}}
+      {{else if eq $j.Lines 0}}
+        <span class="small dim">最近一小時 0 行。</span>
+      {{else}}
+        <div class="small dim" style="margin-bottom:3px">
+          最近一小時說了 {{if $j.LinesAreLowerBound}}至少 {{end}}<b>{{$j.Lines}}</b> 行，
+          收斂成 <b>{{$j.Shapes}}</b> 種句型{{if $j.LinesAreLowerBound}}
+          <span style="color:var(--warning-text)">（撞到 {{$j.Lines}} 行的讀取上限，實際更多）</span>{{end}}：
+        </div>
+        {{range $j.Top}}
+          <div class="small mono" style="padding:1px 0 1px 10px;border-left:2px solid #333">
+            <span class="dim">×{{.Count}}</span>
+            <pre class="copy">{{.Example.Text}}</pre>
+            {{if .Example.Truncated}}<span class="small dim">（已截斷至 {{jobEvidenceLimitLabel .Example.MaxBytes}}；帳本原文 {{.Example.Bytes}} bytes）</span>{{end}}
+            {{if evidenceReplaced .Example.Issues}}<span class="small dim">（含已替換的控制／非法字元）</span>{{end}}
+          </div>
+        {{end}}
+        {{if $j.TopTruncated}}<div class="small dim">句型超過顯示上限；只顯示前 {{$.MachineEvidence.Disclosure.MaxShapes}} 種。</div>{{end}}
+      {{end}}
+    </td>
+  </tr>
+  {{end}}
+{{else}}
+  <tr><td colspan="4" class="empty">還沒收到 unit 觀測。</td></tr>
+{{end}}
+</tbody>
+</table>
+{{with .MachineEvidence}}
+  {{if .SystemdUnits.Invalid}}<p class="small" style="color:var(--warning-text)">{{.SystemdUnits.Invalid}} 筆 systemd 觀測無效。</p>{{end}}
+  {{if .SystemdUnits.Truncated}}<p class="small dim">systemd unit 超過顯示上限；共 {{.SystemdUnits.Total}} 個可解析 unit。</p>{{end}}
+  {{if .Journals.Undecodable}}<p class="small" style="color:var(--warning-text)">{{.Journals.Undecodable}} 筆 journal 觀測無法解析。</p>{{end}}
+  {{if .Journals.UnitsWithoutJournal}}
+    <p class="small dim">本輪未收集 journal：
+      {{range .Journals.UnitsWithoutJournal}}<code>{{.Text}}</code>{{if .Truncated}}（已截斷）{{end}}{{if evidenceReplaced .Issues}}（含已替換字元）{{end}} {{end}}
+    </p>
+  {{end}}
+  {{if .Journals.UnitsWithoutJournalTruncated}}<p class="small dim">未收集 journal 的 unit 超過顯示上限；共 {{.Journals.UnitsWithoutJournalTotal}} 個。</p>{{end}}
+  {{if .Journals.Truncated}}<p class="small dim">journal evidence 超過顯示上限；共 {{.Journals.Total}} 個可解析 unit。</p>{{end}}
+{{end}}
+</div>
+
+<h2>狀態歷史</h2>
+<div class="panel" style="padding:4px 6px">
+<table>
+<thead><tr><th style="width:120px">狀態</th><th style="width:170px">進入時間</th><th style="width:120px">持續</th><th>當時的理由</th></tr></thead>
+<tbody>
+{{range $md.StateHistory.Items}}
+  <tr>
+    <td class="st {{color .State}}">{{label .State}}</td>
+    <td class="small dim">{{.EnteredAt.Local.Format "2006-01-02 15:04"}}</td>
+    <td class="small dim">{{if .LeftAt}}{{dur (sub (deref .LeftAt) .EnteredAt)}}{{else}}至今{{end}}</td>
+    <td class="small dim">{{.Reason.Text}}</td>
+  </tr>
+{{else}}
+  <tr><td colspan="4" class="empty">還沒有任何狀態轉移。</td></tr>
+{{end}}
+</tbody>
+</table>
+{{if $md.StateHistory.Truncated}}<p class="small dim">顯示最近 {{$md.Disclosure.StateHistoryLimit}} 段狀態歷史。</p>{{end}}
+{{if $md.StateHistory.Invalid}}<p class="small dim">{{$md.StateHistory.Invalid}} 段狀態歷史無效。</p>{{end}}
+</div>
+
+{{with .MachineActions}}
+<h2 id="actions" class="section-anchor" tabindex="-1">動作</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>動作</th><th>狀態</th><th>做了會怎樣</th></tr></thead>
+<tbody>
+{{range .Rows}}
+<tr>
+  <td>{{if .Available}}<a href="#{{.Anchor}}">{{.Label}}</a>{{else}}{{.Label}}{{end}}</td>
+  <td>{{if .Available}}<span class="st green">可用</span>{{else}}<span class="st amber">被擋</span>{{end}}</td>
+  <td class="small">{{.Effect}}{{if not .Available}}<div class="sub">{{.Situation}}{{if .NextStep}} {{.NextStep}}{{end}}</div>{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">現在可用 <strong>{{.Catalogue.Available}}</strong> 項，被擋 <strong>{{.Catalogue.Blocked}}</strong> 項。狀態會隨機器改變，重新整理就是最新的。</p>
+{{end}}
+
+<h2 id="action-rename" class="section-anchor" tabindex="-1">重新命名</h2>
+<div class="panel">
+  <p class="small dim" style="margin-top:0">改 Hub 名冊名稱與名稱型 expectations；machine ID、agent 與機器上的 hostname 都不變。</p>
+  {{if $.Access.CanAdmin}}<form class="action-form" method="post" action="/machines/{{$m.MachineID}}/display-name-preview">
+    <label><span class="field-label">新的顯示名稱</span>
+      <input type="text" name="display_name" maxlength="256" autocomplete="off" required aria-required="true">
+    </label>
+    <label><span class="field-label">重新命名理由（必填）</span>
+      <input type="text" name="reason" maxlength="500" autocomplete="off" required aria-required="true">
+    </label>
+    <button type="submit" style="padding:6px 14px">預覽重新命名</button>
+  </form>{{end}}
+</div>
+
+<h2 id="action-notes" class="section-anchor" tabindex="-1">名冊備註</h2>
+<div class="panel">
+  <p class="small dim" style="margin-top:0">更新 Hub 名冊中的人工備註；機器設定與 agent 不變。留空可在預覽後清除現有備註。</p>
+  {{if $.Access.CanAdmin}}<form class="action-form" method="post" action="/machines/{{$m.MachineID}}/notes-preview">
+    <label><span class="field-label">新的名冊備註</span>
+      <input type="text" name="notes" maxlength="1000" autocomplete="off">
+    </label>
+    <label><span class="field-label">更新理由（必填）</span>
+      <input type="text" name="reason" maxlength="500" autocomplete="off" required aria-required="true">
+    </label>
+    <button type="submit" style="padding:6px 14px">預覽備註變更</button>
+  </form>{{end}}
+</div>
+
+<h2 id="action-channel" class="section-anchor" tabindex="-1">部署通道</h2>
+<div class="panel">
+{{if $m.RetiredAt}}
+  <p style="margin:0"><span class="st amber">唯讀</span> 已退役；恢復管理後可變更 channel。</p>
+{{else}}
+  <p class="small dim" style="margin-top:0">變更通道需確認機器名稱。</p>
+  {{if $.Access.CanAdmin}}<form class="action-form" method="post" action="/machines/{{$m.MachineID}}/channel">
+    <input type="hidden" name="expected_revision" value="{{$m.ChannelRevision}}">
+    <input type="hidden" name="idempotency_key" value="{{.ChannelIdempotencyKey}}">
+    <label><span class="field-label">部署通道</span>
+      <select name="channel" style="padding:6px" required aria-required="true">
+        <option value="canary" {{if eq $m.Channel "canary"}}selected{{end}}>canary</option>
+        <option value="stable" {{if eq $m.Channel "stable"}}selected{{end}}>stable</option>
+        <option value="none" {{if not $m.Channel}}selected{{end}}>none</option>
+      </select>
+    </label>
+    <label><span class="field-label">確認機器名稱</span>
+      <input type="text" name="confirm" placeholder="輸入 {{$m.DisplayName}}"
+             style="width:100%;padding:6px" autocomplete="off" required aria-required="true">
+    </label>
+    <button type="submit" style="padding:6px 14px">指派 channel</button>
+  </form>{{end}}
+{{end}}
+</div>
+
+<h2 id="action-connect" class="section-anchor" tabindex="-1">連到這台的 BAT</h2>
+<div class="panel">
+{{with $c}}
+{{if .Available}}
+  <p style="margin-top:0">BAT 位址</p>
+  <pre class="copy">{{.URL.Text}}</pre>
+  {{with .BAT.Value}}
+  <p class="small dim">
+    port={{.Port}}{{if .Bind}} · bind={{.Bind.Text}}{{end}}{{if .ListenAddrs.Items}} · listeners {{range $i, $a := .ListenAddrs.Items}}{{if $i}}、{{end}}<span class="mono">{{$a.Text}}</span>{{end}}{{end}}{{with $c.BAT.ObservedAt}} · agent {{ago .MeasuredAt}} / Hub {{ago .ReceivedAt}}{{end}}
+  </p>
+  {{end}}
+{{else}}
+  <p class="empty" style="margin-top:0">BAT 連線位址不可用。</p>
+  <p><b>{{.Why.Text}}</b></p>
+  {{if .Why.Truncated}}<p class="small dim">原因已截斷。</p>{{end}}
+  {{with .BAT.Value}}{{if .Running}}
+  <p class="small dim">
+    bat-server 確實在跑{{if .Argv}}，命令列原文：<br><span class="mono">{{.Argv.Text}}</span>{{end}}
+    {{if .ListenAddrs.Items}}<br>核心的 socket 表上，{{range $i, $a := .ListenAddrs.Items}}{{if $i}}、{{end}}<span class="mono">{{$a.Text}}</span>{{end}} 在聽 {{.Port}}。{{end}}
+  </p>
+  {{if .ListenAddrs.Truncated}}<p class="small dim">顯示前 {{$c.Disclosure.ListenerLimit}} 個 listener。</p>{{end}}
+  {{if .ListenAddrs.Invalid}}<p class="small dim">{{.ListenAddrs.Invalid}} 個 listener address 無效。</p>{{end}}
+  {{end}}{{end}}
+  {{with .BAT.ObservedAt}}<p class="small dim">BAT evidence clocks：agent {{ago .MeasuredAt}}量到，Hub {{ago .ReceivedAt}}收到。</p>{{end}}
+  {{if .BAT.Invalid}}<p class="small dim">BAT 連線座標無效。</p>{{end}}
+  {{if .Identity.Invalid}}<p class="small dim">連線位址無效。</p>{{end}}
+{{end}}
+{{if .RegistryIP}}
+  <p class="small">Enrollment IP <span class="mono">{{.RegistryIP.Text}}</span>；最新 Tailnet IP 已變更。</p>
+{{end}}
+{{if .RegistryIPInvalid}}<p class="small dim">Enrollment IP 無效。</p>{{end}}
+{{end}}
+{{if and $c.Available $.Access.CanOperate}}
+  <form class="action-form" method="post" action="/machines/{{$m.MachineID}}/connect">
+    <label><span class="sr-only">連線理由（選填）</span>
+      <input type="text" name="reason" placeholder="為什麼要連過去（可以不填）"
+             autocomplete="off">
+    </label>
+    <button type="submit" style="padding:6px 14px">留紀錄並連過去</button>
+  </form>
+{{end}}
+</div>
+
+<h2 id="action-diagnostic" class="section-anchor" tabindex="-1">診斷</h2>
+<div class="panel">
+  <p class="small dim" style="margin-top:0">開一張不改任何設定的工作單，走完整條派工與回報路徑。</p>
+  {{if $.Access.CanOperate}}<form class="action-form" method="post" action="/machines/{{$m.MachineID}}/diagnostic-noop-preview">
+    <label><span class="field-label">逾時（秒）</span>
+      <input type="number" name="timeout" min="1" max="3600" value="600" required aria-required="true"></label>
+    <label><span class="field-label">診斷理由（必填）</span>
+      <input type="text" name="reason" placeholder="為什麼要做這次驗證"
+             style="width:100%;padding:6px" autocomplete="off" required aria-required="true"></label>
+    <button type="submit" style="padding:6px 14px">預覽診斷工作單</button>
+  </form>{{end}}
+</div>
+
+<h2 id="action-enrollment" class="section-anchor" tabindex="-1">名冊</h2>
+{{if .PendingEnrollment}}
+<div class="panel">
+  {{with .PendingEnrollment}}
+  {{if .TokenExpired}}
+  <p style="margin-top:0"><span class="st amber">開過票，但它過期了</span>
+     —— {{.TokenExpiresAt.Local.Format "2006-01-02 15:04"}} 過期，機器一直沒來報到。</p>
+  <p class="small dim">若仍要納管：撤銷舊票、退役此名冊列，再重新註冊；否則退役。</p>
+  {{else}}
+  <p style="margin-top:0"><span class="st amber">開了票，還沒報到</span>
+     —— 這張票 {{.TokenExpiresAt.Local.Format "2006-01-02 15:04"}} 過期。</p>
+  {{end}}
+  {{end}}
+  {{if $.Access.CanAdmin}}<form class="action-form" method="post" action="/machines/{{$m.MachineID}}/revoke-token/preview">
+    <label><span class="field-label">撤銷理由（選填）</span>
+      <input type="text" name="reason" placeholder="為什麼撤銷"
+             autocomplete="off">
+    </label>
+    <button type="submit" style="padding:6px 14px">預覽撤銷 pending enrollment ticket</button>
+  </form>{{end}}
+  <p class="small dim" style="margin-bottom:0">
+    撤銷會使 pending ticket 失效；名冊與 agent credential 不變。
+  </p>
+</div>
+{{end}}
+<h2 id="action-lifecycle" class="section-anchor" tabindex="-1">生命週期</h2>
+<div class="panel">
+{{if $m.RetiredAt}}
+  <p style="margin-top:0"><b>這台已經退場</b>（{{$m.RetiredAt.Local.Format "2006-01-02 15:04"}}）。</p>
+  <p class="small dim">歷史與存取材料保留；恢復後可重新生效。</p>
+  {{if $.Access.CanAdmin}}<form class="action-form" method="post" action="/machines/{{$m.MachineID}}/lifecycle-preview">
+    <input type="hidden" name="desired_state" value="active">
+    <input type="hidden" name="expected_revision" value="{{$m.LifecycleRevision}}">
+    <label><span class="field-label">恢復管理理由（必填）</span>
+      <input type="text" name="reason" placeholder="為什麼放回來"
+             autocomplete="off" required aria-required="true">
+    </label>
+    <button type="submit" style="padding:6px 14px">預覽恢復管理</button>
+  </form>{{end}}
+{{else}}
+  <p style="margin-top:0" class="small dim">退役影響：離開分母；agent 驗證拒絕；bearer、歷史、channel 與名冊列保留。</p>
+  <p class="small dim">退役前會顯示影響並要求確認機器名稱。</p>
+  {{if $.Access.CanAdmin}}<form class="action-form" method="post" action="/machines/{{$m.MachineID}}/lifecycle-preview">
+    <input type="hidden" name="desired_state" value="retired">
+    <input type="hidden" name="expected_revision" value="{{$m.LifecycleRevision}}">
+    <label><span class="field-label">退役理由（必填）</span>
+      <input type="text" name="reason" placeholder="為什麼要退役"
+             style="width:100%;padding:6px" autocomplete="off" required aria-required="true">
+    </label>
+    <button type="submit" style="padding:6px 14px">預覽退役</button>
+  </form>{{end}}
+{{end}}
+  <p class="small dim" style="margin-bottom:0">
+    <a href="/audit?machine_id={{$m.MachineID}}">看這台的動作紀錄 →</a>
+  </p>
+</div>
+
+{{template "foot" .}}{{end}}

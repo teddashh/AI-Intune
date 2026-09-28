@@ -1,0 +1,44 @@
+{{define "reports.html"}}{{template "head" .}}
+{{$p := .Reports}}
+
+<div class="page-heading">
+  <div>
+    <h1>報告</h1>
+    <p>每一份報告算的是什麼、看得回去多遠、能不能把列帶走。</p>
+  </div>
+</div>
+
+<section class="metric-grid" aria-label="報告摘要">
+  <article class="metric-card">
+    <div class="metric-label">報告</div>
+    <div class="metric-value">{{$p.Index.Total}}</div>
+    <div class="metric-note">這個 Hub 現在做得出來的</div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">整份匯得出來</div>
+    <div class="metric-value">{{$p.Index.Exportable}}</div>
+    <div class="metric-note">其餘的一次讀一頁</div>
+  </article>
+</section>
+
+<h2 id="reports" class="section-anchor" tabindex="-1">報告清單</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>報告</th><th>回答什麼</th><th>範圍</th><th>看得到多遠</th><th>匯出</th></tr></thead>
+<tbody>
+{{range $p.Index.Entries}}
+<tr>
+  <td><a href="{{.Path}}">{{.Title}}</a><div class="sub small">{{.ScopeSentence}}</div></td>
+  <td class="small">{{.Question}}<div class="sub">{{.Evidence}}</div></td>
+  <td class="small">{{.RangeSentence}}</td>
+  <td class="small">{{.HorizonSentence}}</td>
+  <td class="small">{{if .ExportPath}}<a href="{{.ExportPath}}">CSV</a><div class="sub">{{.ExportSentence}}</div>{{else}}{{.ExportSentence}}{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+<p class="small dim">匯出檔的欄位、時間寫法與試算表防護在每一份報告之間是同一套。</p>
+
+{{template "foot" .}}{{end}}

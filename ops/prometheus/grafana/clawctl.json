@@ -1,0 +1,373 @@
+{
+ "uid": "clawctl-fleet",
+ "title": "clawctl 機隊",
+ "tags": [
+  "clawctl"
+ ],
+ "timezone": "browser",
+ "schemaVersion": 39,
+ "version": 1,
+ "refresh": "1m",
+ "time": {
+  "from": "now-6h",
+  "to": "now"
+ },
+ "panels": [
+  {
+   "type": "text",
+   "title": "這一頁在回答什麼",
+   "gridPos": {
+    "h": 5,
+    "w": 24,
+    "x": 0,
+    "y": 0
+   },
+   "options": {
+    "mode": "markdown",
+    "content": "**作業系統的事實**（node_exporter）跟 **AI agent 的事實**（clawctl）第一次在同一條時間軸上。\n\n⚠ 最底下那張圖是這整件事的理由：以前這兩組數字在兩個平行宇宙，「sampleagent2 開始 `baseline_hash_mismatch` 的那一刻，記憶體/負載發生了什麼」問不出來。\n\n⚠⚠ **空的面板第一個要懷疑的是有沒有問對地方**，不是「機隊很安靜」。`up == 0` 不代表機器死了 —— sampleagent1 就是活的（tailscale direct handshake、TCP/22 通、每 30 分鐘一次 heartbeat），它只是刻意沒裝 agent。"
+   }
+  },
+  {
+   "type": "stat",
+   "title": "名冊（分母）",
+   "gridPos": {
+    "h": 5,
+    "w": 6,
+    "x": 0,
+    "y": 5
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "clawctl-prom"
+   },
+   "targets": [
+    {
+     "expr": "clawctl_machines_total",
+     "legendFormat": "名冊上",
+     "refId": "A"
+    },
+    {
+     "expr": "count(up{job=\"node\"} == 1)",
+     "legendFormat": "抓得到",
+     "refId": "B"
+    },
+    {
+     "expr": "count(clawctl_machine_last_checkin_age_seconds)",
+     "legendFormat": "agent 有回報",
+     "refId": "C"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "textMode": "value_and_name"
+   }
+  },
+  {
+   "type": "table",
+   "title": "每一台現在的狀態",
+   "gridPos": {
+    "h": 5,
+    "w": 18,
+    "x": 6,
+    "y": 5
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "clawctl-prom"
+   },
+   "targets": [
+    {
+     "expr": "clawctl_machine_state",
+     "format": "table",
+     "instant": true,
+     "refId": "A"
+    }
+   ],
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time": true,
+       "Value": true,
+       "__name__": true,
+       "instance": true,
+       "job": true,
+       "machine_id": true
+      }
+     }
+    }
+   ]
+  },
+  {
+   "type": "bargauge",
+   "title": "憑證還剩多久（負值＝已經過期）",
+   "description": "這一格是 osquery / node_exporter 看不到的東西：機器連得上、agent 在回報，它只是做不了事。",
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 10
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "clawctl-prom"
+   },
+   "targets": [
+    {
+     "expr": "clawctl_credential_expiry_seconds",
+     "legendFormat": "{{machine}} / {{provider}}",
+     "instant": true,
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0
+       },
+       {
+        "color": "green",
+        "value": 21600
+       }
+      ]
+     }
+    }
+   },
+   "options": {
+    "displayMode": "gradient",
+    "orientation": "horizontal"
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "宣告的事件（not_ok）在窗口內出現幾次",
+   "description": "⚠ 0 也會畫出來。一條消失的線跟一條壓在 0 的線意思完全不同 —— 前者代表這條規則沒在看。",
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 10
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "clawctl-prom"
+   },
+   "targets": [
+    {
+     "expr": "clawctl_event_count",
+     "legendFormat": "{{machine}} / {{event}}",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 2,
+      "fillOpacity": 8
+     }
+    }
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "產出物年齡 vs 人宣告的門檻",
+   "description": "門檻是 expectations.json 裡宣告的 max_age_seconds，跟事實一起被吐出來 —— 所以這張圖不用為每台機器各畫一條。",
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 18
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "clawctl-prom"
+   },
+   "targets": [
+    {
+     "expr": "clawctl_artifact_age_seconds",
+     "legendFormat": "{{machine}} 年齡",
+     "refId": "A"
+    },
+    {
+     "expr": "clawctl_artifact_max_age_seconds",
+     "legendFormat": "{{machine}} 門檻",
+     "refId": "B"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 2
+     }
+    }
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "agent 心跳年齡",
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 18
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "clawctl-prom"
+   },
+   "targets": [
+    {
+     "expr": "clawctl_machine_last_checkin_age_seconds",
+     "legendFormat": "{{machine}}",
+     "refId": "A"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s"
+    }
+   }
+  },
+  {
+   "type": "timeseries",
+   "title": "⭐ 兩個世界疊在一起：sampleagent2 的事件流 vs 它的作業系統",
+   "description": "這張圖是整個 Prometheus 遷移的理由。左邊是 clawctl 量的 AI agent 事實，右邊是 node_exporter 量的作業系統事實。以前這兩組數字在兩個平行宇宙，問不出「它為什麼開始失敗」。",
+   "gridPos": {
+    "h": 10,
+    "w": 24,
+    "x": 0,
+    "y": 26
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "clawctl-prom"
+   },
+   "targets": [
+    {
+     "expr": "clawctl_event_count{machine=\"sampleagent2\", event=\"baseline_hash_mismatch\"}",
+     "legendFormat": "baseline_hash_mismatch（clawctl）",
+     "refId": "A"
+    },
+    {
+     "expr": "node_load1{machine=\"sampleagent2\"}",
+     "legendFormat": "load1（node_exporter）",
+     "refId": "B"
+    },
+    {
+     "expr": "100 - (node_memory_MemAvailable_bytes{machine=\"sampleagent2\"} / node_memory_MemTotal_bytes{machine=\"sampleagent2\"} * 100)",
+     "legendFormat": "記憶體用量 %（node_exporter）",
+     "refId": "C"
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "line",
+      "lineWidth": 2,
+      "fillOpacity": 5
+     }
+    }
+   }
+  },
+  {
+   "type": "table",
+   "title": "Agent 版本",
+   "description": "各機器最近回報的 Agent 版本。列數需與名冊一致；部署驗證：./ops/ansible/verify.sh",
+   "gridPos": {
+    "h": 6,
+    "w": 12,
+    "x": 0,
+    "y": 36
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "clawctl-prom"
+   },
+   "targets": [
+    {
+     "expr": "clawctl_agent_info",
+     "legendFormat": "{{machine}}",
+     "refId": "A",
+     "format": "table",
+     "instant": true
+    }
+   ],
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time": true,
+       "__name__": true,
+       "instance": true,
+       "job": true,
+       "machine_id": true,
+       "Value": true
+      },
+      "renameByName": {
+       "machine": "機器",
+       "version": "版本"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "type": "stat",
+   "title": "機隊在幾個版本上",
+   "description": "1 = 全機隊同一版。>1 = 有機器沒推到，或推到一半。\n\n⚠ 這個數字**看不到「不在表上」的機器** —— 一台從沒報到過的機器不會有版本，於是它不會讓這個數字變大。它會安靜地不存在。所以這一格永遠要跟左邊那張表的列數、跟名冊分母一起看。\n「一個空的、乾淨的、沒有壞消息的答案，第一個要懷疑的是你有沒有問對地方。」",
+   "gridPos": {
+    "h": 6,
+    "w": 12,
+    "x": 12,
+    "y": 36
+   },
+   "datasource": {
+    "type": "prometheus",
+    "uid": "clawctl-prom"
+   },
+   "targets": [
+    {
+     "expr": "count(count by (version) (clawctl_agent_info))",
+     "legendFormat": "不同版本數",
+     "refId": "A"
+    },
+    {
+     "expr": "count(clawctl_agent_info)",
+     "legendFormat": "有回報版本的機器",
+     "refId": "B"
+    },
+    {
+     "expr": "clawctl_machines_total",
+     "legendFormat": "名冊上（差額＝沒有版本的）",
+     "refId": "C"
+    }
+   ],
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    },
+    "textMode": "value_and_name"
+   }
+  }
+ ]
+}

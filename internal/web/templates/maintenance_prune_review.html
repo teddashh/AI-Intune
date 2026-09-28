@@ -1,0 +1,31 @@
+{{define "maintenance_prune_review.html"}}{{template "head" .}}
+{{$p := .RetentionPrunePreview}}
+<div class="page-heading"><div><h1>確認永久清理</h1><p>預覽固定於 {{$p.EvaluatedAt.Local.Format "2006-01-02 15:04:05"}}。</p></div></div>
+<div class="caveat"><b>這個動作無法復原。</b> 套用後會永久刪除 {{$p.TotalDeleted}} 列；如清理範圍或 revision 已變更，系統會拒絕這次確認。</div>
+<div class="panel">
+  <div class="metric-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+    <div class="metric-card"><div class="metric-label">將永久刪除</div><div class="metric-value">{{$p.TotalDeleted}}</div><div class="metric-note">四張保留政策資料表</div></div>
+    <div class="metric-card"><div class="metric-label">保護的最新證據</div><div class="metric-value">{{$p.KeptNewest}}</div><div class="metric-note">不因超過期限而刪除</div></div>
+    <div class="metric-card"><div class="metric-label">Expected revision</div><div class="metric-value">{{$p.ExpectedRevision}}</div><div class="metric-note">套用前必須仍一致</div></div>
+  </div>
+  <table><thead><tr><th>資料類別</th><th>刪除界線之前</th><th>將刪除</th><th>保護最新</th></tr></thead><tbody>
+  {{range $p.Counts}}<tr>
+    <td>{{if eq .Table "observed_state"}}觀測資料{{else if eq .Table "machine_checkins"}}機器心跳{{else if eq .Table "ticket_occupancy_observation"}}票的占用帳{{else if eq .Table "canary_silent_failures"}}Canary silent failures{{else}}{{.Table}}{{end}}<span class="small dim mono" style="display:block">{{.Table}}</span></td>
+    <td>{{.Older.Local.Format "2006-01-02 15:04:05"}}</td><td><b>{{.Deleted}}</b></td><td>{{.Kept}}</td>
+  </tr>{{end}}
+  </tbody></table>
+  <p><b>理由：</b>{{.RetentionPruneReason}}</p>
+  <form method="post" action="/tenant/maintenance/retention/prunes" style="margin-top:18px">
+    <input type="hidden" name="evaluated_at" value="{{$p.EvaluatedAt.Format "2006-01-02T15:04:05Z07:00"}}">
+    <input type="hidden" name="observations_seconds" value="{{$p.Policy.ObservationsSeconds}}">
+    <input type="hidden" name="checkins_seconds" value="{{$p.Policy.CheckinsSeconds}}">
+    <input type="hidden" name="occupancy_seconds" value="{{$p.Policy.OccupancySeconds}}">
+    <input type="hidden" name="expected_revision" value="{{$p.ExpectedRevision}}">
+    <input type="hidden" name="preview_digest" value="{{$p.PreviewDigest}}">
+    <input type="hidden" name="reason" value="{{.RetentionPruneReason}}">
+    <input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+    <label><span class="field-label">輸入 <span class="mono">{{$p.Confirmation}}</span> 確認</span><input name="confirm" required autocomplete="off" spellcheck="false"></label>
+    <div class="command-bar" style="margin-top:14px"><button type="submit">永久刪除 {{$p.TotalDeleted}} 列</button><a class="button secondary" href="/tenant/maintenance">取消</a></div>
+  </form>
+</div>
+{{template "foot" .}}{{end}}

@@ -1,0 +1,25 @@
+[Unit]
+Description=AI-Intune managed Hermes Agent
+Documentation=https://github.com/teddashh/AI-Intune
+After=network-online.target
+Wants=network-online.target
+Conflicts=openclaw-gateway.service
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/clawctl/hermes.env
+ExecStartPre=-/usr/bin/podman rm --force --ignore clawctl-hermes
+ExecStart=/usr/bin/podman run --name clawctl-hermes --replace --rm --pull=never --log-driver=journald --shm-size=1g --publish=127.0.0.1:8642:8642 --volume=%h/.local/share/clawctl/hermes/data:/opt/data:Z ${HERMES_IMAGE} gateway run
+ExecStop=/usr/bin/podman stop --ignore --time=30 clawctl-hermes
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+KillMode=control-group
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/containers %h/.local/share/containers %h/.local/share/clawctl/hermes
+PrivateTmp=false
+LockPersonality=true
+
+[Install]
+WantedBy=default.target

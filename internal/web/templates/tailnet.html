@@ -1,0 +1,55 @@
+{{define "tailnet.html"}}{{template "head" .}}
+<div class="page-heading">
+  <div><h1>Tailnet</h1><p>對照 Tailnet 與管理名冊，管理不納管裝置。</p></div>
+  <div class="command-bar"><a class="button secondary" href="/machines/enrollment">註冊機器</a></div>
+</div>
+
+{{$t := .TailnetSettings}}
+{{if not $t.Available}}
+<div class="panel"><p><span class="st amber">清單無法取得</span> — {{$t.Unavailable}}</p></div>
+{{else}}
+<div class="metric-grid">
+  <div class="metric-card"><div class="metric-label">Tailnet peers</div><div class="metric-value">{{$t.PeerCount}}</div><div class="metric-note">觀測 {{$t.ObservedAt.Local.Format "2006-01-02 15:04:05"}}</div></div>
+  <div class="metric-card"><div class="metric-label">尚未納管</div><div class="metric-value">{{len $t.Unenrolled}}</div><div class="metric-note">目前沒有有效忽略規則</div></div>
+  <div class="metric-card"><div class="metric-label">有效忽略</div><div class="metric-value">{{len $t.Ignored}}</div><div class="metric-note">到期後自動回到尚未納管</div></div>
+  <div class="metric-card"><div class="metric-label">在線但無心跳</div><div class="metric-value">{{len $t.OnlineButSilent}}</div><div class="metric-note">Tailnet online、Agent 未回報</div></div>
+</div>
+
+<h2>尚未納管</h2>
+<div class="panel">
+{{if $t.Unenrolled}}
+<table><thead><tr><th>名稱</th><th>Stable ID</th><th>位址</th><th>OS</th><th>狀態</th><th>動作</th></tr></thead><tbody>
+{{range $t.Unenrolled}}<tr>
+  <td><b>{{.Hostname}}</b></td><td class="mono">{{.StableID}}</td><td class="mono">{{.IP}}</td><td>{{.OS}}</td>
+  <td>{{if .Online}}<span class="st green">online</span>{{else}}<span class="dim">offline</span>{{end}}</td>
+  <td>{{if and $.Access.CanAdmin .StableID}}<form method="post" action="/settings/tailnet/peer-ignore-preview">
+    <input type="hidden" name="peer_id" value="{{.StableID}}"><input type="hidden" name="action" value="ignore">
+    <label><span class="sr-only">理由</span><input name="reason" placeholder="不納管理由" required autocomplete="off"></label>
+    <label><span class="sr-only">效期</span><select name="days"><option value="7">7 天</option><option value="30" selected>30 天</option><option value="90">90 天</option><option value="366">366 天</option></select></label>
+    <button type="submit">預覽忽略</button>
+  </form>{{end}}</td>
+</tr>{{end}}</tbody></table>
+{{else}}<p>目前沒有尚未納管的 Tailnet peer。</p>{{end}}
+</div>
+{{end}}
+
+<h2>有效忽略規則</h2>
+<div class="panel">
+{{if $t.Ignored}}
+<table><thead><tr><th>名稱</th><th>Stable ID</th><th>理由</th><th>到期</th><th>Revision</th><th>動作</th></tr></thead><tbody>
+{{range $t.Ignored}}<tr>
+  <td><b>{{.Hostname}}</b></td><td class="mono">{{.PeerID}}</td><td>{{.Reason}}</td><td>{{.ExpiresAt.Local.Format "2006-01-02 15:04"}}</td><td>{{.Revision}}</td>
+  <td>{{if $.Access.CanAdmin}}<form method="post" action="/settings/tailnet/peer-ignore-preview">
+    <input type="hidden" name="peer_id" value="{{.PeerID}}"><input type="hidden" name="action" value="unignore">
+    <label><span class="sr-only">取消理由</span><input name="reason" placeholder="取消忽略理由" required autocomplete="off"></label>
+    <button class="button secondary" type="submit">預覽取消</button>
+  </form>{{end}}</td>
+</tr>{{end}}</tbody></table>
+{{else}}<p>目前沒有有效忽略規則。</p>{{end}}
+</div>
+
+{{if $t.Available}}
+{{if $t.OnlineButSilent}}<h2>在線但 Agent 未回報</h2><div class="panel"><table><thead><tr><th>Machine ID</th><th>Tailnet 名稱</th><th>位址</th></tr></thead><tbody>{{range $t.OnlineButSilent}}<tr><td><a href="/machines/{{.MachineID}}" class="mono">{{.MachineID}}</a></td><td>{{.Peer.Hostname}}</td><td class="mono">{{.Peer.IP}}</td></tr>{{end}}</tbody></table></div>{{end}}
+{{if $t.RetiredButOnline}}<h2>已退役但仍在線</h2><div class="panel"><table><thead><tr><th>機器</th><th>Tailnet 名稱</th><th>位址</th><th>退役時間</th></tr></thead><tbody>{{range $t.RetiredButOnline}}<tr><td><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a></td><td>{{.Peer.Hostname}}</td><td class="mono">{{.Peer.IP}}</td><td>{{.RetiredAt.Local.Format "2006-01-02 15:04"}}</td></tr>{{end}}</tbody></table></div>{{end}}
+{{end}}
+{{template "foot" .}}{{end}}

@@ -1,0 +1,28 @@
+{{define "artifact_fetch_operation.html"}}{{template "head" .}}
+{{with .ArtifactFetchOperation}}{{$o := .Item}}
+<div class="page-heading"><div>
+  <h1>Fetch operation {{short $o.OperationID 12}}</h1>
+  <p>Durable intake 狀態。Published result：succeeded + result digest。</p>
+</div></div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Operation evidence</h2>
+  <dl class="facts">
+    <dt>Operation ID</dt><dd class="mono">{{$o.OperationID}}</dd>
+    <dt>Artifact</dt><dd>{{$o.Name}}@{{$o.Version}}</dd>
+    <dt>State</dt><dd>{{$o.State}}</dd>
+    <dt>Phase</dt><dd>{{$o.Phase}}</dd>
+    <dt>Progress</dt><dd>{{bytes $o.ProgressBytes}}；policy 上限 {{bytes $o.MaxBytes}}</dd>
+    <dt>Attempt</dt><dd>{{$o.Attempt}}</dd>
+    <dt>Created</dt><dd>{{$o.CreatedAt.Local.Format "2006-01-02 15:04:05"}}</dd>
+    <dt>Updated</dt><dd>{{$o.UpdatedAt.Local.Format "2006-01-02 15:04:05"}}</dd>
+    <dt>Started</dt><dd>{{with $o.StartedAt}}{{.Local.Format "2006-01-02 15:04:05"}}{{else}}尚未{{end}}</dd>
+    <dt>Finished</dt><dd>{{with $o.FinishedAt}}{{.Local.Format "2006-01-02 15:04:05"}}{{else}}尚未{{end}}</dd>
+    <dt>Result SHA-256</dt><dd class="mono">{{with $o.ResultSHA256}}{{.}}{{else}}尚未產生{{end}}</dd>
+    <dt>Result bytes</dt><dd>{{with $o.ResultSizeBytes}}{{bytes .}}{{else}}尚未產生{{end}}</dd>
+    <dt>Failure code</dt><dd class="mono">{{with $o.ErrorCode}}{{.}}{{else}}沒有{{end}}</dd>
+  </dl>
+</div>
+<p><a href="/apps?view=operations">← 回 Operations</a></p>
+{{end}}
+{{template "foot" .}}{{end}}

@@ -1,0 +1,35 @@
+{{define "configuration_assignment_review.html"}}{{template "head" .}}
+{{$r := .SettingAssignmentReview}}{{$p := $r.Preview}}
+<div class="page-heading"><div>
+  <h1>確認 {{$r.ScopeLabel}} {{$p.ScopeID}} 的設定</h1>
+  {{if $p.Unchanged}}
+  <p>這個對象已經在跑 {{$p.PolicyID}} rev {{$p.Revision}}；指派不會改變任何裝置。</p>
+  {{else}}
+  <p>{{$p.AffectedMachines}} 台裝置會在下次報到時換成 {{$p.PolicyID}} rev {{$p.Revision}}。</p>
+  {{end}}
+</div></div>
+
+<div class="panel">
+<table><tbody>
+  <tr><th style="width:270px">對象</th><td>{{$r.ScopeLabel}} <span class="mono">{{$p.ScopeID}}</span></td></tr>
+  <tr><th>目前設定</th><td>{{if $p.CurrentPolicyID}}<span class="mono">{{$p.CurrentPolicyID}}</span> rev {{$p.CurrentRevision}}{{else}}預設值{{end}}</td></tr>
+  <tr><th>指派設定</th><td><span class="mono">{{$p.PolicyID}}</span> rev {{$p.Revision}}</td></tr>
+  <tr><th>報到間隔</th><td>{{$p.Settings.CheckinIntervalSeconds}} 秒</td></tr>
+  <tr><th>量測間隔</th><td>{{$p.Settings.ObservationIntervalSeconds}} 秒</td></tr>
+  <tr><th>影響裝置</th><td>{{$p.AffectedMachines}} 台</td></tr>
+  <tr><th>設定身分</th><td class="mono small">{{$p.Digest}}</td></tr>
+  <tr><th>理由</th><td>{{$r.Reason}}</td></tr>
+</tbody></table>
+<form method="post" action="/machines/configuration/assignments" style="margin-top:18px">
+  <input type="hidden" name="scope" value="{{$p.Scope}}">
+  <input type="hidden" name="scope_id" value="{{$p.ScopeID}}">
+  <input type="hidden" name="policy_id" value="{{$p.PolicyID}}">
+  <input type="hidden" name="policy_revision" value="{{$p.Revision}}">
+  <input type="hidden" name="preview_digest" value="{{$p.PreviewDigest}}">
+  <input type="hidden" name="idempotency_key" value="{{$r.IdempotencyKey}}">
+  <input type="hidden" name="reason" value="{{$r.Reason}}">
+  <label><span class="field-label">輸入 {{$p.ScopeID}} 確認</span><input name="confirm_scope_id" required autocomplete="off"></label>
+  <div class="command-bar" style="margin-top:14px"><button type="submit">指派 {{$p.PolicyID}} rev {{$p.Revision}}</button><a class="button secondary" href="/machines/configuration#policies">取消</a></div>
+</form>
+</div>
+{{template "foot" .}}{{end}}

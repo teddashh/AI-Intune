@@ -1,0 +1,20 @@
+# → /etc/grafana/provisioning/datasources/clawctl.yml
+#
+# ⚠ uid 是寫死的（clawctl-prom），因為 clawctl.json 裡每個 panel 都指名它。
+#   uid 對不上的話 Grafana 不會報錯，它會畫出一整頁空面板 ——
+#   正好是這個專案最痛恨的那種失敗：看起來像「機隊很安靜」。
+apiVersion: 1
+
+datasources:
+  - name: clawctl-prometheus
+    uid: clawctl-prom
+    type: prometheus
+    access: proxy
+    url: http://localhost:9090
+    isDefault: true
+    # 跟 prometheus.yml 的 scrape_interval / evaluation_interval 一致。
+    # 寫錯的話 Grafana 會用預設 15s 去 query 一份 60s 的資料，
+    # 圖上每四格會有三格是洞，而那些洞看起來像「服務中斷」。
+    jsonData:
+      timeInterval: 60s
+      httpMethod: POST

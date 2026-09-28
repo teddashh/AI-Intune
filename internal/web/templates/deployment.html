@@ -1,0 +1,130 @@
+{{define "deployment.html"}}{{template "head" .}}
+{{$d := .Deployment}}{{$v := $d.Summary}}
+
+<div class="page-heading section-anchor" id="deployment-overview" tabindex="-1">
+  <div>
+    <h1>部署 <span class="mono">{{$v.DeploymentID}}</span></h1>
+    <p>{{$v.Channel}} · {{$d.Version}} · desired revision {{$v.DesiredRevision}} · control revision {{$v.ControlRevision}} · attempt {{$v.Attempt}}</p>
+  </div>
+  <div class="command-bar" aria-label="部署證據">
+    <a class="button secondary" href="{{$d.JobsURL}}">查看此部署所有工作單</a>
+  </div>
+</div>
+
+{{/* ⚠ SPEC §9：Stuck 是第一個下鑽，不埋在逐台流水帳後面。 */}}
+<h2 id="stuck" class="section-anchor" tabindex="-1">Stuck（{{$v.Stuck}} 台）</h2>
+<div class="panel">
+  <h3>終態未成功（{{$v.TerminalStuck}} 台）</h3>
+  {{range $d.TerminalStuck}}
+    <p><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a>：{{terminalJobOutcome .JobState}}（<span class="mono">{{.JobState}}</span>，job <a class="mono" href="/jobs/{{.JobID}}" aria-label="工作單 {{.JobID}}" title="{{.JobID}}">{{short .JobID 8}}</a>）</p>
+  {{else}}<p class="empty">沒有未成功的終態。</p>{{end}}
+  <h3>15 分鐘沒事件（{{$v.SilentStuck}} 台）</h3>
+  {{range $d.SilentStuck}}
+    <p><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a>：15 分鐘沒事件（<span class="mono">{{.JobState}}</span>，job <a class="mono" href="/jobs/{{.JobID}}" aria-label="工作單 {{.JobID}}" title="{{.JobID}}">{{short .JobID 8}}</a>）</p>
+  {{else}}<p class="empty">沒有非終態工作單超過 15 分鐘沒事件。</p>{{end}}
+</div>
+
+{{if $d.ShowCanarySilent}}
+<h2 id="canary-silent-failures" class="section-anchor" tabindex="-1">finished 之後 canary 集合的沉默失敗</h2>
+<div class="panel">
+{{range $d.CanarySilent}}
+	 <p>{{.DisplayName}} · {{.FirstSeenAt.Local.Format "2006-01-02 15:04 MST"}}～{{.LastSeenAt.Local.Format "2006-01-02 15:04 MST"}} · {{.Reason}}</p>
+{{else}}<p class="empty">沒有</p>{{end}}
+</div>
+{{end}}
+
+<h2>計數</h2>
+<div class="panel">
+  <p>
+    {{range $d.JobCounts}}<span style="display:inline-block;margin-right:10px"><a href="{{.Href}}" aria-label="查看此部署的 {{.Count}} 張 {{.State}} 工作單">{{.Count}} {{.State}}</a></span>{{else}}0 jobs{{end}}
+    {{if gt $d.RestartCount 0}}（Hub 這段期間重啟過 {{$d.RestartCount}} 次；見總覽的 Hub 日誌）{{end}}
+  </p>
+</div>
+
+<h2 id="deployment-targets" class="section-anchor" tabindex="-1">Targets 與 Jobs</h2>
+<div class="panel" style="padding:8px 10px 4px">
+  <p style="margin-top:0">跨故障域證據：已開單的 {{$d.Independent.OpenedTargets}} 台中，{{$d.Independent.PassedTargets}} 台有第二個 producer 回報通過；可用 producer {{$d.Independent.LiveProducers}}。</p>
+  <p class="small dim">{{range $d.Independent.Verdicts}}<span class="{{independentVerdictClass .Verdict}}">{{.Verdict}}</span> {{.Targets}} 台　{{end}}</p>
+</div>
+<div class="panel" style="padding:4px 6px">
+<table>
+<caption class="sr-only">此 deployment 的 included targets、工作單與跨故障域證據</caption>
+<thead><tr><th scope="col">機器</th><th scope="col">批次</th><th scope="col">job</th><th scope="col">狀態</th><th scope="col">terminal_at</th><th scope="col">跨故障域</th></tr></thead>
+<tbody>
+{{range $d.Included}}
+<tr>
+  <th scope="row"><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a></th><td>{{.BatchNo}}</td>
+  {{if .JobID}}
+    <td><a class="mono" href="/jobs/{{.JobID}}" aria-label="工作單 {{.JobID}}" title="{{.JobID}}">{{short .JobID 8}}</a></td><td>{{.JobState}}</td><td>{{timeOrDash .TerminalAt}}</td>
+    <td><span class="{{independentVerdictClass .Independent}}" title="{{independentVerdictLabel .Independent}}">{{.Independent}}</span> <span class="small dim">{{.IndependentRows}} 筆／可用 producer {{.IndependentLive}}</span></td>
+  {{else}}
+    <td>—</td><td>not_opened</td><td>—</td><td>—</td>
+  {{end}}
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+<h3>排除</h3>
+<div class="panel">
+{{range $d.Excluded}}
+  <p><a href="/machines/{{.Target.MachineID}}">{{.Target.DisplayName}}</a>：<span class="mono">{{.Target.ExcludedReason}}</span> —— {{.Reason}}</p>
+{{else}}<p class="empty">沒有排除任何機器。</p>{{end}}
+</div>
+
+<h2 id="deployment-actions" class="section-anchor" tabindex="-1">動作</h2>
+<div class="panel">
+  <p>{{$d.Status}}</p>
+  {{if $v.BoundaryPause}}
+  <p class="small">boundary kind：<span class="mono">{{$v.BoundaryPause.Kind}}</span></p>
+  {{end}}
+
+  <h3>Continue next batch</h3>
+  <p class="small {{if not $d.Continue.Eligible}}dim{{end}}">{{$d.Continue.Reason}}</p>
+  {{if $d.Continue.Eligible}}
+    {{if $.Access.CanOperate}}
+    <form class="action-form" method="post" action="/deployments/{{$v.DeploymentID}}/continue-preview">
+      <label><span class="field-label">變更理由</span><input type="text" name="reason" maxlength="500" autocomplete="off"></label>
+      <button type="submit">Preview Continue</button>
+    </form>
+    {{end}}
+  {{end}}
+
+  <h3>Retry terminal failures</h3>
+  <p class="small {{if not $d.Retry.Eligible}}dim{{end}}">{{$d.Retry.Reason}}</p>
+  {{if $d.Retry.Eligible}}
+    {{if $.Access.CanOperate}}
+    <form class="action-form" method="post" action="/deployments/{{$v.DeploymentID}}/retry-preview">
+      <label><span class="field-label">變更理由</span><input type="text" name="reason" maxlength="500" autocomplete="off"></label>
+      <button type="submit">Preview Retry</button>
+    </form>
+    {{end}}
+  {{end}}
+
+  <h3>Abandon</h3>
+  <p class="small {{if not $d.Abandon.Eligible}}dim{{end}}">{{$d.Abandon.Reason}}</p>
+  {{if $d.Abandon.Eligible}}
+    {{if $.Access.CanAdmin}}
+    <form class="action-form" method="post" action="/deployments/{{$v.DeploymentID}}/abandon-preview">
+      <label><span class="field-label">變更理由</span><input type="text" name="reason" maxlength="500" autocomplete="off"></label>
+      <button type="submit">Preview Abandon</button>
+    </form>
+    {{end}}
+  {{end}}
+</div>
+
+<h2 id="deployment-settings" class="section-anchor" tabindex="-1">設定</h2>
+<div class="panel">
+  <dl class="facts">
+    <dt>Resource</dt><dd>{{$v.ResourceKind}} / {{$v.ResourceID}}</dd>
+    <dt>Batch size</dt><dd>{{$v.BatchSize}}</dd>
+    <dt>Material status</dt><dd>{{$v.Material.Status}}</dd>
+    <dt>Version</dt><dd>{{with $v.Material.Version}}{{.}}{{else}}未知{{end}}</dd>
+    <dt>Artifact digest</dt><dd class="mono">{{with $v.Material.ArtifactDigest}}{{.}}{{else}}未知{{end}}</dd>
+    <dt>Size</dt><dd>{{with $v.Material.SizeBytes}}{{bytes .}}{{else}}未知{{end}}</dd>
+    <dt>Node engines</dt><dd class="mono">{{with $v.Material.EnginesNode}}{{.}}{{else}}未宣告{{end}}</dd>
+  </dl>
+</div>
+
+{{template "foot" .}}{{end}}

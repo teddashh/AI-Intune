@@ -1,0 +1,143 @@
+{{define "compliance.html"}}{{template "head" .}}
+{{$c := .Compliance}}
+<div class="page-heading"><div>
+  <h1>裝置合規性</h1>
+  <p>合規性原則訂出每台裝置必須符合的條件。判決只由 Hub 量到的事實決定，裝置不能自己宣告它合規。</p>
+</div></div>
+
+<div class="metric-grid">
+  <div class="metric-card">
+    <div class="metric-label">符合</div>
+    <div class="metric-value">{{$c.Compliant}}</div>
+    <div class="metric-note metric-state"><span class="dot green" aria-hidden="true"></span>每一條規則都量到而且通過</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">不符合</div>
+    <div class="metric-value">{{$c.Noncompliant}}</div>
+    <div class="metric-note metric-state"><span class="dot red" aria-hidden="true"></span>至少一條規則確定沒過</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">量不到</div>
+    <div class="metric-value">{{$c.Unmeasured}}</div>
+    <div class="metric-note metric-state"><span class="dot grey" aria-hidden="true"></span>缺少判斷所需的回報</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-label">未指派</div>
+    <div class="metric-value">{{$c.Unevaluated}}</div>
+    <div class="metric-note metric-state"><span class="dot grey" aria-hidden="true"></span>還沒有人替它訂條件</div>
+  </div>
+</div>
+
+{{if $c.HasActions}}
+<p class="small" style="margin:-6px 0 18px">合規性動作目前停發工作單的裝置：<strong>{{$c.Blocked}}</strong> 台。判定一恢復就自動解除。</p>
+{{end}}
+
+<h2 id="policies" class="section-anchor" tabindex="-1">合規性原則</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<caption class="sr-only">已發佈的合規性原則</caption>
+<thead><tr>
+  <th>原則</th><th style="width:110px">revision</th><th style="min-width:230px">規則</th>
+  <th style="min-width:170px">不符合時</th>
+  <th style="width:110px">指派範圍</th><th style="width:160px">發佈時間</th>
+  <th style="min-width:330px">指派這組條件</th>
+</tr></thead>
+<tbody>
+{{range $c.Policies}}
+  <tr>
+    <td class="name"><span class="mono">{{.PolicyID}}</span><span class="sub">共 {{.RevisionCount}} 個 revision</span></td>
+    <td class="mono">{{.Revision}}</td>
+    <td class="small">{{range .Policy.Rules}}<div>{{ruleLabel .Kind}}{{with ruleBound .}} <span class="dim">{{.}}</span>{{end}}</div>{{end}}</td>
+    <td class="small">{{range .Policy.Actions}}<div>{{actionLabel .Kind}} <span class="dim">{{graceLabel .GraceSeconds}}</span></div>{{else}}<span class="dim">只回報</span>{{end}}</td>
+    <td>{{.Assignments}}</td>
+    <td class="small">{{.PublishedAt.Local.Format "2006-01-02 15:04"}}</td>
+    <td>
+      {{if $.Access.CanAdmin}}
+      <form class="action-form" method="post" action="/machines/compliance/assignment-preview" style="margin:0">
+        <input type="hidden" name="policy_id" value="{{.PolicyID}}">
+        <input type="hidden" name="policy_revision" value="{{.Revision}}">
+        <label><span class="field-label">指派對象</span>
+          <select name="scope" aria-label="指派範圍">
+            <option value="machine">裝置</option>
+            <option value="channel">通道</option>
+          </select>
+        </label>
+        <label><span class="field-label">對象識別碼</span>
+          <input type="text" name="scope_id" placeholder="machine ID 或 canary / stable" autocomplete="off" required aria-required="true">
+        </label>
+        <label><span class="field-label">理由</span>
+          <input type="text" name="reason" placeholder="為什麼這一群要用這組條件" autocomplete="off" required aria-required="true">
+        </label>
+        <button type="submit">預覽指派</button>
+      </form>
+      {{end}}
+    </td>
+  </tr>
+{{else}}
+  <tr><td colspan="7" class="empty">還沒有發佈過合規性原則，所以每一台的判決都是未指派。</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+{{if .Access.CanAdmin}}
+<h2 id="publish" class="section-anchor" tabindex="-1">發佈合規性原則</h2>
+<div class="panel">
+  <p style="margin-top:0">勾選要納入的規則。同一個識別碼填入新的規則會產生下一個 revision；填入目前的規則不會產生新的 revision。</p>
+  <form class="form-grid" method="post" action="/machines/compliance/policy-preview">
+    <label><span class="field-label">原則識別碼</span>
+      <input type="text" name="policy_id" value="{{$c.NextPolicy}}" placeholder="例如 fleet-floor" autocomplete="off" required aria-required="true">
+    </label>
+    {{range $c.RuleChoices}}
+    <label><span class="field-label"><input type="checkbox" name="rule_{{.Kind}}" value="on"> {{.Label}}</span>
+      {{if eq .Field "agent_version"}}
+      <input type="text" name="{{.Field}}" placeholder="例如 92fcd02" autocomplete="off">
+      {{else if .Field}}
+      <input type="number" name="{{.Field}}" min="{{.Min}}" max="{{.Max}}" value="{{.Default}}">
+      {{end}}
+      <span class="small dim">{{.Help}}{{if .Unit}}（單位：{{.Unit}}）{{end}}</span>
+    </label>
+    {{end}}
+    {{range $c.ActionChoices}}
+    <label><span class="field-label"><input type="checkbox" name="action_{{.Kind}}" value="on"> 不符合時{{.Label}}</span>
+      <input type="number" name="grace_{{.Kind}}" min="0" max="{{.Max}}" value="{{.Default}}">
+      <span class="small dim">{{.Help}}（單位：秒）</span>
+    </label>
+    {{end}}
+    <label><span class="field-label">理由</span>
+      <input type="text" name="reason" placeholder="為什麼要用這組條件" autocomplete="off" required aria-required="true">
+    </label>
+    <button type="submit">預覽發佈</button>
+  </form>
+</div>
+{{end}}
+
+<h2 id="devices" class="section-anchor" tabindex="-1">裝置判決</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<caption class="sr-only">每台裝置的合規性判決與證據</caption>
+<thead><tr>
+  <th>裝置</th><th style="width:120px">來源</th><th style="width:180px">原則</th>
+  <th style="width:170px">判決</th><th style="width:190px">動作</th>
+  <th style="min-width:300px">證據</th><th style="width:150px">最後回報</th>
+</tr></thead>
+<tbody>
+{{range $c.Machines}}
+  <tr>
+    <td class="name"><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a><span class="sub mono">{{.MachineID}}</span></td>
+    <td>{{.SourceLabel}}{{if .Channel}}<div class="small dim mono">{{.Channel}}</div>{{end}}</td>
+    <td>{{if .PolicyID}}<span class="mono">{{.PolicyID}}</span> <span class="dim">rev {{.Revision}}</span>{{else}}<span class="dim">—</span>{{end}}</td>
+    <td><span class="st {{.Tone}}"><span class="dot {{.Tone}}" aria-hidden="true"></span>{{.Label}}</span></td>
+    <td class="small">{{range .Actions}}<div><span class="st {{actionTone .State}}"><span class="dot {{actionTone .State}}" aria-hidden="true"></span>{{.Label}} {{.StateLabel}}</span>{{with .DueAt}}<span class="sub">{{.Local.Format "01-02 15:04"}} 生效</span>{{end}}</div>{{else}}<span class="dim">—</span>{{end}}</td>
+    <td class="small">{{range .Results}}<div><span class="dot {{outcomeTone .Outcome}}" aria-hidden="true"></span>{{.Label}}：{{.Detail}}</div>{{else}}<span class="dim">—</span>{{end}}</td>
+    <td class="small">{{with .ReportedAt}}{{.Local.Format "2006-01-02 15:04"}}{{else}}<span class="dim">—</span>{{end}}</td>
+  </tr>
+{{else}}
+  <tr><td colspan="7" class="empty">名冊是空的。</td></tr>
+{{end}}
+</tbody>
+</table>
+<p class="small dim" style="margin:10px 6px 6px">判決是此刻算出來的，時間為 {{$c.EvaluatedAt.Local.Format "2006-01-02 15:04:05"}}。報到新鮮度會隨時間改變，重新整理即是重新判決。</p>
+</div>
+
+{{template "foot" .}}{{end}}

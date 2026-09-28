@@ -1,0 +1,54 @@
+{{define "token.html"}}{{template "head" .}}
+{{with .Token}}
+{{if .SecretAvailable}}
+<h1>{{.Name}} 的 enroll 票</h1>
+
+<div class="panel">
+  <p style="margin-top:0"><b>這串字只顯示一次。</b></p>
+  <pre class="copy">{{.Token}}</pre>
+</div>
+
+<div class="panel">
+  {{if $.AgentBundles}}
+  <p style="margin-top:0"><b>下載 <span class="mono">{{.Name}}</span> 的 Agent 安裝包：</b></p>
+  <div class="command-bar">{{range $.AgentBundles}}
+    <a class="button secondary" href="{{.URL}}">linux/{{.Arch}} · {{bytes .SizeBytes}}</a>
+  {{end}}</div>
+  {{end}}
+  <p>把安裝包傳到 <b>{{.Name}}</b>，解壓後執行：</p>
+  {{if .HubBase}}
+  <pre class="copy">./install-agent.sh --hub {{.HubBase}}</pre>
+  {{else}}
+  <pre class="copy">./install-agent.sh --hub http://&lt;Hub 在 tailnet 上的位址&gt;:8787</pre>
+  {{end}}
+  <p class="small dim">貼上本頁 token；安裝程式會完成 Tailscale、linger、enroll、service 與 Hub 驗收。</p>
+  <p class="small dim">無互動安裝：<span class="mono">--token-file FILE --tailscale-auth-key-file FILE</span>（兩個檔案均為 0600）。</p>
+</div>
+{{else}}
+<h1>{{.Name}} 的 enroll 票</h1>
+
+<div class="panel">
+  <p style="margin-top:0"><b>原票已建立；token 無法重顯。</b></p>
+  <p>撤銷原票、退役名冊列，再重新註冊。</p>
+</div>
+{{end}}
+
+<div class="caveat">
+  <b>{{.Name}} 已加入名冊（machine_id <span class="mono">{{.MachineID}}</span>）。</b>
+  報到前狀態為「從未報到」。
+  <br>
+  <a href="/machines/{{.MachineID}}">退役這台機器</a>
+</div>
+
+<div class="panel">
+  <p style="margin-top:0">這張票 <b>{{.TTL}}</b> 後（{{.ExpiresAt}}）過期，只能用一次。</p>
+  {{if $.Access.CanAdmin}}<form method="post" action="/machines/{{.MachineID}}/revoke-token/preview">
+    <input type="hidden" name="reason" value="{{if .Replayed}}補發 enroll 票前撤銷原票{{else}}開票後立刻撤銷{{end}}">
+    <button type="submit">{{if .Replayed}}預覽撤銷原本的 pending enrollment ticket{{else}}預覽撤銷這張 pending enrollment ticket{{end}}</button>
+  </form>{{end}}
+  <p class="small dim">撤銷只影響 pending ticket；名冊與 agent credential 不變。</p>
+</div>
+
+<p><a href="/machines/enrollment">← 回機器註冊</a></p>
+{{end}}
+{{template "foot" .}}{{end}}

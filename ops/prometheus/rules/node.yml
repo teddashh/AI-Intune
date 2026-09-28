@@ -1,0 +1,83 @@
+# 作業系統那一側的事實，來自 node_exporter。
+#
+# ⚠⚠ 這一份跟 clawctl.yml / expectations.yml 分開，因為它的資料來源不同：
+#     這裡每一條的量測者都是 Prometheus 自己（`up` 那一類），不是我們的 agent
+#     自報的。SPEC §7.2 說「自證不算數」—— 這一份天生滿足那一條。
+
+groups:
+  - name: node-disk
+    interval: 60s
+    rules:
+      # ── 磁碟：問「會不會滿」，不問「現在幾 %」 ──────────────────
+      #
+      # ⚠⚠ 這一條刻意**不是**「使用率 > 85% 就亮」。2026-09-06 實測：
+      #     sampleagent3 85.6%、sampleagent4 84.9%，而兩台的斜率都是平的
+      #     （sampleagent3 +0.01 GB/天、sampleagent4 +0.95 GB/天，都在**變多**）。
+      #     一條 85% 的靜態門檻對這兩台就是**永遠亮著**，然後幾天內被靜音，
+      #     然後這條規則就等於不存在。
+      #
+      #     那正是 `CredentialExpiringSoon` 被刪掉的同一個錯：一張 8 小時的票
+      #     永遠在「六小時內過期」。**永遠亮的燈不是燈。**
+      #     一台在 86% 穩定住三個月的機器沒有問題要解；一台從 40% 一週衝到 70%
+      #     的機器有 —— 而靜態門檻剛好把這兩件事講反。
+      #
+      # ⚠ 兩個條件缺一不可：
+      #     predict_linear  照現在的斜率，14 天內會歸零嗎（趨勢）
+      #     > 70%           而且它已經用掉七成了（沒有餘裕吸收預測誤差）
+      #   只有趨勢：一顆 5% 滿的碟寫一陣子暫存檔就會誤報。
+      #   只有比例：就是上面說的那盞永遠亮的燈。
+      #
+      # ⚠ 6h 的取樣窗是**現在能拿到的最大值**：這台 2026-09-05 深夜重開過，
+      #   Prometheus 的歷史還不到一天。歷史長出來之後這裡應該放大到 24h ——
+      #   窗越短，一次 docker pull 或一次建置就越容易被讀成趨勢。
+      - alert: DiskWillFillWithinTwoWeeks
+        expr: |
+          (
+            predict_linear(
+              node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}[6h],
+              14 * 24 * 3600
+            ) < 0
+          )
+          and
+          (
+            node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}
+              / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}
+            < 0.30
+          )
+        for: 1h
+        labels:
+          severity: warning
+          source: prometheus
+        annotations:
+          summary: '{{ $labels.machine }} 的 {{ $labels.mountpoint }} 照現在的速度兩週內會寫滿'
+          description: >-
+            現在還剩 {{ $value | humanize1024 }}B。這條看的是**斜率**不是比例 ——
+            一台穩定停在 86% 的機器不會觸發它，一台正在往下掉的會。
+            ⚠ 它只說「照這個速度」。速度會變，所以這不是預言，是一個提早的問句：
+            那些位元組是誰寫的？先看 `du -sh` 排前幾名的目錄，再決定要不要清。
+            ⚠ 磁碟寫滿的機器，它的 agent 會先安靜下來 —— 到時候你看到的會是
+            「失聯」，而不是「磁碟滿了」。這條存在的意義就是搶在那之前講。
+
+      # ── 這一條在守上面那條的前提 ───────────────────────────────
+      #
+      # predict_linear 在**沒有資料**的時候不會報錯，它只是不回傳任何序列 ——
+      # 於是「磁碟在填滿」跟「我們沒在量磁碟」在告警清單上長得一模一樣：
+      # 兩者都是一片安靜。⚠ 這正是 PRODUCT.md 地基二那句
+      # 「一個空的、乾淨的、沒有壞消息的答案，第一個要懷疑的是有沒有問對地方」。
+      - alert: NoFilesystemMetricsForMachine
+        expr: |
+          count by (machine) (up{job="node"} == 1)
+          unless
+          count by (machine) (node_filesystem_avail_bytes{mountpoint="/"})
+        for: 15m
+        labels:
+          severity: info
+          source: prometheus
+        annotations:
+          summary: '{{ $labels.machine }} 抓得到，但沒有根目錄的磁碟資料'
+          description: >-
+            node_exporter 有在答（up == 1），卻沒有 mountpoint="/" 的
+            node_filesystem_avail_bytes。**這不代表那台磁碟沒問題** ——
+            代表上面那條「會不會寫滿」對這台**從來沒有評估過**。
+            可能是 filesystem collector 被關掉，或根目錄的 fstype
+            落在排除清單裡。要嘛修 collector，要嘛改排除清單。

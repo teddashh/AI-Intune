@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  這是 user LaunchAgent，不是 system daemon；理由與 systemd user unit 相同：
+  coding CLI 的憑證權限為 0600，且屬於執行 agent 的使用者。root daemon 雖然
+  讀得到，但那會造成不必要的權限擴張。
+
+  KeepAlive=true 對應 Restart=always；ThrottleInterval=5 對應 RestartSec=5。
+  launchd 沒有 Type=notify 與 WatchdogSec 的對應。agent 的 sdNotify 在沒有
+  NOTIFY_SOCKET 時會直接 return（cmd/clawctl-agent/main.go:746-749），因此
+  macOS 上沒有 watchdog。
+
+  launchd 沒有 CPUQuota／MemoryMax 的對應。ProcessType=Background 只影響
+  排程優先權與 I/O throttling，不是上限；Linux unit 的 20%／256M 在此沒有
+  等價物。
+
+  macOS 沒有 journald，因此 stdout 與 stderr 都寫入 log 檔案。
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.clawctl.agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@@CLAWCTL_AGENT_BIN@@</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>5</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>@@CLAWCTL_AGENT_LOG@@</string>
+  <key>StandardErrorPath</key>
+  <string>@@CLAWCTL_AGENT_LOG@@</string>
+</dict>
+</plist>

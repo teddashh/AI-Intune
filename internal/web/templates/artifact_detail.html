@@ -1,0 +1,31 @@
+{{define "artifact_detail.html"}}{{template "head" .}}
+{{with .ArtifactDetail}}{{$i := .Item}}
+<div class="page-heading"><div>
+  <h1>Artifact {{short $i.ArtifactID 12}}</h1>
+  <p>Verification：本次 request 完整讀取 bytes 並核對 SHA-256。</p>
+</div></div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Artifact evidence</h2>
+  <dl class="facts">
+    <dt>Artifact ID</dt><dd class="mono">{{$i.ArtifactID}}</dd>
+    <dt>Name</dt><dd>{{with $i.Name}}{{.}}{{else}}未知{{end}}</dd>
+    <dt>Version</dt><dd>{{with $i.Version}}{{.}}{{else}}未知{{end}}</dd>
+    <dt>Status</dt><dd><span class="st {{if eq $i.Status "ready"}}green{{else if eq $i.Status "unavailable"}}amber{{else}}red{{end}}">{{$i.Status}}</span></dd>
+    <dt>Issue</dt><dd class="mono">{{with $i.Issue}}{{.}}{{else}}沒有{{end}}</dd>
+    <dt>SHA-256</dt><dd class="mono">{{with $i.SHA256}}{{.}}{{else}}未知{{end}}</dd>
+    <dt>Size</dt><dd>{{with $i.SizeBytes}}{{bytes .}}{{else}}未知{{end}}</dd>
+    <dt>Node engines</dt><dd class="mono">{{with $i.EnginesNode}}{{.}}{{else}}未宣告{{end}}</dd>
+    <dt>Ingest evidence</dt><dd>{{with $i.FetchedAt}}{{.Local.Format "2006-01-02 15:04:05"}}{{else}}沒有可信 sidecar 時間{{end}}</dd>
+    <dt>Verified in this request</dt><dd>{{with $i.VerifiedAt}}{{.Local.Format "2006-01-02 15:04:05"}}{{else}}否{{end}}</dd>
+    <dt>Deployment references</dt><dd>{{$i.DeploymentReferences}} total；{{$i.ActiveDeploymentReferences}} active</dd>
+  </dl>
+</div>
+{{if eq $i.Status "ready"}}
+<p class="small dim">SHA-256 verification：passed。</p>
+{{else}}
+<p class="caveat"><b>Material 尚未就緒。</b></p>
+{{end}}
+<p><a href="/apps?view=artifacts">← 回 Artifacts</a></p>
+{{end}}
+{{template "foot" .}}{{end}}

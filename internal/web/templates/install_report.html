@@ -1,0 +1,225 @@
+{{define "install_report.html"}}{{template "head" .}}
+{{$p := .InstallReport}}
+{{$r := $p.Report}}
+
+<div class="page-heading">
+  <div>
+    <h1>每機安裝狀態</h1>
+    <p>我叫它裝的那一個，跟我看到的一不一樣，以及看到的那個版號講的是不是正在跑的那一份。</p>
+  </div>
+  <div class="command-bar" aria-label="每機安裝狀態命令列">
+    <a class="button secondary" href="{{$p.ExportHref}}">匯出</a>
+  </div>
+</div>
+
+<section class="metric-grid" aria-label="每機安裝狀態摘要">
+  <article class="metric-card">
+    <div class="metric-label">分母</div>
+    <div class="metric-value">{{$r.Machines}}</div>
+    <div class="metric-note">名冊上未退役的機器</div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">被指派過</div>
+    <div class="metric-value">{{$r.Assigned}} / {{$r.Machines}}</div>
+    <div class="metric-note">
+      <span class="metric-state"><span class="dot {{if eq $r.Assigned $r.Machines}}green{{else}}amber{{end}}" aria-hidden="true"></span>
+      {{if eq $r.Assigned $r.Machines}}分母裡每一台都被指派過{{else}}有機器一個資源都沒有被指派過{{end}}</span>
+    </div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">版號不是跑的那一份</div>
+    <div class="metric-value">{{$r.Misattributed}}</div>
+    <div class="metric-note">
+      <span class="metric-state"><span class="dot {{if $r.Misattributed}}amber{{else}}green{{end}}" aria-hidden="true"></span>
+      {{if $r.Misattributed}}這幾格看到的版號量的是沒在跑的那一份{{else}}沒有一格看到的版號量的是沒在跑的那一份{{end}}</span>
+    </div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">指派的跟看到的不一樣</div>
+    <div class="metric-value">{{$r.Differing}}</div>
+    <div class="metric-note">共 {{len $r.Resources}} 個資源</div>
+  </article>
+</section>
+
+<p class="small dim">{{$r.Caveat}}</p>
+{{if $r.NextStep}}<p class="small">{{$r.NextStep}}</p>{{end}}
+
+{{if $p.Misattributed}}
+<h2 id="misattributed" class="section-anchor" tabindex="-1">看到的版號不是正在跑的那一份</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>資源</th><th>機器</th><th>指派的</th><th>看到的</th><th>這一格是什麼</th>
+  <th>量版號的那個檔案</th><th>正在跑的那個檔案</th><th>下一步</th></tr></thead>
+<tbody>
+{{range $p.Misattributed}}
+<tr>
+  <td>{{.Resource}}</td>
+  <td><a href="/machines/{{.Row.MachineID}}">{{.Row.DisplayName}}</a></td>
+  <td class="small mono">{{if .Row.Assigned}}{{.Row.Assigned}}{{else}}—{{end}}</td>
+  <td class="small mono">{{if .Row.Observed}}{{.Row.Observed}}{{else}}—{{end}}</td>
+  <td class="small">{{.Row.Runtime.Title}}<div class="sub">{{.Row.Runtime.Meaning}}</div></td>
+  <td class="small mono">{{if .Row.Runtime.MeasuredFile}}{{.Row.Runtime.MeasuredFile}}{{else}}—{{end}}</td>
+  <td class="small mono">{{if .Row.Runtime.RunningFile}}{{.Row.Runtime.RunningFile}}{{else}}—{{end}}</td>
+  <td class="small">{{.Row.Runtime.NextStep}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">這幾格看到的版號量的是沒在跑的那一份，所以下面那張「指派的跟看到的」比的是沒有人在用的檔案。</p>
+{{else}}
+<h2 id="misattributed" class="section-anchor" tabindex="-1">看到的版號不是正在跑的那一份</h2>
+<p class="empty">沒有一格看到的版號量的是沒在跑的那一份。</p>
+{{end}}
+
+{{if $p.Differing}}
+<h2 id="differing" class="section-anchor" tabindex="-1">指派的跟看到的不一樣</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>資源</th><th>機器</th><th>這一格是什麼</th><th>指派的</th><th>看到的</th>
+  <th>版號講的是哪一份</th><th>指派給誰</th></tr></thead>
+<tbody>
+{{range $resource := $p.Differing}}
+{{range $resource.Rows}}
+{{if or (eq .State "assigned_newer") (eq .State "assigned_older")}}
+<tr>
+  <td>{{$resource.Name}}</td>
+  <td><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a></td>
+  <td class="small">{{.Title}}<div class="sub">{{.NextStep}}</div></td>
+  <td class="small mono">{{.Assigned}}</td>
+  <td class="small mono">{{.Observed}}{{if .FromDisk}}<div class="sub">檔案上讀的</div>{{end}}</td>
+  <td class="small">{{with .Runtime}}{{if runtimeMisattributed .}}<span class="st amber">{{.Title}}</span>{{else}}{{.Title}}{{end}}{{else}}—{{end}}</td>
+  <td class="small">{{.ScopeLabel}}<div class="sub">rev {{.Revision}}</div></td>
+</tr>
+{{end}}
+{{end}}
+{{end}}
+</tbody>
+</table>
+</div>
+{{else}}
+<h2 id="differing" class="section-anchor" tabindex="-1">指派的跟看到的不一樣</h2>
+<p class="empty">每一台被指派過的機器上，指派的跟看到的都對得起來。</p>
+{{end}}
+
+{{if $p.Unassigned}}
+<h2 id="unassigned" class="section-anchor" tabindex="-1">沒有被指派過的</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>資源</th><th>沒有被指派過</th><th>這是什麼</th></tr></thead>
+<tbody>
+{{range $p.Unassigned}}
+<tr>
+  <td>{{.Name}}</td>
+  <td class="small">{{.UnassignedOn}} / {{$r.Machines}} 台</td>
+  <td class="small">這幾台從來沒有被指派過這個東西，所以它們上面有沒有都不是這裡決定的。</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">「沒有被指派過」跟「指派了還沒裝上」是兩件事：前者要先指派一次，後者要去看工作單。</p>
+{{end}}
+
+{{if $p.Matrix.Rows}}
+<h2 id="matrix" class="section-anchor" tabindex="-1">資源 × 機器</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th style="width:120px">資源</th>
+  {{range $p.Matrix.Labels}}<th>{{.}}</th>{{end}}
+</tr></thead>
+<tbody>
+{{range $p.Matrix.Rows}}
+<tr>
+  <td>{{.Name}}</td>
+  {{range .Cells}}
+  <td class="small">
+    {{if eq .State "matches"}}<span class="mono">{{.Observed}}</span>
+    {{else if eq .State "assigned_newer"}}<span class="st amber mono">{{.Assigned}} → {{.Observed}}</span>
+    {{else if eq .State "assigned_older"}}<span class="st amber mono">{{.Assigned}} → {{.Observed}}</span>
+    {{else if eq .State "incomparable"}}<span class="mono">{{.Observed}}</span>
+      <span class="dim">（比不出來）</span>
+    {{else if eq .State "assigned_no_version"}}<span class="dim">指派沒講版號</span>
+    {{else if eq .State "observed_no_version"}}<span class="dim">裝了，問不到版號</span>
+    {{else if eq .State "absent"}}<span class="st amber">這台上沒有</span>
+    {{else if eq .State "unobserved"}}<span class="dim">看不到</span>
+    {{else if eq .State "unreported"}}<span class="st amber">沒回報過</span>
+    {{else if eq .State "unassigned"}}<span class="dim">沒有指派</span>
+    {{end}}
+    {{if runtimeMisattributed .Runtime}}<br><span class="st amber">版號不是跑的那一份</span>{{end}}
+  </td>
+  {{end}}
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">「A → B」讀作「指派的是 A、看到的是 B」，不是「從 A 升到 B」。{{if $p.Matrix.Misattributed}}其中 {{$p.Matrix.Misattributed}} 格看到的版號量的是沒在跑的那一份。{{end}}</p>
+{{else}}
+<h2 id="matrix" class="section-anchor" tabindex="-1">資源 × 機器</h2>
+<p class="empty">{{$r.Headline}}</p>
+{{end}}
+
+<h2 id="states" class="section-anchor" tabindex="-1">每一格是什麼</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>這一格是什麼</th><th>幾格</th><th>意思</th><th>下一步</th></tr></thead>
+<tbody>
+{{range $p.States}}
+<tr>
+  <td>{{.Title}}</td>
+  <td>{{.Count}}</td>
+  <td class="small">{{.Meaning}}</td>
+  <td class="small">{{.NextStep}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+<h2 id="runtimes" class="section-anchor" tabindex="-1">看到的版號講的是哪一份</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>這一格是什麼</th><th>幾格</th><th>意思</th><th>下一步</th></tr></thead>
+<tbody>
+{{range $p.Runtimes}}
+<tr>
+  <td>{{.Title}}</td>
+  <td>{{.Count}}</td>
+  <td class="small">{{.Meaning}}</td>
+  <td class="small">{{.NextStep}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">只有「正在跑的是另一個檔案」與「正在跑的那個檔案不見了」算是看到的版號量錯了檔案；其餘五種不用人動手。</p>
+
+{{range $r.Resources}}
+<h2 id="resource-{{.ResourceKind}}-{{.ResourceID}}" class="section-anchor" tabindex="-1">{{.Name}}</h2>
+<p class="small">{{.Headline}}{{if .NextStep}} {{.NextStep}}{{end}}</p>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>機器</th><th>這一格是什麼</th><th>指派的</th><th>看到的</th>
+  <th>版號講的是哪一份</th><th>指派給誰</th><th>Hub 收到的時刻</th></tr></thead>
+<tbody>
+{{range .Rows}}
+<tr>
+  <td><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a></td>
+  <td class="small">{{.Title}}{{if .NextStep}}<div class="sub">{{.NextStep}}</div>{{end}}</td>
+  <td class="small mono">{{if .Assigned}}{{.Assigned}}{{else}}—{{end}}</td>
+  <td class="small mono">{{if .Observed}}{{.Observed}}{{else}}—{{end}}{{if .FromDisk}}<div class="sub">檔案上讀的</div>{{end}}</td>
+  <td class="small">{{with .Runtime}}{{if runtimeMisattributed .}}<span class="st amber">{{.Title}}</span>{{else}}{{.Title}}{{end}}
+    <div class="sub mono">量：{{if .MeasuredFile}}{{.MeasuredFile}}{{else}}—{{end}}</div>
+    {{if .RunningFile}}<div class="sub mono">跑：{{.RunningFile}}</div>{{end}}
+    {{if .NextStep}}<div class="sub">{{.NextStep}}</div>{{end}}{{else}}—{{end}}</td>
+  <td class="small">{{if .ScopeLabel}}{{.ScopeLabel}}<div class="sub">rev {{.Revision}}{{if .AssignedAt}}・{{.AssignedAt.Local.Format "2006-01-02 15:04"}}{{end}}</div>{{else}}—{{end}}</td>
+  <td class="small mono">{{if .ObservedAt}}{{.ObservedAt.Local.Format "2006-01-02 15:04"}}{{else}}—{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{end}}
+
+{{template "foot" .}}{{end}}

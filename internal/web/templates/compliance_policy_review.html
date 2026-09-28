@@ -1,0 +1,42 @@
+{{define "compliance_policy_review.html"}}{{template "head" .}}
+{{$r := .CompliancePolicyReview}}{{$p := $r.Preview}}
+<div class="page-heading"><div>
+  <h1>確認合規性原則 {{$p.PolicyID}}</h1>
+  {{if $p.Unchanged}}
+  <p>這組規則就是目前的 revision {{$p.CurrentRev}}；發佈不會產生新的 revision。</p>
+  {{else}}
+  <p>revision {{$p.CurrentRev}} → {{$p.NextRev}}；{{$p.AffectedMachines}} 台裝置會立刻改用這組條件判決。</p>
+  {{end}}
+</div></div>
+
+<div class="panel">
+<table><tbody>
+  <tr><th style="width:270px">原則</th><td class="mono">{{$p.PolicyID}}</td></tr>
+  <tr><th>revision</th><td class="mono">{{$p.CurrentRev}} → {{$p.NextRev}}</td></tr>
+  <tr><th>規則</th><td>{{range $p.Rules}}<div>{{.Label}}{{with .Bound}} <span class="dim">{{.}}</span>{{end}}</div>{{end}}</td></tr>
+  <tr><th>不符合時</th><td>{{range $p.Actions}}<div>{{.Label}} <span class="dim">{{.Grace}}</span><span class="sub">{{.Effect}}</span></div>{{else}}<span class="dim">只回報，不改變任何裝置拿得到什麼</span>{{end}}</td></tr>
+  <tr><th>影響裝置</th><td>{{$p.AffectedMachines}} 台</td></tr>
+  <tr><th>規則身分</th><td class="mono small">{{$p.Digest}}</td></tr>
+  <tr><th>理由</th><td>{{$r.Reason}}</td></tr>
+</tbody></table>
+<form method="post" action="/machines/compliance/policies" style="margin-top:18px">
+  <input type="hidden" name="policy_id" value="{{$p.PolicyID}}">
+  {{range $p.Policy.Rules}}
+  <input type="hidden" name="rule_{{.Kind}}" value="on">
+  {{if .MaxAgeSeconds}}<input type="hidden" name="max_age_seconds" value="{{.MaxAgeSeconds}}">{{end}}
+  {{if .MinFreePercent}}<input type="hidden" name="min_free_percent" value="{{.MinFreePercent}}">{{end}}
+  {{if .AgentVersion}}<input type="hidden" name="agent_version" value="{{.AgentVersion}}">{{end}}
+  {{end}}
+  {{range $p.Policy.Actions}}
+  <input type="hidden" name="action_{{.Kind}}" value="on">
+  <input type="hidden" name="grace_{{.Kind}}" value="{{.GraceSeconds}}">
+  {{end}}
+  <input type="hidden" name="expected_revision" value="{{$p.CurrentRev}}">
+  <input type="hidden" name="preview_digest" value="{{$p.PreviewDigest}}">
+  <input type="hidden" name="idempotency_key" value="{{$r.IdempotencyKey}}">
+  <input type="hidden" name="reason" value="{{$r.Reason}}">
+  <label><span class="field-label">輸入 {{$p.PolicyID}} 確認</span><input name="confirm_policy_id" required autocomplete="off"></label>
+  <div class="command-bar" style="margin-top:14px"><button type="submit">發佈 revision {{$p.NextRev}}</button><a class="button secondary" href="/machines/compliance#publish">取消</a></div>
+</form>
+</div>
+{{template "foot" .}}{{end}}

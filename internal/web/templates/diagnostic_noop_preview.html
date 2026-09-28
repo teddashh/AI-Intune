@@ -1,0 +1,35 @@
+{{define "diagnostic_noop_preview.html"}}{{template "head" .}}
+{{$p := .DiagnosticPreview}}
+<div class="page-heading"><div>
+  <h1>確認 {{$p.DisplayName}} 的診斷</h1>
+  <p>建立 1 張 noop 工作單；機器設定不變。</p>
+</div></div>
+
+<div class="panel">
+<table><tbody>
+  <tr><th style="width:220px">機器</th><td>{{$p.DisplayName}}<div class="mono small dim">{{$p.MachineID}}</div></td></tr>
+  <tr><th>逾時</th><td>{{$p.Timeout}} 秒</td></tr>
+  <tr><th>revision</th><td>{{$p.CurrentRevision}} → {{$p.PlannedRevision}}</td></tr>
+  <tr><th>工作單執行</th><td>{{$p.JobsEnabled}}</td></tr>
+  <tr><th>執行中的工作單</th><td>{{$p.ActiveJobCount}}</td></tr>
+  <tr><th>理由</th><td>{{$p.Reason}}</td></tr>
+</tbody></table>
+</div>
+
+{{if $p.Blockers}}
+<div class="caveat"><ul>{{range $p.Blockers}}<li>{{.}}</li>{{end}}</ul></div>
+{{else}}
+<div class="panel">
+  <form class="action-form" method="post" action="/machines/{{$p.MachineID}}/diagnostic-noop-jobs">
+    <input type="hidden" name="timeout" value="{{$p.Timeout}}">
+    <input type="hidden" name="preview_digest" value="{{$p.PreviewDigest}}">
+    <input type="hidden" name="idempotency_key" value="{{$p.IdempotencyKey}}">
+    <input type="hidden" name="reason" value="{{$p.Reason}}">
+    <label><span class="field-label">確認機器名稱</span><input type="text" name="confirm" autocomplete="off" required aria-required="true"></label>
+    <button type="submit">建立診斷工作單</button>
+  </form>
+</div>
+{{end}}
+
+<p><a href="/machines/diagnostics">回診斷</a></p>
+{{template "foot" .}}{{end}}

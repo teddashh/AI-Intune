@@ -1,0 +1,56 @@
+# clawctl 的 Prometheus 設定。跑在 samplehub1。
+#
+# 這一步的目的不是取代任何東西 —— 是讓「作業系統的事實」跟「AI agent 的事實」
+# 第一次進到同一個 TSDB，這樣才問得出「sampleagent2 開始 baseline_hash_mismatch 的
+# 那一刻，記憶體/磁碟/重啟發生了什麼」。現在這是兩個平行宇宙，問不出來。
+#
+# ⚠⚠ 名冊就是 fleet.json。在名冊上但抓不到的機器，up == 0。
+#    這正是 SPEC §7.2 當初寫錯的那一條 ——「OTel/Loki/Grafana 回答不了名冊分母的
+#    問題」。Prometheus 的 scrape target list 天生就是分母，我們把人家的核心
+#    設計當成人家的缺口，然後自己重寫了一遍。
+#
+#    sampleagent1 刻意留在名冊裡：它從來沒回報過，所以它會永遠 up == 0。
+#    那不是壞掉，那是**它應該長的樣子** —— 一個在分母裡、但你還不知道
+#    它怎麼了的位置。（operator 自己處理那台，我們只是不把它從分母拿掉。）
+
+global:
+  scrape_interval: 60s
+  evaluation_interval: 60s
+  external_labels:
+    fleet: clawctl
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # ── 作業系統的事實 ─────────────────────────────────────────────
+  - job_name: node
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/fleet.json
+    # ⚠⚠ 永遠不要在這個 job 上開 honor_labels: true。
+    #    node_uname_info 自己帶一個 machine label，那個是 CPU 架構
+    #    （aarch64 / x86_64），不是機器名。預設 honor_labels: false 會把它
+    #    改名成 exported_machine，讓 fleet.json 的 machine="sampleagent2" 勝出 ——
+    #    所以現在 clawctl_machine_state{machine="sampleagent2"} join 得起來。
+    #    一旦開了 honor_labels，join 會**安靜地**錯掉，而畫面上不會缺任何東西。
+
+  # ── AI agent 的事實（clawctl 自己已經在吐了）──────────────────
+  - job_name: clawctl-hub
+    static_configs:
+      - targets: ["100.64.200.2:8787"]
+    # ⚠⚠⚠ 這裡**不准**加 machine label。
+    #
+    # 這個 job 抓的是 Hub，但 Hub 吐的是**全機隊**的判決 ——
+    # clawctl_machine_state 等等本身就每台一行、自己帶 machine label。
+    # 在 target 上再蓋一個 machine: samplehub1，會讓那個 target label 勝出，
+    # 每一台真正的名字被改名成 exported_machine。
+    #
+    # 2026-09-05 我真的這樣寫了，而且是在上面那段親手寫下同一個警告之後
+    # 三十行的地方。抓到的方式是拿真的資料跑每一條 expr：
+    #   CredentialExpired 命中 4  samplehub1
+    #   NotOKEventSeen    命中 1  samplehub1     ← 應該是 sampleagent2
+    # 數量全對、告警全部照常觸發、只有機器名全錯。promtool 過，
+    # 服務 active，畫面上什麼都不缺。
+    #
+    # 守它的是 rules/clawctl.yml 的 LabelCollisionDetected。

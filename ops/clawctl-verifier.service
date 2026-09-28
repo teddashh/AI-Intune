@@ -1,0 +1,55 @@
+# clawctl-verifier —— 第二雙眼睛，systemd **user** unit
+#
+# 這支跑的是 `clawctl-agent verifier`，但它**不是** agent：
+# 它有自己的 binary 副本、自己的 bearer（另一張表、另一組 hash）、
+# 自己的 targets 檔，不讀 agent.json，也不碰 agent 的任何狀態。
+# 兩者共用同一份原始碼只是為了不維護兩個 build。
+#
+# ⚠ 這台機器（sampleagent3）刻意**不在**自己的 targets 名冊裡。
+# separation rule 的意思是 verifier 不驗自己的故障域，
+# 而一個驗自己的 verifier 只是把自述換了個名字。
+#
+# ⚠ 一趟一次。要定期跑是 .timer 的事，不是程式的事——
+# 一個自己排程的 verifier 會長出 claim／lease／expiry 這一整套
+# 跟證據無關的生命週期。
+#
+# ⚠ 安裝後需要 `loginctl enable-linger opc`（本機已是 yes），
+# 否則登出就不會跑，而 Hub 上只會看到派工一直停在「等它回報」。
+
+[Unit]
+Description=clawctl verifier (independent evidence for assigned jobs)
+Documentation=https://github.com/teddashh/AI-Intune
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/clawctl-verifier verifier \
+  --hub http://100.64.200.2:8787 \
+  --token-file %h/.config/clawctl/verifier.token \
+  --targets %h/.config/clawctl/verifier-targets.json
+
+# 沒有派工時它印一行就結束，exit 0。非零只有一個意思：有單但量不到，
+# 證據一列都沒寫，派工還停在等它回報。所以那個失敗要留在 unit 狀態上，
+# 不要用 SuccessExitStatus 把它蓋掉。
+
+# 只讀觀測，不需要任何特權。
+NoNewPrivileges=true
+ProtectSystem=strict
+# ⚠ read-only 是刻意的：ssh 因此寫不進 known_hosts。
+# 一台 host key 對不上的機器會變成「量不到」而不是被默默信任。
+ProtectHome=read-only
+PrivateTmp=false
+RestrictSUIDSGID=true
+LockPersonality=true
+# ⚠ 不要加 PrivateDevices／ProtectKernelTunables／ProtectClock：
+# 它們隱含 capability 操作，非特權的 systemd --user manager 會
+# status=218/CAPABILITIES 起不來。這是 clawctl-agent.service 量過的坑。
+
+# ⚠ 這兩個上限要留足夠餘裕。被打死的是本地的 ssh，而遠端從來沒被問到——
+# 6272eb5 起那種結束會被當成傳輸失敗，但一開始就不要撞到比較好。
+CPUQuota=20%
+MemoryMax=256M
+
+[Install]
+WantedBy=default.target

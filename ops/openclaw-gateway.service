@@ -1,0 +1,28 @@
+# AI-Intune managed OpenClaw unit v1
+
+[Unit]
+Description=AI-Intune managed OpenClaw Gateway
+Documentation=https://github.com/teddashh/AI-Intune
+After=network-online.target
+Wants=network-online.target
+Conflicts=clawctl-hermes.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h
+Environment=PATH=%h/.local/share/clawctl/node-runtime/current/bin:/usr/bin:/bin
+ExecStart=%h/.local/share/clawctl/node-runtime/current/bin/node %h/.local/share/clawctl/openclaw/current/lib/node_modules/openclaw/dist/index.js gateway --port 18789
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.openclaw %h/.local/share/clawctl/openclaw
+PrivateTmp=false
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=default.target

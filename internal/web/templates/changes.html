@@ -1,0 +1,131 @@
+{{define "changes.html"}}{{template "head" .}}
+{{$p := .Changes}}
+
+<div class="page-heading"><div>
+  <h1>變更</h1>
+  <p>檢視裝置、名冊與代理程式觀測在指定時間範圍內的變更。</p>
+  {{if $p.HasFilters}}<p class="small">目前套用了精確篩選或正在續頁。<a href="/reports/changes">清除篩選</a></p>{{end}}
+</div></div>
+
+<div class="panel">
+<form method="get" action="/reports/changes" aria-label="Changes 篩選">
+  <div class="form-grid">
+    <label><span class="field-label">Machine ID</span>
+      <input name="machine_id" value="{{$p.MachineID}}" placeholder="精確 machine_id" autocomplete="off">
+    </label>
+    <label><span class="field-label">Subject</span>
+      <input name="subject" value="{{$p.Subject}}" placeholder="精確 subject" autocomplete="off">
+    </label>
+    <label><span class="field-label">From（不含）</span>
+      <input name="from" value="{{$p.From}}" placeholder="2026-09-08T12:00:00Z" autocomplete="off">
+    </label>
+    <label><span class="field-label">To（包含）</span>
+      <input name="to" value="{{$p.To}}" placeholder="2026-09-08T13:00:00Z" autocomplete="off">
+    </label>
+    <label><span class="field-label">每頁筆數</span>
+      <input name="limit" type="number" min="1" max="100" value="{{$p.Limit}}" inputmode="numeric">
+    </label>
+  </div>
+  <fieldset style="margin:14px 0 10px">
+    <legend class="field-label">Kinds（可複選）</legend>
+    <div style="display:flex;flex-wrap:wrap;gap:8px 16px">
+      {{range $p.Kinds}}<label class="small mono"><input type="checkbox" name="kind" value="{{.Value}}" {{if .Selected}}checked{{end}}> {{.Label}}</label>{{end}}
+    </div>
+  </fieldset>
+  <button type="submit">套用篩選</button>
+  {{if $p.HasFilters}} <a href="/reports/changes" style="margin-left:10px">清除篩選</a>{{end}}
+</form>
+</div>
+
+<section aria-labelledby="change-window-title">
+  <div class="section-title"><h2 id="change-window-title">這次查詢的 window 與一致性</h2></div>
+  <div class="panel">
+    <dl class="facts">
+      <dt>Window</dt><dd><span class="mono">{{$p.Result.Window.From.UTC.Format "2006-01-02T15:04:05Z"}}</span> → <span class="mono">{{$p.Result.Window.To.UTC.Format "2006-01-02T15:04:05Z"}}</span> <span class="small dim">{{$p.Result.Window.Boundary}}</span></dd>
+      <dt>時間基準</dt><dd><span class="mono">{{$p.Result.Window.TimeBasis}}</span>；Hub received_at。</dd>
+      <dt>評估時間</dt><dd><span class="mono">{{$p.Result.EvaluatedAt.Local.Format "2006-01-02 15:04:05"}}</span></dd>
+      <dt>Consistency</dt><dd><span class="mono">{{$p.Result.Consistency}}</span></dd>
+      <dt>Creation ceilings</dt><dd class="mono small">observations={{$p.Result.CreationCeilings.Observations}} · state={{$p.Result.CreationCeilings.StateHistory}} · registry={{$p.Result.CreationCeilings.Registry}} · lifecycle={{$p.Result.CreationCeilings.RegistryLifecycle}} · retention={{$p.Result.CreationCeilings.RetentionLog}}</dd>
+    </dl>
+  </div>
+</section>
+
+<section aria-labelledby="change-counts-title">
+  <div class="section-title">
+    <h2 id="change-counts-title">Kind counts</h2>
+    <p class="active-filter">精確篩選後 {{$p.Result.Total}} 筆；本頁 {{len $p.Rows}} 筆</p>
+  </div>
+  <div class="panel" style="padding:4px 6px;overflow-x:auto">
+    <table>
+      <thead><tr>{{range $p.Result.KindCounts}}<th scope="col">{{.Kind}}</th>{{end}}</tr></thead>
+      <tbody><tr>{{range $p.Result.KindCounts}}<td>{{.Count}}</td>{{end}}</tr></tbody>
+    </table>
+  </div>
+</section>
+
+<section aria-labelledby="change-coverage-title">
+  <div class="section-title"><h2 id="change-coverage-title">Coverage</h2></div>
+  <div class="panel">
+    {{if $p.CoveragePartial}}
+      <p class="st amber" style="margin-top:0"><b>Coverage partial —— 這些結果不能當成完整歷史。</b></p>
+      <ul class="small">{{range $p.CoverageMessages}}<li>{{.}}</li>{{end}}</ul>
+    {{else}}
+      <p class="st green" style="margin-top:0">Coverage complete。</p>
+    {{end}}
+    <p class="small dim" style="margin-bottom:0">Observation comparison=<span class="mono">{{$p.Result.Coverage.ObservationComparison}}</span>；observation history=<span class="mono">{{$p.Result.Coverage.ObservationHistory}}</span>；registry history=<span class="mono">{{$p.Result.Coverage.RegistryHistory}}</span>；state history=<span class="mono">{{$p.Result.Coverage.StateHistory}}</span>；endpoint delta=window boundaries。</p>
+  </div>
+</section>
+
+<section aria-labelledby="change-ledger-title">
+  <div class="section-title"><h2 id="change-ledger-title">變更證據</h2></div>
+  {{if $p.Rows}}
+    {{range $p.Rows}}
+    <article class="panel" data-change-kind="{{.Item.Kind}}" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap">
+        <div>
+          <p style="margin:0"><b>{{.KindLabel}}</b> · <span class="mono">{{.Item.Subject}}</span></p>
+          <p class="small" style="margin:5px 0 0">
+            {{if .MachineHref}}<a href="{{.MachineHref}}">{{.Item.DisplayName}}</a> <span class="mono dim">{{.MachineID}}</span>
+            {{else}}{{.Item.DisplayName}} <span class="dim">（machine link 無法安全建立）</span>{{end}}
+          </p>
+        </div>
+        <div class="small">
+          <b>Hub changed_at</b> <span class="mono">{{.Item.ChangedAt.Local.Format "2006-01-02 15:04:05"}}</span><br>
+          <b>Agent measured_at</b> {{with .Item.AgentMeasuredAt}}<span class="mono">{{.Local.Format "2006-01-02 15:04:05"}}</span>{{else}}<span class="dim">不適用／未可靠取得</span>{{end}}
+        </div>
+      </div>
+
+      <p class="small dim">{{.Semantics}} · {{.Baseline}}{{if .Severity}} · severity {{.Severity}}{{end}}</p>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:14px;align-items:start">
+        <div>
+          <p class="field-label" style="margin-top:0">Before</p>
+          {{if .Before.Fields}}<dl class="facts">{{range .Before.Fields}}<dt>{{.Label}}</dt><dd class="mono">{{.Value}}</dd>{{end}}</dl>
+          {{else}}<p class="small dim">{{.Before.Unavailable}}</p>{{end}}
+        </div>
+        <div aria-hidden="true" style="font-size:24px;padding-top:24px">→</div>
+        <div>
+          <p class="field-label" style="margin-top:0">After</p>
+          {{if .After.Fields}}<dl class="facts">{{range .After.Fields}}<dt>{{.Label}}</dt><dd class="mono">{{.Value}}</dd>{{end}}</dl>
+          {{else}}<p class="small dim">{{.After.Unavailable}}</p>{{end}}
+        </div>
+      </div>
+
+      {{if .Item.ChangedFields}}<p class="small"><b>Changed fields</b> <span class="mono">{{range $i, $field := .Item.ChangedFields}}{{if $i}}, {{end}}{{$field}}{{end}}</span></p>{{end}}
+      {{if .Item.RedactedFields}}<p class="small dim"><b>省略欄位</b> <span class="mono">{{range $i, $field := .Item.RedactedFields}}{{if $i}}, {{end}}{{$field}}{{end}}</span></p>{{end}}
+      {{if .Item.Issues}}<p class="small st amber"><b>Evidence issues</b> <span class="mono">{{range $i, $issue := .Item.Issues}}{{if $i}}, {{end}}{{$issue}}{{end}}</span></p>{{end}}
+      {{if .Item.AlteredFields}}<p class="small dim"><b>替換／截短欄位</b> <span class="mono">{{range $i, $field := .Item.AlteredFields}}{{if $i}}, {{end}}{{$field}}{{end}}</span></p>{{end}}
+    </article>
+    {{end}}
+  {{else}}
+    <p class="empty">{{if $p.HasFilters}}沒有符合目前精確篩選的變更。{{else}}這個 window 還沒有可列出的變更。{{end}}</p>
+  {{end}}
+</section>
+
+{{if or $p.FirstPageHref $p.NextHref}}
+<nav aria-label="Changes 分頁" style="display:flex;gap:12px;align-items:center;margin:12px 0">
+  {{if $p.FirstPageHref}}<a href="{{$p.FirstPageHref}}">回到這次查詢的第一頁</a>{{end}}
+  {{if $p.NextHref}}<a rel="next" href="{{$p.NextHref}}">下一頁（較舊的變更）</a>{{end}}
+</nav>
+{{end}}
+
+{{template "foot" .}}{{end}}

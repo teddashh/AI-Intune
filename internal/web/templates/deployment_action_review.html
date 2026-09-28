@@ -1,0 +1,72 @@
+{{define "deployment_action_review.html"}}{{template "head" .}}
+{{with .DeploymentActionReview}}{{$p := .Preview}}{{$d := $p.Deployment}}
+<div class="page-heading"><div>
+  <h1>{{.Title}}</h1>
+  <p>套用部署動作前的預覽。</p>
+</div></div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Authority snapshot</h2>
+  <dl class="facts">
+    <dt>Deployment</dt><dd class="mono">{{$d.DeploymentID}}</dd>
+    <dt>Channel / version</dt><dd>{{$d.Channel}} / {{with $d.Material.Version}}{{.}}{{else}}未知{{end}}</dd>
+    <dt>State</dt><dd>{{$d.State}}</dd>
+    <dt>Control revision</dt><dd>{{$d.ControlRevision}}</dd>
+    <dt>Opened batch</dt><dd>{{$d.OpenedBatch}} / {{$d.TotalBatches}}</dd>
+    <dt>Material</dt><dd class="mono">{{with $d.Material.ArtifactDigest}}{{.}}{{else}}未知{{end}}</dd>
+    <dt>Reason</dt><dd>{{if .Reason}}{{.Reason}}{{else}}未填{{end}}</dd>
+  </dl>
+  {{if $p.Eligibility.Eligible}}<p><b>確認後會發生：</b>{{.ActionView.Reason}}</p>
+  {{else}}<p class="caveat"><b>目前不可執行：</b>{{.ActionView.Reason}}</p>{{end}}
+  {{with $p.Promotion}}<p><b>Stable promotion：</b>{{if .Allowed}}允許{{else}}阻擋（{{range .Blockers}}{{deploymentBlockerLabel .}} {{end}}）{{end}}；跨故障域 verifier {{.IndependentPassedTargets}} / {{len .IndependentTargets}} 台通過。</p>
+  {{if .IndependentTargets}}<table><thead><tr><th>Canary 機器</th><th>工作單</th><th>獨立證據</th><th>下一步</th></tr></thead><tbody>
+  {{range .IndependentTargets}}<tr><td>{{.DisplayName}}</td><td><a class="mono" href="/jobs/{{.JobID}}">{{.JobID}}</a></td><td>{{.State}}</td><td>{{if eq .NextStep "none"}}無{{else if eq .NextStep "assign_verifier"}}到工作單指派跨故障域 verifier{{else if eq .NextStep "wait_for_verifier"}}等待已指派 verifier 完整回報{{else if eq .NextStep "rerun_verifier"}}重新執行已指派 verifier{{else if eq .NextStep "assign_active_verifier"}}到工作單指派仍有效的 verifier{{else if eq .NextStep "reassign_verifier"}}重新指派 verifier{{else if eq .NextStep "upgrade_and_reassign_verifier"}}升級後重新指派 verifier{{else if eq .NextStep "repair_and_rerun_canary"}}修復後重跑 canary{{else}}確認 artifact 後重跑 canary{{end}}</td></tr>{{end}}
+  </tbody></table>{{end}}{{end}}
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">精確 targets</h2>
+  {{if eq $p.Action "retry"}}
+  <p>範圍是下列機器；確認後會建立新的 deployment，只有下方「新 attempt 結果」標為「納入」的機器會開新工作單。</p>
+  <table><thead><tr><th>機器</th><th>原 job</th><th>終態</th></tr></thead><tbody>
+  {{range $p.TerminalFailureTargets}}<tr><td>{{.DisplayName}}<br><span class="mono small">{{.MachineID}}</span></td><td><a class="mono" href="/jobs/{{.JobID}}">{{.JobID}}</a></td><td>{{terminalJobOutcome .JobState}}（<span class="mono">{{.JobState}}</span>）</td></tr>{{end}}
+  </tbody></table>
+  <h3>Retry attempt 計畫</h3>
+  <p class="small">新 attempt 的 batch 與排除結果。</p>
+  <table><thead><tr><th>機器</th><th>新批次</th><th>新 attempt 結果</th></tr></thead><tbody>
+  {{range $p.Targets}}<tr><td>{{.DisplayName}}<br><span class="mono small">{{.MachineID}}</span></td><td>{{if .BatchNo}}{{.BatchNo}}{{else}}—{{end}}</td><td>{{with .ExcludedReason}}排除：{{.}}{{else}}納入{{end}}</td></tr>{{else}}<tr><td colspan="3">沒有可納入新 attempt 的 target。</td></tr>{{end}}
+  </tbody></table>
+  {{else}}
+  <table><thead><tr><th>機器</th><th>批次</th><th>排除</th></tr></thead><tbody>
+  {{range $p.Targets}}<tr><td>{{.DisplayName}}<br><span class="mono small">{{.MachineID}}</span></td><td>{{.BatchNo}}</td><td>{{with .ExcludedReason}}{{.}}{{else}}—{{end}}</td></tr>{{else}}<tr><td colspan="3">沒有新 target；此動作只改 lifecycle。</td></tr>{{end}}
+  </tbody></table>
+  {{end}}
+</div>
+
+<div class="panel">
+  {{if and $p.Eligibility.Eligible .CapabilityAllowed}}
+  <p>輸入確認值以套用。</p>
+  <form method="post" action="{{.ApplyPath}}">
+    <input type="hidden" name="preview_digest" value="{{$p.PreviewDigest}}">
+    <input type="hidden" name="expected_control_revision" value="{{$d.ControlRevision}}">
+    <input type="hidden" name="expected_opened_batch" value="{{$d.OpenedBatch}}">
+    <input type="hidden" name="reason" value="{{.Reason}}">
+    <input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+    <div class="action-form">
+    {{if eq $p.Action "continue"}}
+      <label><span class="field-label">輸入 channel：{{$d.Channel}}</span><input name="confirm_channel" autocomplete="off" required></label>
+    {{else if eq $p.Action "retry"}}
+      <label><span class="field-label">輸入 channel：{{$d.Channel}}</span><input name="confirm_channel" autocomplete="off" required></label>
+      <label><span class="field-label">輸入 version：{{with $d.Material.Version}}{{.}}{{end}}</span><input name="confirm_version" autocomplete="off" required></label>
+    {{else}}
+      <label><span class="field-label">輸入完整 deployment ID</span><input class="mono" name="confirm_deployment_id" autocomplete="off" required></label>
+    {{end}}
+      <button type="submit">{{.Button}}</button>
+    </div>
+  </form>
+  {{else if not .CapabilityAllowed}}
+  {{else}}<p class="small dim">此 preview 有 blocker。</p>{{end}}
+  <p><a href="/deployments/{{$d.DeploymentID}}">取消，回該部署</a></p>
+</div>
+{{end}}
+{{template "foot" .}}{{end}}

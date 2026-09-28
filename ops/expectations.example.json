@@ -1,0 +1,87 @@
+{
+  "_comment": [
+    "「它有沒有在做事」的答案來源。一條規則問兩個問題，缺一不可：",
+    "  max_age_seconds → 那個負責檢查的東西，自己還活著嗎（看檔案時間，不看內容）",
+    "  events          → 它活著的時候，喊了什麼（讀列舉欄位，不掃散文）",
+    "只做第二個，就退回成 PRODUCT.md 地基二否決掉的那張關鍵字表。",
+    "why 是必填，而且會原封不動出現在告警裡。",
+    "",
+    "⚠⚠ max_age_seconds 要照那支程式**保證**會寫的節奏定，不是照它現在的節奏。",
+    "watcher.sh 只有兩種寫入：每小時一次心跳（保證），異常時每 60 秒一次（不保證）。",
+    "拿 900 秒去量它，在一台『正在每分鐘失敗』的機器上會通過 —— 而那是",
+    "因為它壞了。修好的那一刻它就轉紅，理由還是錯的。所以窗口照心跳定：",
+    "整點跨越才發，最大間隔約 3660 秒，取 5400 秒留 1.5 倍餘裕。",
+    "",
+    "⚠⚠ 只有 max_age_seconds、沒有 events 的宣告是刻意的，也是有代價的。",
+    "MACHINE_LOG.md 是給人讀的散文，沒有列舉欄位 —— 宣告 events 就是在掃自由文字判狀態。",
+    "代價很具體：sampleagent4 的心跳連續失敗 68 天，每 30 分鐘勤奮地寫一次「我失敗了」，",
+    "新鮮度全綠。詳見 docs/research/HEARTBEAT-PIPELINE-2026-09-05.md。",
+    "正確的修法在生產端（讓它同時 append 一行 JSONL），不是替別人的散文寫解析器。"
+  ],
+  "expectations": [
+    {
+      "machine": "samplehub1",
+      "unit": "openclaw-watcher.service",
+      "artifact": "/home/example-user/.openclaw/workspace/evolution-journal.jsonl",
+      "max_age_seconds": 5400,
+      "why": "watcher 每小時往事件檔寫一次心跳。停了就代表這個哨兵自己死了 —— 而一個死掉的哨兵不會喊自己死了。⚠ 只有每小時一次心跳，所以這條最久要 90 分鐘才發現得了",
+      "events": {
+        "ts_field": "ts",
+        "type_field": "event",
+        "not_ok": [
+          "baseline_hash_mismatch",
+          "baseline_meta_hash_mismatch",
+          "baseline_hashes_file_missing",
+          "baseline_immutability_lost",
+          "openclaw_gateway_not_running"
+        ],
+        "window_seconds": 3600
+      }
+    },
+    {
+      "machine": "sampleagent2",
+      "unit": "openclaw-watcher.service",
+      "artifact": "/home/ubuntu/.openclaw/workspace/evolution-journal.jsonl",
+      "max_age_seconds": 5400,
+      "why": "watcher 每小時往事件檔寫一次心跳。停了就代表這個哨兵自己死了 —— 而一個死掉的哨兵不會喊自己死了。⚠ 只有每小時一次心跳，所以這條最久要 90 分鐘才發現得了",
+      "events": {
+        "ts_field": "ts",
+        "type_field": "event",
+        "not_ok": [
+          "baseline_hash_mismatch",
+          "baseline_meta_hash_mismatch",
+          "baseline_hashes_file_missing",
+          "baseline_immutability_lost",
+          "openclaw_gateway_not_running"
+        ],
+        "window_seconds": 3600
+      }
+    },
+    {
+      "machine": "sampleagent4",
+      "unit": "openclaw-watcher.service",
+      "artifact": "/home/example-user-b/.openclaw/workspace/evolution-journal.jsonl",
+      "max_age_seconds": 5400,
+      "why": "watcher 每小時往事件檔寫一次心跳。停了就代表這個哨兵自己死了 —— 而一個死掉的哨兵不會喊自己死了。⚠ 只有每小時一次心跳，所以這條最久要 90 分鐘才發現得了",
+      "events": {
+        "ts_field": "ts",
+        "type_field": "event",
+        "not_ok": [
+          "baseline_hash_mismatch",
+          "baseline_meta_hash_mismatch",
+          "baseline_hashes_file_missing",
+          "baseline_immutability_lost",
+          "openclaw_gateway_not_running"
+        ],
+        "window_seconds": 3600
+      }
+    },
+    {
+      "machine": "samplehub1",
+      "unit": "openclaw-gateway.service",
+      "artifact": "/home/example-user/sampleagent1-management/.openclaw-ws/MACHINE_LOG.md",
+      "max_age_seconds": 2700,
+      "why": "samplehub1 上的 sampleagent1-management agent 每 30 分鐘 SSH 進 sampleagent1 探五件事（可達、gateway、磁碟、tunnel、tailscale）再寫一行。排程是 gateway cron `sampleagent1-heartbeat`（0,30 * * * *）。⚠ 這是 sampleagent1 唯一的證據管線 —— 它自己沒裝 clawctl agent，在名冊上是 NeverReported。⚠ 過期有兩個原因，這條分不出來：sampleagent1 不答，或 samplehub1 的 gateway cron 沒在發。兩個都該修，先跑 `openclaw cron list` 看 sampleagent1-heartbeat 的 Last。⚠ 每天 05:15 的 sampleagent1-billing-daily 也寫這個檔，會把年齡歸零約 45 分鐘 —— 遮不住多小時的缺口，但會讓告警閃一下。實績：2026-08-21 到 09-04 之間斷過 48h、47.5h、38.5h、37.5h，當時沒有任何東西會講。"
+    }
+  ]
+}

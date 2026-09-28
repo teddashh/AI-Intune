@@ -1,0 +1,40 @@
+{{define "revoke_token_preview.html"}}{{template "head" .}}
+{{with .EnrollTokenRevocationPreview}}
+<div class="page-heading section-anchor" id="pending-enrollment-ticket-revocation">
+  <div>
+    <h1>確認撤銷 {{.Name}} 的 pending enrollment ticket</h1>
+    <p>撤銷前預覽。</p>
+  </div>
+</div>
+
+<div class="caveat">
+  <b>Pending enrollment ticket 將失效；名冊與 agent credential 不變。</b>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">待確認的精確影響</h2>
+  <table>
+    <tbody>
+      <tr><th>機器</th><td><b>{{.Name}}</b><br><span class="mono small">{{.MachineID}}</span></td></tr>
+      <tr><th>票建立時間</th><td>{{.TokenCreatedAt}}</td></tr>
+      <tr><th>票到期時間</th><td>{{.TokenExpiresAt}} {{if .TokenExpired}}<span class="st amber">已過期，但仍是尚未兌換的 pending ticket</span>{{else}}<span class="st green">尚未過期</span>{{end}}</td></tr>
+      <tr><th>預覽時間</th><td>{{.PreviewedAt}}</td></tr>
+      <tr><th>撤銷理由</th><td>{{if .Reason}}{{.Reason}}{{else}}未填{{end}}</td></tr>
+      <tr><th>名冊列</th><td>{{if .RegistryRetained}}保留{{else}}不保留{{end}}</td></tr>
+      <tr><th>管理分母變化</th><td><span class="mono">{{.DenominatorDelta}}</span></td></tr>
+      <tr><th>已啟用 agent credential</th><td>{{if .ActiveAgentCredentialAffected}}會受影響{{else}}不受影響{{end}}</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <form method="post" action="/machines/{{.MachineID}}/revoke-token">
+    <input type="hidden" name="preview_digest" value="{{.PreviewDigest}}">
+    <input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+    <input type="hidden" name="reason" value="{{.Reason}}">
+    <button type="submit">確認只撤銷這張 pending enrollment ticket</button>
+    <a href="/machines/{{.MachineID}}" style="margin-left:12px">取消，回那台機器</a>
+  </form>
+</div>
+{{end}}
+{{template "foot" .}}{{end}}

@@ -1,0 +1,23 @@
+{{define "maintenance_restore_drill_review.html"}}{{template "head" .}}
+{{$p := .RestoreDrillPreview}}
+<div class="page-heading"><div><h1>確認還原演練</h1><p>預覽固定於 {{$p.EvaluatedAt.Local.Format "2006-01-02 15:04:05"}}。</p></div></div>
+<div class="caveat"><b>正式資料庫不會被替換。</b> 系統只會複製這份備份到私有暫存空間，驗證能否開啟並核對名冊；若備份身分已變更，系統會拒絕建立 operation。</div>
+<div class="panel">
+  <div class="metric-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+    <div class="metric-card"><div class="metric-label">備份檔</div><div class="metric-value" style="font-size:19px;overflow-wrap:anywhere">{{$p.Backup.Name}}</div><div class="metric-note">{{bytes $p.Backup.SizeBytes}}</div></div>
+    <div class="metric-card"><div class="metric-label">正式名冊預期數</div><div class="metric-value">{{$p.LiveExpected}}</div><div class="metric-note">完成時會再次核對</div></div>
+    <div class="metric-card"><div class="metric-label">備份修改時間</div><div class="metric-value" style="font-size:19px">{{$p.Backup.ModifiedAt.Local.Format "2006-01-02 15:04:05"}}</div><div class="metric-note">固定於這次預覽</div></div>
+  </div>
+  <dl class="facts">
+    <dt>SHA-256</dt><dd class="mono" style="overflow-wrap:anywhere">{{$p.Backup.SHA256}}</dd>
+    <dt>理由</dt><dd>{{.RestoreDrillReason}}</dd>
+  </dl>
+  <form method="post" action="/tenant/maintenance/restore-drills" style="margin-top:18px">
+    <input type="hidden" name="preview_digest" value="{{$p.PreviewDigest}}">
+    <input type="hidden" name="reason" value="{{.RestoreDrillReason}}">
+    <input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+    <label><span class="field-label">輸入 <span class="mono">{{$p.Confirmation}}</span> 確認</span><input name="confirm" required autocomplete="off" spellcheck="false"></label>
+    <div class="command-bar" style="margin-top:14px"><button type="submit">建立還原演練</button><a class="button secondary" href="/tenant/maintenance">取消</a></div>
+  </form>
+</div>
+{{template "foot" .}}{{end}}

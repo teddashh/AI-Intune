@@ -1,0 +1,81 @@
+{{define "deployments.html"}}{{template "head" .}}
+{{$p := .DeploymentList}}
+
+<div class="page-heading"><div>
+  <h1>{{if $p.IsNew}}新增部署{{else}}部署帳本{{end}}</h1>
+  {{if $p.IsNew}}
+  <p>填寫 settings 並預覽精確 target snapshot 與安全閘門。</p>
+  {{else}}
+  <p>每一列都是同一條期望狀態 → 工作單 → 驗證管線。</p>
+  {{end}}
+</div></div>
+
+{{if $p.IsNew}}
+<section id="deployment-new" class="section-anchor" tabindex="-1" aria-labelledby="deployment-new-title">
+  <h2 id="deployment-new-title">Deployment settings</h2>
+  <div class="panel">
+    {{if $.Access.CanAdmin}}
+    <form method="post" action="/deployments/preview">
+      <div class="action-form">
+        <label><span class="field-label">Channel</span>
+          <select name="channel" required><option value="canary">canary</option><option value="stable">stable</option></select>
+        </label>
+        <label><span class="field-label">OpenClaw version</span>
+          <input name="version" autocomplete="off" required placeholder="例如 2026.9.8">
+        </label>
+        <label><span class="field-label">Artifact SHA-256</span>
+          <input class="mono" name="artifact_sha256" autocomplete="off" required minlength="64" maxlength="64">
+        </label>
+      </div>
+      <div class="action-form">
+        <label><span class="field-label">Batch size</span><input type="number" name="batch_size" value="5" min="1" max="5" required></label>
+        <label><span class="field-label">Execution timeout（秒）</span><input type="number" name="execution_timeout_seconds" value="600" min="1" max="86400" required></label>
+        <label><span class="field-label">不可逆變更</span><select name="irreversible" required><option value="false">否</option><option value="true">是</option></select></label>
+      </div>
+      <label><span class="field-label">變更理由</span><input name="reason" maxlength="500" autocomplete="off"></label>
+      <p><button type="submit">Preview deployment</button></p>
+    </form>
+    {{end}}
+    <h3>Hub 已收錄的 OpenClaw artifact 候選</h3>
+    <p class="small dim">驗證層級：清單 metadata；preview SHA-256 與部署資格。</p>
+    {{if $p.Artifacts}}
+    <table><thead><tr><th>版本</th><th>SHA-256</th><th>大小</th><th>Node engines</th></tr></thead><tbody>
+    {{range $p.Artifacts}}<tr><td>{{.Version}}</td><td class="mono">{{.SHA256}}</td><td>{{bytes .SizeBytes}}</td><td class="mono">{{or .EnginesNode "未宣告"}}</td></tr>{{end}}
+    </tbody></table>
+    {{else}}<p class="empty">沒有 OpenClaw artifact 候選。<a href="/updates">查看 catalog</a></p>{{end}}
+  </div>
+</section>
+{{else}}
+<div class="section-title">
+  <h2 id="deployment-ledger" class="section-anchor" tabindex="-1">{{$p.Heading}}</h2>
+  <p class="active-filter">本頁 {{len $p.Rows}} 張；帳本共 {{$p.Total}} 張</p>
+</div>
+<div class="panel" style="padding:4px 6px">
+{{if $p.Rows}}
+<table>
+<caption class="sr-only">{{$p.Heading}}</caption>
+<thead><tr><th scope="col">id</th><th scope="col">channel</th><th scope="col">版本</th><th scope="col">revision</th><th scope="col">state</th><th scope="col">批次</th><th scope="col">工作單計數</th><th scope="col">stuck</th><th scope="col">attempt</th></tr></thead>
+<tbody>
+{{range $p.Rows}}
+<tr>
+  <th scope="row" class="mono">
+    <a href="/deployments/{{.Summary.DeploymentID}}" aria-label="部署 {{.Summary.DeploymentID}}" title="{{.Summary.DeploymentID}}">{{short .Summary.DeploymentID 8}}</a>
+    <span class="sub mono dim" style="display:block;word-break:break-all">{{.Summary.DeploymentID}}</span>
+  </th>
+  <td>{{.Summary.Channel}}</td><td>{{.Version}}</td><td>{{.Summary.DesiredRevision}} / control {{.Summary.ControlRevision}}</td>
+  <td>{{.Summary.State}}{{with .Summary.BoundaryPause}}<div class="small">安全閘門：{{.Kind}}</div>{{end}}</td><td>{{.Summary.OpenedBatch}} / {{.Summary.TotalBatches}}</td>
+  <td class="small">
+    {{range .JobCounts}}<a href="{{.Href}}" aria-label="查看此部署的 {{.Count}} 張 {{.State}} 工作單">{{.Count}} {{.State}}</a><br>{{else}}<span class="dim">0 jobs</span>{{end}}
+  </td>
+  <td><a href="/deployments/{{.Summary.DeploymentID}}?section=stuck#stuck" aria-label="查看此部署的 Stuck 明細">{{.Summary.Stuck}}</a></td><td>{{.Summary.Attempt}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<p class="empty">{{$p.Empty}}</p>
+{{end}}
+</div>
+{{end}}
+
+{{template "foot" .}}{{end}}

@@ -1,0 +1,341 @@
+{{define "head"}}<!doctype html>
+<html lang="{{.Locale.Tag}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Locale.PageTitle}} · AI-Intune</title>
+<style>
+:root{
+  --topbar:#323130; --sidebar:#f3f2f1; --canvas:#faf9f8; --surface:#fff;
+  --surface-alt:#f7f7f7; --line:#e1dfdd; --line-strong:#c8c6c4;
+  --ink:#201f1e; --dim:#605e5c; --muted:#605e5c; --accent:#006fc9;
+  --accent-soft:#eff6fc; --green:#107c10; --green-soft:#f1faf1;
+  --amber:#ca5010; --amber-soft:#fff4e5; --red:#a4262c; --red-soft:#fde7e9;
+  --grey:#605e5c; --blue:#006fc9; --warning-text:#8a3b00; --shadow:0 1px 3px rgba(0,0,0,.12);
+  --topbar-height:48px; --sidebar-width:212px; --workload-width:224px;
+}
+*{box-sizing:border-box}
+html{background:var(--canvas);scroll-behavior:smooth}
+body{
+  margin:0;background:var(--canvas);color:var(--ink);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",
+       "PingFang TC","Microsoft JhengHei",Arial,sans-serif;
+}
+a{color:var(--accent);text-underline-offset:2px}
+a:hover{color:#004e8c}
+button,input,select,textarea{font:inherit}
+button,input,select{min-height:34px}
+input,select,textarea{
+  max-width:100%;border:1px solid var(--line-strong);border-radius:2px;background:#fff;
+  color:var(--ink);padding:6px 9px;
+}
+input:focus,select:focus,textarea:focus,a:focus-visible,button:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;
+}
+button,.button{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--accent);
+  border-radius:2px;background:var(--accent);color:#fff;padding:6px 13px;text-decoration:none;
+  cursor:pointer;font-weight:600;
+}
+button:hover,.button:hover{background:#005a9e;color:#fff}
+.button.secondary{background:#fff;color:var(--ink);border-color:var(--line-strong)}
+.button.secondary:hover{background:var(--surface-alt);color:var(--ink)}
+.skip-link{position:fixed;left:10px;top:-60px;z-index:100;background:#fff;padding:9px 14px}
+.skip-link:focus{top:7px}
+.sr-only{
+  position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;
+  overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important;
+}
+
+.topbar{
+  position:sticky;top:0;z-index:30;height:var(--topbar-height);display:flex;align-items:center;
+  gap:18px;background:var(--topbar);color:#fff;padding:0 18px;box-shadow:0 1px 2px rgba(0,0,0,.25);
+}
+.topbar a{color:inherit;text-decoration:none}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;letter-spacing:.01em;white-space:nowrap}
+.brand-mark{
+  display:grid;place-items:center;width:22px;height:22px;border-radius:3px;background:#2b88d8;
+  color:#fff;font-size:11px;font-weight:700;
+}
+.topbar-tools{margin-left:auto;display:flex;align-items:center;height:100%;gap:4px}
+.topbar-boundary{display:flex;align-items:center;gap:7px;padding:0 11px;color:#e1dfdd;font-size:12px}
+.topbar-boundary .dot{margin:0}
+.operator-chip{display:flex;align-items:center;gap:7px;padding:3px 9px;border-left:1px solid rgba(255,255,255,.24);font-size:12px;color:#fff;white-space:nowrap}
+.operator-chip .operator-detail{color:#c8c6c4}
+.language-switch{
+  display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:3px 9px;
+  border:1px solid rgba(255,255,255,.34);border-radius:2px;color:#fff;font-size:12px;white-space:nowrap;
+}
+.language-switch:hover{background:rgba(255,255,255,.12);color:#fff}
+.clock{padding-left:12px;border-left:1px solid rgba(255,255,255,.24);color:#e1dfdd;font-size:12px;white-space:nowrap}
+
+.app-shell{display:grid;grid-template-columns:var(--sidebar-width) minmax(0,1fr);min-height:calc(100vh - var(--topbar-height))}
+.sidebar{
+  position:sticky;top:var(--topbar-height);align-self:start;height:calc(100vh - var(--topbar-height));
+  overflow-y:auto;background:var(--sidebar);border-right:1px solid var(--line);padding:10px 0 22px;
+}
+.nav-group-label{
+  padding:12px 20px 5px;color:var(--muted);font-size:11px;font-weight:600;letter-spacing:.06em;
+  text-transform:uppercase;
+}
+.sidebar nav{display:block}
+.nav-item{
+  position:relative;display:flex;align-items:center;gap:11px;min-height:38px;padding:7px 16px;
+  color:var(--ink);text-decoration:none;border-left:3px solid transparent;
+}
+.nav-item:hover{background:#e9e8e7;color:var(--ink)}
+.nav-item.on,.nav-item[aria-current="page"]{background:#e1dfdd;border-left-color:var(--accent);font-weight:600}
+.nav-icon{width:18px;height:18px;display:grid;place-items:center;flex:none;color:#0078d4}
+.nav-icon svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.nav-separator{height:1px;background:var(--line-strong);margin:12px 20px}
+.sidebar-note{margin:18px 20px 0;padding-top:14px;border-top:1px solid var(--line-strong);color:var(--dim);font-size:12px}
+
+.workspace-shell{display:grid;grid-template-columns:minmax(0,1fr);min-width:0}
+.workspace-shell.with-workload-nav{grid-template-columns:var(--workload-width) minmax(0,1fr)}
+.workload-rail{
+  position:sticky;top:var(--topbar-height);align-self:start;height:calc(100vh - var(--topbar-height));
+  overflow-y:auto;background:#fff;border-right:1px solid var(--line);padding:16px 0 24px;
+}
+.workload-title{padding:0 18px 13px;font-size:18px;font-weight:600;color:var(--ink)}
+.main-content{min-width:0;padding:18px 28px 80px}
+.content-inner{width:100%;max-width:none;margin:0}
+.breadcrumb{display:flex;align-items:center;gap:8px;min-height:26px;color:var(--dim);font-size:12px;margin-bottom:8px}
+.breadcrumb a{text-decoration:none}
+.breadcrumb-separator{color:var(--muted)}
+.subnav{display:block;margin:0}
+.subnav-item{
+  display:flex;align-items:center;min-height:36px;padding:7px 18px;border-left:3px solid transparent;
+  color:var(--ink);font-size:13px;text-decoration:none;
+}
+.subnav-item:hover{background:var(--surface-alt);color:var(--ink)}
+.subnav-item.on,.subnav-item[aria-current]{border-left-color:var(--accent);background:#edebe9;color:var(--ink);font-weight:600}
+.section-anchor{display:block;scroll-margin-top:calc(var(--topbar-height) + 58px)}
+.page-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin:0 0 18px}
+.page-heading h1{font-size:26px;line-height:1.25;font-weight:500;margin:0 0 5px}
+.page-heading p{margin:0;color:var(--dim)}
+.command-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+/* 第一屏仍然用完整句子，KPI 只負責讓人掃讀，不取代證據邊界。 */
+.headline{margin:0 0 16px}
+.headline p{font-size:15px;line-height:1.5;margin:0 0 5px}
+.headline p:first-child{font-size:17px;font-weight:600;color:var(--ink)}
+.headline .quiet{color:var(--dim)}
+
+h1{font-size:26px;font-weight:500;line-height:1.25;margin:0 0 18px}
+h2{
+  font-size:17px;font-weight:600;color:var(--ink);letter-spacing:0;margin:30px 0 11px;
+  border:0;padding:0;
+}
+h3{font-size:14px;margin:18px 0 8px}
+h2[id]{scroll-margin-top:calc(var(--topbar-height) + 12px)}
+.panel{
+  background:var(--surface);border:1px solid var(--line);border-radius:3px;padding:18px 20px;
+  box-shadow:var(--shadow);overflow-x:auto;
+}
+.panel + .panel{margin-top:14px}
+details.panel > summary{cursor:pointer;font-weight:600;list-style-position:outside}
+details.panel > summary + *{margin-top:12px}
+
+.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 18px}
+.metric-card{
+  min-width:0;min-height:142px;background:var(--surface);border:1px solid var(--line);border-radius:3px;
+  padding:17px 18px;box-shadow:var(--shadow);display:flex;flex-direction:column;color:var(--ink);text-decoration:none;
+}
+.metric-card:hover{border-color:#8a8886;color:var(--ink);box-shadow:0 2px 6px rgba(0,0,0,.16)}
+.metric-label{font-size:14px;font-weight:600;margin-bottom:12px}
+.metric-value{font-size:32px;line-height:1;font-weight:500;letter-spacing:-.02em;margin-bottom:9px}
+.metric-note{color:var(--dim);font-size:13px;margin-top:auto}
+.metric-state{display:inline-flex;align-items:center;gap:7px}
+.metric-state .dot{margin:0}
+.dashboard-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(270px,1fr);gap:14px;align-items:start}
+.dashboard-stack{display:grid;gap:14px}
+.dashboard-stack .panel + .panel{margin-top:0}
+.panel-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-2px 0 12px}
+.panel-title h2{margin:0;font-size:16px}
+.panel-title a{font-size:13px;text-decoration:none}
+.section-title{display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:30px 0 11px}
+.section-title h2{margin:0}
+.active-filter{margin:0;color:var(--dim);font-size:13px}
+.active-filter a{margin-left:8px}
+.signal-list{list-style:none;margin:0;padding:0}
+.signal-list li{padding:9px 0;border-bottom:1px solid var(--line);display:flex;gap:9px;align-items:flex-start}
+.signal-list li:last-child{border-bottom:0}
+.signal-list .dot{margin-top:7px}
+
+.table-scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;background:var(--surface)}
+caption{text-align:left;font-weight:600;padding:0 0 10px}
+th{
+  text-align:left;font-size:12px;font-weight:600;color:var(--dim);padding:8px 10px;
+  border-bottom:1px solid var(--line-strong);white-space:nowrap;background:#fafafa;
+}
+td{padding:10px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--accent-soft)}
+td.name a{font-weight:600;text-decoration:none}
+td.name .sub{display:block;color:var(--dim);font-size:12px;font-weight:400}
+td.reason{color:var(--dim);min-width:260px}
+
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:8px;vertical-align:baseline;flex:none}
+.green{background:var(--green)} .amber{background:var(--amber)}
+.red{background:var(--red)} .grey{background:var(--grey)} .blue{background:var(--blue)}
+.st{white-space:nowrap;font-weight:600}
+.st.green{background:none;color:var(--green)}
+.st.blue{background:none;color:var(--blue)}
+.st.amber{background:none;color:var(--amber)}
+.st.red{background:none;color:var(--red)}
+.st.grey{background:none;color:var(--grey)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
+.dim{color:var(--dim)}
+.small{font-size:13px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#f5f5f5;padding:1px 3px;border-radius:2px}
+
+ul.findings{list-style:none;margin:0;padding:0}
+ul.findings li{padding:9px 0;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:flex-start}
+ul.findings li:last-child{border-bottom:none}
+ul.findings .who{color:var(--dim);flex:none;min-width:96px}
+.caveat{
+  border-left:3px solid var(--amber);background:var(--amber-soft);color:#5c3b00;
+  padding:12px 15px;border-radius:0 3px 3px 0;margin:14px 0;font-size:14px;
+}
+.caveat b{color:#7a3e00}
+.strip{display:flex;gap:2px;align-items:flex-end;height:26px}
+.strip i{display:block;width:6px;border-radius:1px}
+.swatch{display:inline-block;width:8px;height:8px;border-radius:1px;margin:0 4px 0 8px}
+pre.copy{
+  background:#f7f7f7;border:1px solid var(--line);border-radius:2px;padding:12px 14px;overflow-x:auto;
+  margin:8px 0 0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;color:#323130;
+}
+blockquote.summary{margin:0 0 14px;padding:10px 14px;border-left:2px solid var(--line-strong);color:var(--ink);white-space:pre-wrap;font-size:14px}
+blockquote.summary .meta{display:block;color:var(--dim);font-size:12px;margin-bottom:5px}
+.empty{color:var(--dim);font-style:normal;padding:6px 0}
+.field-label{display:block;font-weight:600;font-size:13px;margin:0 0 4px}
+.form-grid{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:10px;align-items:end}
+.form-grid label,.form-grid input,.form-grid select{width:100%}
+.enrollment-form{
+  display:grid;grid-template-columns:minmax(180px,.8fr) minmax(240px,1.2fr) auto;
+  gap:10px;align-items:end;margin:10px 0 4px;
+}
+.enrollment-form label,.enrollment-form input{width:100%}
+.action-form{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin:10px 0 4px}
+.action-form label{flex:1 1 220px}
+.action-form input,.action-form select{width:100%}
+.action-form button{flex:0 0 auto}
+.section-anchor:focus{outline:2px solid var(--accent);outline-offset:4px}
+
+@media (max-width:1100px){
+  :root{--sidebar-width:190px;--workload-width:196px}
+  .main-content{padding:18px 20px 70px}
+  .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .dashboard-grid{grid-template-columns:1fr}
+}
+@media (max-width:760px){
+  .topbar{padding:0 12px}.topbar-boundary,.operator-chip,.clock{display:none}
+  .app-shell{display:block}
+  .sidebar{position:static;height:auto;overflow:visible;border-right:0;border-bottom:1px solid var(--line);padding:0}
+  .sidebar nav{display:flex;overflow-x:auto;scrollbar-width:thin}
+  .nav-group-label,.nav-separator,.sidebar-note{display:none}
+  .nav-item{min-width:max-content;min-height:46px;padding:8px 13px;border-left:0;border-bottom:3px solid transparent}
+  .nav-item.on,.nav-item[aria-current="page"]{border-left:0;border-bottom-color:var(--accent)}
+  .nav-icon{display:none}
+  .workspace-shell,.workspace-shell.with-workload-nav{display:block}
+  .workload-rail{position:static;height:auto;overflow:visible;border-right:0;border-bottom:1px solid var(--line);padding:0;background:#fff}
+  .workload-title{padding:10px 14px 3px;font-size:15px}
+  .subnav{display:flex;overflow-x:auto;scrollbar-width:thin;padding:0 7px}
+  .subnav-item{min-width:max-content;min-height:42px;padding:7px 10px;border-left:0;border-bottom:3px solid transparent}
+  .subnav-item.on,.subnav-item[aria-current]{border-left:0;border-bottom-color:var(--accent);background:transparent;color:var(--accent)}
+  .main-content{padding:15px 14px 56px}
+  .page-heading{display:block}.command-bar{margin-top:12px}
+  .metric-grid{grid-template-columns:1fr 1fr;gap:9px}
+  .metric-card{min-height:124px;padding:14px}
+  .metric-value{font-size:28px}
+  .panel{padding:15px}
+  input,select,textarea{font-size:16px}
+  table{min-width:680px}
+  .enrollment-form{grid-template-columns:1fr;align-items:stretch}
+  .form-grid{grid-template-columns:1fr}
+  .action-form{display:grid;grid-template-columns:1fr;align-items:stretch}
+}
+@media (max-width:430px){
+  .brand-mark{display:none}.topbar{gap:8px}
+  .metric-grid{grid-template-columns:1fr}
+  .metric-card{min-height:110px}
+  .page-heading h1,h1{font-size:23px}
+}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main-content">{{.Locale.SkipLabel}}</a>
+<header class="topbar">
+  <a class="brand" href="/" aria-label="{{.Locale.BrandAria}}">
+    <span class="brand-mark" aria-hidden="true">AI</span>
+    <span>{{.Locale.BrandLabel}}</span>
+  </a>
+  <div class="topbar-tools">
+    {{if .Access.Known}}
+      <span class="topbar-boundary"><span class="dot green" aria-hidden="true"></span>{{.Locale.VerifiedLabel}}</span>
+      <span class="operator-chip" title="{{.Access.Attribution}}">
+        <span>{{.Access.Login}}</span><span class="operator-detail">{{.Access.Permissions}} · {{.Access.Device}}</span>
+      </span>
+    {{else}}
+      <span class="topbar-boundary"><span class="dot amber" aria-hidden="true"></span>{{.Locale.UnverifiedLabel}}</span>
+    {{end}}
+    <a class="language-switch" href="{{.Locale.ToggleHref}}" title="{{.Locale.ToggleTitle}}" aria-label="{{.Locale.ToggleTitle}}">{{.Locale.ToggleLabel}}</a>
+    <time class="clock">{{.Now}}</time>
+  </div>
+</header>
+<div class="app-shell">
+  <aside class="sidebar">
+    <nav aria-label="{{.Locale.MainNavAria}}">
+      <div class="nav-group-label">{{.Locale.NavGroupLabel}}</div>
+      <a href="/" class="nav-item {{if eq .Nav "dashboard"}}on{{end}}" {{if eq .Nav "dashboard"}}aria-current="page"{{end}}>
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span><span>{{.Locale.DashboardLabel}}</span>
+      </a>
+      <a href="/machines#machines" class="nav-item {{if or (eq .Nav "machines") (eq .Nav "machines-detail") (eq .Nav "machines-enrollment") (eq .Nav "machines-lifecycle") (eq .Nav "machines-configuration") (eq .Nav "updates")}}on{{end}}" {{if or (eq .Nav "machines") (eq .Nav "machines-detail") (eq .Nav "machines-enrollment") (eq .Nav "machines-lifecycle") (eq .Nav "machines-configuration") (eq .Nav "updates")}}aria-current="page"{{end}}>
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1"/><path d="M8 20h8M12 16v4"/></svg></span><span>{{.Locale.DevicesLabel}}</span>
+      </a>
+      <a href="/apps" class="nav-item {{if or (eq .Nav "apps") (eq .Nav "deployments") (eq .Nav "deployments-detail")}}on{{end}}" {{if or (eq .Nav "apps") (eq .Nav "deployments") (eq .Nav "deployments-detail")}}aria-current="page"{{end}}>
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg></span><span>{{.Locale.AppsLabel}}</span>
+      </a>
+      <a href="/settings/tailnet" class="nav-item {{if eq .Nav "tailnet"}}on{{end}}" {{if eq .Nav "tailnet"}}aria-current="page"{{end}}>
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v5c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10V6z"/><path d="M9 12l2 2 4-4"/></svg></span><span>{{.Locale.EndpointLabel}}</span>
+      </a>
+      <a href="/jobs" class="nav-item {{if or (eq .Nav "jobs") (eq .Nav "jobs-detail")}}on{{end}}" {{if or (eq .Nav "jobs") (eq .Nav "jobs-detail")}}aria-current="page"{{end}}>
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"/><circle cx="16" cy="8" r="3"/><path d="M5 18c0-3 1.4-5 3-5s3 2 3 5M13 18c0-3 1.4-5 3-5s3 2 3 5"/></svg></span><span>{{.Locale.AgentsLabel}}</span>
+      </a>
+      <a href="/reports" class="nav-item {{if or (eq .Nav "reports") (eq .Nav "changes") (eq .Nav "tickets") (eq .Nav "audit")}}on{{end}}" {{if or (eq .Nav "reports") (eq .Nav "changes") (eq .Nav "tickets") (eq .Nav "audit")}}aria-current="page"{{end}}>
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5z"/><path d="M8 16v-3M12 16V8M16 16v-5"/></svg></span><span>{{.Locale.ReportsLabel}}</span>
+      </a>
+      <a href="/tenant/maintenance" class="nav-item {{if or (eq .Nav "tenant-maintenance") (eq .Nav "tenant-data")}}on{{end}}" {{if or (eq .Nav "tenant-maintenance") (eq .Nav "tenant-data")}}aria-current="page"{{end}}>
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20V7l8-4 8 4v13"/><path d="M8 10h2M14 10h2M8 14h2M14 14h2M10 20v-3h4v3"/></svg></span><span>{{.Locale.TenantLabel}}</span>
+      </a>
+      <a href="/machines/diagnostics" class="nav-item {{if eq .Nav "machines-diagnostics"}}on{{end}}" {{if eq .Nav "machines-diagnostics"}}aria-current="page"{{end}}>
+        <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 4a6 6 0 0 0-6 8l-5 5 4 4 5-5a6 6 0 0 0 8-6"/><path d="m15 7 2 2"/></svg></span><span>{{.Locale.SupportLabel}}</span>
+      </a>
+    </nav>
+  </aside>
+  <div class="workspace-shell {{if .SubNav.Items}}with-workload-nav{{end}}">
+    {{if .SubNav.Items}}
+    <aside class="workload-rail">
+      <div class="workload-title">{{.SubNav.Title}}</div>
+      <nav class="subnav" aria-label="{{.SubNav.Label}}">
+        {{range .SubNav.Items}}<a href="{{.Href}}" class="subnav-item {{if .Current}}on{{end}}" {{if .Current}}aria-current="{{.CurrentKind}}"{{end}}>{{.Label}}</a>{{end}}
+      </nav>
+    </aside>
+    {{end}}
+    <main class="main-content" id="main-content" tabindex="-1" lang="{{.Locale.ContentTag}}">
+      <div class="content-inner">
+        <nav class="breadcrumb" aria-label="{{.Locale.BreadcrumbAria}}" lang="{{.Locale.Tag}}">
+          <a href="/">{{.Locale.BreadcrumbHome}}</a><span class="breadcrumb-separator" aria-hidden="true">›</span><span aria-current="page">{{.Locale.PageTitle}}</span>
+        </nav>
+{{end}}
+
+{{define "foot"}}
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>
+{{end}}

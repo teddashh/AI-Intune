@@ -1,0 +1,49 @@
+{{define "data_disclosure.html"}}{{template "head" .}}
+{{$p := .DataDisclosure}}
+{{$d := $p.Disclosure}}
+
+<div class="page-heading">
+  <div>
+    <h1>資料揭露</h1>
+    <p>這個 Hub 對每一台機器留了什麼、是誰產生的、留多久、退役之後還剩什麼。</p>
+  </div>
+</div>
+
+<section class="metric-grid" aria-label="資料揭露摘要">
+  <article class="metric-card">
+    <div class="metric-label">資料類別</div>
+    <div class="metric-value">{{len $d.Categories}}</div>
+    <div class="metric-note">涵蓋 {{$d.Tables}} 張存著機器識別碼的表</div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">會被保留期清掉</div>
+    <div class="metric-value">{{$d.Timed}}</div>
+    <div class="metric-note">其餘的留著，不按時間清</div>
+  </article>
+</section>
+
+<h2 id="categories" class="section-anchor" tabindex="-1">留了什麼</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>類別</th><th>留的是什麼</th><th>留多久</th><th>退役之後</th><th>看得到它</th></tr></thead>
+<tbody>
+{{range $d.Categories}}
+<tr>
+  <td>{{.Title}}<div class="sub small">{{.SourceSentence}}</div></td>
+  <td class="small">{{.Holds}}<div class="sub">{{.FreeTextSentence}}</div></td>
+  <td class="small">{{.RetentionSentence}}</td>
+  <td class="small">{{.RetirementSentence}}</td>
+  <td class="small"><a href="{{.Path}}">{{.Path}}</a><div class="sub">需要 {{.Capability}} 權限</div></td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+<p class="small dim">
+  保留期的數字讀的是這個 Hub 現行的設定，改了就跟著改；
+  <a href="/tenant/maintenance">在維護那一頁改</a>。
+  要看某一台實際留了多少列，從那一台的<a href="/machines">裝置頁</a>進去。
+</p>
+
+{{template "foot" .}}{{end}}

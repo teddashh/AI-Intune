@@ -1,0 +1,30 @@
+{{define "machine_rename_review.html"}}{{template "head" .}}
+{{$p := .MachineRenamePreview}}
+<div class="page-heading"><div>
+  <h1>確認重新命名 {{$p.CurrentDisplayName}}</h1>
+  <p>名冊顯示名稱將改為 <b>{{$p.DisplayName}}</b>。</p>
+</div></div>
+
+<div class="panel">
+<table>
+  <tbody>
+    <tr><th>Machine ID</th><td class="mono">{{$p.MachineID}}</td></tr>
+    <tr><th>目前名稱</th><td>{{$p.CurrentDisplayName}}</td></tr>
+    <tr><th>新名稱</th><td>{{$p.DisplayName}}</td></tr>
+    <tr><th>影響</th><td>名稱型 expectations 改用新名稱；machine ID、agent 與機器上的 hostname 不變。{{if $p.PendingTokenLabelChanges}}尚未兌換的 enrollment ticket 標籤一併更新，token 不變。{{end}}</td></tr>
+    <tr><th>理由</th><td>{{.MachineRenameReason}}</td></tr>
+  </tbody>
+</table>
+<form method="post" action="/machines/{{$p.MachineID}}/display-name" style="margin-top:18px">
+  <input type="hidden" name="display_name" value="{{$p.DisplayName}}">
+  <input type="hidden" name="preview_digest" value="{{$p.PreviewDigest}}">
+  <input type="hidden" name="reason" value="{{.MachineRenameReason}}">
+  <input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+  <label><span class="field-label">確認目前名稱</span>
+    <input type="text" name="confirm_display_name" placeholder="輸入 {{$p.CurrentDisplayName}}"
+           autocomplete="off" required aria-required="true">
+  </label>
+  <div class="command-bar" style="margin-top:14px"><button type="submit">改成 {{$p.DisplayName}}</button><a class="button secondary" href="/machines/{{$p.MachineID}}?section=actions#actions">取消</a></div>
+</form>
+</div>
+{{template "foot" .}}{{end}}

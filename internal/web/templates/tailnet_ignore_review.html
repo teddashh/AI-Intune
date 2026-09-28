@@ -1,0 +1,22 @@
+{{define "tailnet_ignore_review.html"}}{{template "head" .}}
+{{$p := .TailnetIgnorePreview}}
+<div class="page-heading"><div><h1>確認 Tailnet 規則</h1><p>{{$p.Hostname}} · <span class="mono">{{$p.PeerID}}</span></p></div></div>
+<div class="panel">
+<table><tbody>
+  <tr><th>動作</th><td>{{if eq $p.Action "ignore"}}忽略{{else}}取消忽略{{end}}</td></tr>
+  <tr><th>目前</th><td>{{if $p.CurrentlyIgnored}}已忽略{{else}}尚未忽略{{end}}</td></tr>
+  <tr><th>套用後</th><td>{{if $p.IgnoredAfter}}已忽略{{else}}尚未忽略{{end}}</td></tr>
+  {{if $p.IgnoredAfter}}<tr><th>到期</th><td>{{$p.ExpiresAt.Local.Format "2006-01-02 15:04:05 MST"}}</td></tr>{{end}}
+  <tr><th>理由</th><td>{{$p.Reason}}</td></tr>
+  <tr><th>Expected revision</th><td>{{$p.ExpectedRevision}}</td></tr>
+</tbody></table>
+<form method="post" action="/settings/tailnet/peer-ignores" style="margin-top:18px">
+  <input type="hidden" name="peer_id" value="{{$p.PeerID}}"><input type="hidden" name="action" value="{{$p.Action}}">
+  <input type="hidden" name="expires_at" value="{{$p.ExpiresAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}">
+  <input type="hidden" name="expected_revision" value="{{$p.ExpectedRevision}}"><input type="hidden" name="preview_digest" value="{{$p.PreviewDigest}}">
+  <input type="hidden" name="reason" value="{{$p.Reason}}"><input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+  <label><span class="field-label">輸入 {{$p.Hostname}} 確認</span><input name="confirm_hostname" required autocomplete="off"></label>
+  <div class="command-bar" style="margin-top:14px"><button type="submit">套用</button><a class="button secondary" href="/settings/tailnet">取消</a></div>
+</form>
+</div>
+{{template "foot" .}}{{end}}

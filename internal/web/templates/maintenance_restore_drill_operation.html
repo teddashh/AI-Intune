@@ -1,0 +1,42 @@
+{{define "maintenance_restore_drill_operation.html"}}{{template "head" .}}
+{{with .RestoreDrillOperation}}{{$o := .}}
+<div class="page-heading"><div><h1>還原演練 {{short $o.OperationID 12}}</h1><p>驗證 {{$o.Backup.Name}} 的目前狀態與結果。</p></div>
+  {{if or (eq (printf "%s" $o.State) "queued") (eq (printf "%s" $o.State) "running")}}<a class="button secondary" href="/tenant/maintenance/restore-drills/{{$o.OperationID}}">重新整理</a>{{end}}
+</div>
+<div class="panel">
+  <div class="panel-title"><h2>Operation 狀態</h2><span class="{{restoreDrillStateClass $o.State}}">{{restoreDrillStateLabel $o.State}}</span></div>
+  <dl class="facts">
+    <dt>Operation ID</dt><dd class="mono">{{$o.OperationID}}</dd>
+    <dt>階段</dt><dd>{{restoreDrillPhaseLabel $o.Phase}}</dd>
+    <dt>嘗試次數</dt><dd>{{$o.Attempt}}</dd>
+    <dt>建立時間</dt><dd>{{$o.CreatedAt.Local.Format "2006-01-02 15:04:05"}}</dd>
+    <dt>開始時間</dt><dd>{{timeOrDash $o.StartedAt}}</dd>
+    <dt>完成時間</dt><dd>{{timeOrDash $o.FinishedAt}}</dd>
+  </dl>
+</div>
+<div class="panel">
+  <h2 style="margin-top:0">固定的備份</h2>
+  <dl class="facts">
+    <dt>檔名</dt><dd>{{$o.Backup.Name}}</dd>
+    <dt>大小</dt><dd>{{bytes $o.Backup.SizeBytes}}</dd>
+    <dt>修改時間</dt><dd>{{$o.Backup.ModifiedAt.Local.Format "2006-01-02 15:04:05"}}</dd>
+    <dt>SHA-256</dt><dd class="mono" style="overflow-wrap:anywhere">{{$o.Backup.SHA256}}</dd>
+  </dl>
+</div>
+{{if eq (printf "%s" $o.State) "succeeded"}}
+<div class="metric-grid">
+  <div class="metric-card"><div class="metric-label">備份機器數</div><div class="metric-value">{{intOrDash $o.Machines}}</div><div class="metric-note">成功讀取的名冊</div></div>
+  <div class="metric-card"><div class="metric-label">備份預期數</div><div class="metric-value">{{intOrDash $o.Expected}}</div><div class="metric-note">備份內 expected 名冊</div></div>
+  <div class="metric-card"><div class="metric-label">正式預期數</div><div class="metric-value">{{intOrDash $o.LiveExpected}}</div><div class="metric-note">演練完成時核對</div></div>
+  <div class="metric-card"><div class="metric-label">驗證時間</div><div class="metric-value" style="font-size:25px">{{with $o.DurationMilliseconds}}{{.}} ms{{else}}—{{end}}</div><div class="metric-note">備份副本驗證</div></div>
+</div>
+<div class="panel"><dl class="facts"><dt>最新心跳</dt><dd>{{timeOrDash $o.NewestCheckinAt}}</dd><dt>結果</dt><dd><span class="st green">備份可還原</span> 正式資料庫未被替換。</dd></dl></div>
+{{else if eq (printf "%s" $o.State) "failed"}}
+<div class="caveat"><b>演練未通過。</b> {{with $o.ErrorDetail}}{{.}}{{else}}目前沒有失敗細節。{{end}}</div>
+<div class="panel"><dl class="facts"><dt>Failure code</dt><dd class="mono">{{with $o.ErrorCode}}{{.}}{{else}}—{{end}}</dd><dt>下一步</dt><dd>確認最新備份可安全讀取後，回到維護頁重新預覽。</dd></dl></div>
+{{else}}
+<div class="panel"><p><span class="st blue">{{restoreDrillStateLabel $o.State}}</span> — 系統會在背景驗證固定的備份副本；完成後重新整理本頁查看結果。</p></div>
+{{end}}
+<p><a href="/tenant/maintenance">← 回維護</a></p>
+{{end}}
+{{template "foot" .}}{{end}}

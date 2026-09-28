@@ -1,0 +1,44 @@
+{{define "artifact_fetch_review.html"}}{{template "head" .}}
+{{with .ArtifactFetchReview}}
+<div class="page-heading"><div>
+  <h1>確認 fetch {{.Name}}@{{.Version}}</h1>
+  <p>建立 operation 前的 metadata 預覽。</p>
+</div></div>
+
+<div class="panel">
+  <h2 style="margin-top:0">Pinned intake plan</h2>
+  <dl class="facts">
+    <dt>Artifact</dt><dd>{{.Name}}@{{.Version}}</dd>
+	<dt>Source</dt><dd class="mono">{{.SourceKind}}</dd>
+    <dt>Policy</dt><dd class="mono">{{.PolicyVersion}}</dd>
+	{{with .EnginesNode}}<dt>Node engines</dt><dd class="mono">{{.}}</dd>{{end}}
+    <dt>Maximum bytes</dt><dd>{{bytes .MaxBytes}}</dd>
+    <dt>Reason</dt><dd>{{if .Reason}}{{.Reason}}{{else}}未填{{end}}</dd>
+    <dt>Already available and verified</dt><dd>{{if .AlreadyAvailableAndVerified}}是{{else}}否{{end}}</dd>
+    {{if .AlreadyAvailableAndVerified}}<dt>Existing SHA-256</dt><dd class="mono">{{with .ExistingArtifactSHA256}}{{.}}{{else}}不一致{{end}}</dd>{{end}}
+  </dl>
+  {{if .Blockers}}<p class="caveat"><b>目前不可入列：</b>{{range .Blockers}}{{.}} {{end}}</p>{{end}}
+</div>
+
+<div class="panel">
+  {{if and .EnqueueAllowed .CapabilityAllowed}}
+  <p>輸入 package 與 exact version 以確認。</p>
+  <form method="post" action="/apps/artifact-fetches">
+    <input type="hidden" name="name" value="{{.Name}}">
+    <input type="hidden" name="version" value="{{.Version}}">
+    <input type="hidden" name="preview_digest" value="{{.PreviewDigest}}">
+    <input type="hidden" name="reason" value="{{.Reason}}">
+    <input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+    <div class="action-form">
+      <label><span class="field-label">輸入 package：{{.Name}}</span><input name="confirm_name" autocomplete="off" required></label>
+      <label><span class="field-label">輸入 exact version：{{.Version}}</span><input name="confirm_version" autocomplete="off" required></label>
+      <button type="submit">確認並建立 fetch operation</button>
+    </div>
+  </form>
+  {{else}}
+	<p class="small dim">此 preview 無法建立 operation。</p>
+  {{end}}
+  <p><a href="/apps?view=fetch">取消，回 Fetch</a></p>
+</div>
+{{end}}
+{{template "foot" .}}{{end}}

@@ -1,0 +1,113 @@
+{{define "tickets.html"}}{{template "head" .}}
+{{$p := .Tickets}}
+
+<div class="page-heading">
+  <div>
+    <h1>票證使用量</h1>
+    <p>檢視代理程式回報的上游 provider 使用量、尖峰與錯誤證據。</p>
+    {{if $p.HasFilter}}<p class="small">目前顯示一個 provider。<a href="{{$p.ClearHref}}">清除篩選</a></p>{{end}}
+  </div>
+  <div class="command-bar" aria-label="票證使用量命令列">
+    <a class="button secondary" href="{{$p.ExportHref}}">匯出</a>
+  </div>
+</div>
+
+<div class="panel" style="margin-bottom:18px">
+  <form method="get" action="/reports/tickets" class="action-form" aria-label="票證使用量篩選">
+    <label><span class="field-label">報告期間</span>
+      <select name="days">
+        {{range $p.WindowOptions}}<option value="{{.Days}}" {{if .Selected}}selected{{end}}>最近 {{.Days}} 天</option>{{end}}
+      </select>
+    </label>
+    {{if $p.HasFilter}}<input type="hidden" name="provider_ref" value="{{$p.Result.ProviderRef}}">{{end}}
+    <button type="submit">套用</button>
+    {{if $p.HasFilter}}<a class="button secondary" href="{{$p.ClearHref}}">清除 provider</a>{{end}}
+  </form>
+</div>
+
+<section class="metric-grid" aria-label="票證使用量摘要">
+  <article class="metric-card">
+    <div class="metric-label">裝置報到率</div>
+    <div class="metric-value">{{$p.Result.Roster.ReportingRatePercent}}%</div>
+    <div class="metric-note">{{$p.Result.Roster.Reporting}} / {{$p.Result.Roster.Expected}} 台預期裝置已回報</div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">Provider</div>
+    <div class="metric-value">{{$p.Result.MatchedTotal}}</div>
+    <div class="metric-note">符合目前篩選條件</div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">跑完回合</div>
+    <div class="metric-value">{{$p.TotalRuns}}</div>
+    <div class="metric-note">驗證成功需搭配驗證證據</div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">有錯誤的回合</div>
+    <div class="metric-value">{{$p.TotalErrorRuns}}</div>
+    <div class="metric-note">錯誤依上游原文呈現</div>
+  </article>
+</section>
+
+{{if not $p.Result.Roster.SchedulingEligible}}
+<div class="caveat"><b>調度分析停用。</b> 目前報到率低於 80%；下一步是讓未回報的預期裝置恢復代理程式回報。</div>
+{{end}}
+
+<section aria-labelledby="ticket-table-title">
+  <div class="section-title">
+    <h2 id="ticket-table-title">Provider 使用量</h2>
+    <p class="active-filter">固定視窗 {{$p.Result.Window.From.Local.Format "2006-01-02 15:04"}} → {{$p.Result.Window.To.Local.Format "2006-01-02 15:04"}}</p>
+  </div>
+  <div class="panel" style="padding:4px 6px">
+    <table>
+      <thead><tr>
+        <th scope="col">Provider</th>
+        <th scope="col">跑完回合</th>
+        <th scope="col">尖峰 / 小時</th>
+        <th scope="col">距上次跑完</th>
+        <th scope="col">裝置與代理程式</th>
+        <th scope="col">錯誤證據</th>
+      </tr></thead>
+      <tbody>
+      {{range $p.Rows}}
+        {{$row := .Item}}
+        <tr>
+          <td class="name"><a href="{{.FilterHref}}">{{$row.Provider.Text}}</a><span class="sub mono">{{$row.ProviderRef}}</span></td>
+          <td>{{$row.Runs}}</td>
+          <td>{{$row.PeakPerHour}}{{with $row.PeakHour}}<span class="sub dim small">{{.Local.Format "2006-01-02 15:00"}}</span>{{end}}</td>
+          <td>{{with $row.LastRunAt}}{{ago .}}<span class="sub dim small">{{.Local.Format "2006-01-02 15:04:05"}}</span>{{else}}<span class="dim">無有效時間</span>{{end}}</td>
+          <td class="small">
+            <b>{{$row.Machines.Total}} 台裝置</b> · {{$row.Agents.Total}} 個代理程式
+            {{if $row.Machines.Items}}<div class="dim">{{range $i, $machine := $row.Machines.Items}}{{if $i}}、{{end}}{{$machine.Text}}{{end}}{{if $row.Machines.Truncated}}…{{end}}</div>{{end}}
+          </td>
+          <td class="small">
+            {{if $row.ErrorRuns}}<span class="st amber">{{$row.ErrorRuns}} 個回合</span>
+              {{range $row.Errors}}<div class="mono dim" style="white-space:pre-wrap;margin-top:4px">×{{.Count}} {{.Text.Text}}</div>{{end}}
+              {{if $row.ErrorsTruncated}}<div class="dim">顯示 {{$row.Errors | len}} / {{$row.ErrorVariantsTotal}} 種錯誤原文</div>{{end}}
+            {{else}}<span class="dim">0</span>{{end}}
+          </td>
+        </tr>
+      {{else}}
+        <tr><td colspan="6" class="empty">沒有符合目前篩選條件的票證使用量記錄。</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section aria-labelledby="ticket-evidence-title">
+  <div class="section-title"><h2 id="ticket-evidence-title">查詢與證據界線</h2></div>
+  <div class="panel">
+    <dl class="facts">
+      <dt>時間基準</dt><dd><span class="mono">{{$p.Result.Window.TimeBasis}}</span> {{$p.Result.Window.Boundary}}</dd>
+      <dt>一致性</dt><dd><span class="mono">{{$p.Result.Consistency}}</span></dd>
+      <dt>候選證據</dt><dd>{{$p.Result.CandidateRows}} 列 · {{$p.Result.CandidateBytes}} bytes</dd>
+      <dt>Provider 身分</dt><dd>這裡呈現上游 provider 文字；票證設定檔採不同身分模型。</dd>
+      <dt>結果語意</dt><dd>完成的回合；驗證成功需搭配驗證證據。</dd>
+      <dt>錯誤語意</dt><dd>保留錯誤原文，不推定為 429 或 401 分類。</dd>
+      {{if $p.Result.SkippedNoProvider}}<dt>缺少 provider</dt><dd>{{$p.Result.SkippedNoProvider}} 個回合未納入 provider 表格。</dd>{{end}}
+      {{if $p.Result.Coverage.Issues}}<dt>證據狀態</dt><dd class="mono small">{{range $i, $issue := $p.Result.Coverage.Issues}}{{if $i}} · {{end}}{{$issue}}{{end}}</dd>{{end}}
+    </dl>
+  </div>
+</section>
+
+{{template "foot" .}}{{end}}

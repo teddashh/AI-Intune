@@ -1,0 +1,15 @@
+{{define "action.html"}}{{template "head" .}}
+{{with .Action}}
+<h1>{{.Headline}}</h1>
+<div class="panel">
+  <p style="margin-top:0"><b>{{.Subject}}</b></p>
+  <p>{{.Detail}}</p>
+  {{if .Changed}}
+  <p class="small dim">此結果已留存；重新送出相同確認不會再次執行動作。</p>
+  {{else}}
+  <p class="small dim">狀態未變更。</p>
+  {{end}}
+  <p><a href="{{.Back}}">← {{.BackLabel}}</a></p>
+</div>
+{{end}}
+{{template "foot" .}}{{end}}

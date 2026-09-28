@@ -1,0 +1,194 @@
+{{define "profile_report.html"}}{{template "head" .}}
+{{$p := .ProfileReport}}
+{{$r := $p.Report}}
+
+<div class="page-heading">
+  <div>
+    <h1>發佈與指派</h1>
+    <p>這份 profile 發佈了，然後呢。</p>
+  </div>
+  <div class="command-bar" aria-label="發佈與指派命令列">
+    <a class="button secondary" href="{{$p.ExportHref}}">匯出</a>
+  </div>
+</div>
+
+<section class="metric-grid" aria-label="發佈與指派摘要">
+  <article class="metric-card">
+    <div class="metric-label">已發佈</div>
+    <div class="metric-value">{{$r.Published}}</div>
+    <div class="metric-note">profile 的版本數</div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">身上有 profile</div>
+    <div class="metric-value">{{$r.Wearing}} / {{$r.Machines}}</div>
+    <div class="metric-note">
+      <span class="metric-state"><span class="dot {{if eq $r.Bare 0}}green{{else}}amber{{end}}" aria-hidden="true"></span>
+      {{if eq $r.Bare 0}}分母裡每一台身上都有一份{{else}}{{$r.Bare}} 台身上沒有{{end}}</span>
+    </div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">版號不是跑的那一份</div>
+    <div class="metric-value">{{$r.SeenMisattributed}}</div>
+    <div class="metric-note">
+      <span class="metric-state"><span class="dot {{if eq $r.SeenMisattributed 0}}green{{else}}amber{{end}}" aria-hidden="true"></span>
+      {{if eq $r.SeenMisattributed 0}}看得到的版號量的都是在跑的那一份{{else}}看得到的證據量在沒在跑的檔案上{{end}}</span>
+    </div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">發佈了一台都沒指派</div>
+    <div class="metric-value">{{$r.Unassigned}}</div>
+    <div class="metric-note">最新的一版而沒有機器穿著它</div>
+  </article>
+</section>
+
+<p class="small dim">{{$r.Caveat}}</p>
+{{if $r.NextStep}}<p class="small">{{$r.NextStep}}</p>{{end}}
+
+{{if $p.Unknown}}
+<h2 id="unknown" class="section-anchor" tabindex="-1">點名了一個這個 Hub 沒有見過的版本</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>profile</th><th>套件</th><th>版號</th><th>這是什麼</th><th>下一步</th></tr></thead>
+<tbody>
+{{range $p.Unknown}}
+<tr>
+  <td>{{.ProfileID}}<div class="sub">rev {{.Revision}}</div></td>
+  <td class="small">{{.Package.PackageID}}</td>
+  <td class="small mono">{{.Package.Version}}</td>
+  <td class="small">{{.Package.Meaning}}</td>
+  <td class="small">{{.Package.NextStep}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">「沒有見過」講的是這個 Hub 沒有指派過、也沒有在任何一台上看到過；它不是說那一版不存在。</p>
+{{end}}
+
+{{if $p.Misattributed}}
+<h2 id="misattributed" class="section-anchor" tabindex="-1">看得到，而看到的版號量的是沒在跑的那一份</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>profile</th><th>套件</th><th>版號</th><th>機隊上看到幾台</th><th>其中量錯檔案</th><th>這一版在這個 Hub 身上是什麼</th></tr></thead>
+<tbody>
+{{range $p.Misattributed}}
+<tr>
+  <td>{{.ProfileID}}<div class="sub">rev {{.Revision}}</div></td>
+  <td class="small">{{.Package.PackageID}}</td>
+  <td class="small mono">{{.Package.Version}}</td>
+  <td class="small">{{.Package.SeenOn}}</td>
+  <td class="small"><span class="st amber">{{.Package.SeenMisattributedOn}}</span></td>
+  <td class="small">{{.Package.Title}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">這幾格的「看得到」量的是一份沒有人在跑的安裝，所以那個版號講的是它在硬碟上，不是它在跑。要看是哪一份檔案，到每機安裝狀態那一台上。</p>
+{{end}}
+
+{{if $p.Unassigned}}
+<h2 id="unassigned" class="section-anchor" tabindex="-1">發佈了，一台都沒指派</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>profile</th><th>發佈的時刻</th><th>發佈的人</th><th>下一步</th></tr></thead>
+<tbody>
+{{range $p.Unassigned}}
+<tr>
+  <td>{{.ProfileID}}<div class="sub">rev {{.Revision}}</div></td>
+  <td class="small mono">{{.PublishedAt.Local.Format "2006-01-02 15:04"}}</td>
+  <td class="small">{{.PublishedBy}}</td>
+  <td class="small">{{.NextStep}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">「發佈了一台都沒指派」跟「被更新的版本取代了」是兩件事：前者是這個 profile 最新的一版，後者是歷史版本本來的樣子。</p>
+{{end}}
+
+<h2 id="states" class="section-anchor" tabindex="-1">每一版現在是什麼</h2>
+{{if $p.States}}
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>這一版現在是什麼</th><th>幾版</th><th>意思</th><th>下一步</th></tr></thead>
+<tbody>
+{{range $p.States}}
+<tr>
+  <td>{{.Title}}</td>
+  <td>{{.Count}}</td>
+  <td class="small">{{.Meaning}}</td>
+  <td class="small">{{.NextStep}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{else}}
+<p class="empty">{{$r.Headline}}</p>
+{{end}}
+
+{{if $p.PackageStates}}
+<h2 id="package-states" class="section-anchor" tabindex="-1">它們點名的版本，這個 Hub 見過沒有</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>這一版在這個 Hub 身上是什麼</th><th>幾格</th><th>意思</th><th>下一步</th></tr></thead>
+<tbody>
+{{range $p.PackageStates}}
+<tr>
+  <td>{{.Title}}</td>
+  <td>{{.Count}}</td>
+  <td class="small">{{.Meaning}}</td>
+  <td class="small">{{.NextStep}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">「指派過沒有」跟「看到過沒有」是兩個分開的問題：一個講工作單那一側，一個講指派以外的安裝路徑。</p>
+{{end}}
+
+{{range $r.Profiles}}
+<h2 id="profile-{{.ProfileID}}-{{.Revision}}" class="section-anchor" tabindex="-1">{{.ProfileID}} rev {{.Revision}}</h2>
+<p class="small">{{.Headline}}{{if .NextStep}} {{.NextStep}}{{end}}</p>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>套件</th><th>版號</th><th>這一版在這個 Hub 身上是什麼</th><th>指派過幾次</th><th>最後一次指派</th><th>機隊上看到幾台</th></tr></thead>
+<tbody>
+{{range .Packages}}
+<tr>
+  <td class="small">{{.PackageID}}</td>
+  <td class="small mono">{{.Version}}</td>
+  <td class="small">{{.Title}}{{if .NextStep}}<div class="sub">{{.NextStep}}</div>{{end}}</td>
+  <td class="small">{{.Intents}}</td>
+  <td class="small mono">{{if .LastAssignedAt}}{{.LastAssignedAt.Local.Format "2006-01-02 15:04"}}{{else}}—{{end}}</td>
+  <td class="small">{{.SeenOn}}{{if .SeenMisattributedOn}}<div class="sub">其中 {{.SeenMisattributedOn}} 台量的是沒在跑的那一份</div>{{end}}</td>
+</tr>
+{{else}}
+<tr><td colspan="6" class="small dim">這一版一個套件都沒點名。</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{if .Machines}}
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>穿著這一版的機器</th><th>指派的時刻</th><th>指派的人</th><th>指派</th></tr></thead>
+<tbody>
+{{range .Machines}}
+<tr>
+  <td><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a>{{if .Retired}}<span class="sub">已退役，不在分母裡</span>{{end}}</td>
+  <td class="small mono">{{.AssignedAt.Local.Format "2006-01-02 15:04"}}</td>
+  <td class="small">{{.AssignedBy}}</td>
+  <td class="small mono">rev {{.AssignmentRevision}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{else}}
+<p class="empty">沒有機器穿著這一版。</p>
+{{end}}
+{{end}}
+
+{{template "foot" .}}{{end}}

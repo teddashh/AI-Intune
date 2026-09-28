@@ -1,0 +1,72 @@
+# clawctl-agent —— systemd **user** unit
+#
+# ⚠ 這必須是 user unit，不是 system unit。
+#
+# 原因是實測出來的：coding CLI 的憑證全部是 0600 且屬於那個使用者
+# （samplehub1 是 example-user、sampleagent1/2 是 ubuntu、sampleagent3 是 opc、sampleagent4 是 example-user-b）。
+# root daemon 讀得到（root 讀什麼都行），但那是不必要的權限擴張，而且
+# 「現在是哪個帳號在用」這個判斷本來就需要使用者的 session 脈絡。
+#
+# ⚠ 安裝後一定要 `loginctl enable-linger <user>`，否則使用者一登出
+# 這個 unit 就被停掉，然後 Hub 上會出現一整排 Unreachable，
+# 而那些機器其實好好的。install-agent.sh 會做這件事。
+
+[Unit]
+Description=clawctl agent (fleet observation)
+Documentation=https://github.com/teddashh/AI-Intune
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=%h/.local/bin/clawctl-agent
+Restart=always
+RestartSec=5
+
+# WatchdogSec 由一條專屬的 goroutine 餵，週期是這裡的 1/3（30 秒）。
+#
+# ⚠ 這個數字不准單獨改。2026-09-03 全機隊每 90 秒被 SIGABRT 一次，
+# 原因就是這一行寫 90、而程式那邊把餵食掛在 check-in 上（週期 96–144 秒）。
+# 兩個檔案各自看都是合理的數字，合起來是團滅。
+# cmd/clawctl-agent/watchdog_test.go 會真的讀這個檔並比對，改壞了測試會紅。
+#
+# ⚠ 而且那次團滅在 Hub 上是綠的 —— 因為每次重啟都會立刻送一顆 check-in，
+# 心跳流看起來規律得不得了。這正是下面那句話成立的原因：
+# 觀測那條 goroutine 卡住時，unit 不該被 watchdog 打死 ——
+# 它應該活著並且繼續回報「我還在，但我卡在觀測」。被打死會讓這台看起來
+# 像是正常重啟，而正常重啟看起來像沒事。
+WatchdogSec=90
+
+# ⚠ 沒有這行，安裝途中被 kill 會留下孤兒 wget/tar 佔著檔案，
+# 下次重試會在一個不乾淨的目錄上跑。
+KillMode=control-group
+
+# 唯讀觀測不需要任何特權。
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/clawctl %h/.config/systemd/user/openclaw-gateway.service.d %h/.cache/clawctl %h/.local/share/clawctl %h/.openclaw
+# ⚠ PrivateTmp 必須是 false：OpenClaw 的 log 在 /tmp/openclaw/（tmpfs），
+# 那是輔助線索的來源。
+PrivateTmp=false
+# ⚠ 這裡刻意**沒有** PrivateDevices=true。
+#
+# 它看起來是免費的加固，實際上會讓整個 unit 起不來：PrivateDevices 隱含
+# CapabilityBoundingSet=~CAP_MKNOD，而一個非特權的 systemd --user manager
+# 沒有權限動 capability bounding set。結果是：
+#
+#     Failed to drop capabilities: Operation not permitted
+#     Failed at step CAPABILITIES ... status=218/CAPABILITIES
+#
+# 這個 bug 只有在真的用 systemd 裝一次才會出現 —— 手動跑 binary 是好的，
+# 單元測試也全過。同理不要加 ProtectKernelTunables / ProtectKernelModules /
+# ProtectClock，它們全都隱含 capability 操作。
+RestrictSUIDSGID=true
+LockPersonality=true
+
+# 觀測不該吃掉機器。一台因為監控而變慢的機器，人會把監控關掉。
+CPUQuota=20%
+MemoryMax=256M
+
+[Install]
+WantedBy=default.target

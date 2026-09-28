@@ -1,0 +1,319 @@
+{{define "dashboard.html"}}{{template "head" .}}
+
+<div class="page-heading">
+  <div>
+    {{if .MachineIndex}}
+    <h1>裝置</h1>
+    <p>名冊、目前心跳與需要查看的裝置。</p>
+    {{else}}
+    <h1>儀表板</h1>
+    <p>檢視受管理裝置、目前狀態、代理程式活動與部署摘要。</p>
+    {{end}}
+  </div>
+  <div class="command-bar" aria-label="頁面動作">
+    <a class="button" href="/machines/enrollment">註冊裝置</a>
+    <a class="button secondary" href="">重新整理</a>
+  </div>
+</div>
+
+<section id="fleet-kpis" class="section-anchor" tabindex="-1" aria-labelledby="fleet-kpis-title">
+  <h2 class="sr-only" id="fleet-kpis-title">機隊摘要</h2>
+  <div class="metric-grid">
+    <a class="metric-card" id="kpi-managed" href="/machines?lifecycle=active#machines">
+      <div class="metric-label">受管理裝置</div>
+      <div class="metric-value">{{.Dashboard.Expected}}</div>
+      <div class="metric-note"><span class="metric-state"><span class="dot blue" aria-hidden="true"></span>納入狀態判斷的分母</span></div>
+    </a>
+    <a class="metric-card" id="kpi-reporting" href="/machines?lifecycle=active&amp;reporting=true#machines">
+      <div class="metric-label">正在回報</div>
+      <div class="metric-value">{{.Dashboard.Reporting}} / {{.Dashboard.Expected}}</div>
+      <div class="metric-note">
+        <span class="metric-state"><span class="dot {{if eq .Dashboard.Reporting .Dashboard.Expected}}green{{else}}amber{{end}}" aria-hidden="true"></span>
+        {{if eq .Dashboard.Reporting .Dashboard.Expected}}分母內每台都有回報{{else}}有機器沒有回報{{end}}</span>
+      </div>
+    </a>
+    <a class="metric-card" id="kpi-attention" href="/machines?lifecycle=active&amp;state=Degraded&amp;state=Unreachable&amp;state=NeverReported&amp;state=IdentityConflict#machines">
+      <div class="metric-label">需要查看</div>
+      <div class="metric-value">{{.Dashboard.Attention}}</div>
+      <div class="metric-note">
+        <span class="metric-state"><span class="dot {{if eq .Dashboard.Attention 0}}green{{else}}red{{end}}" aria-hidden="true"></span>
+        {{if eq .Dashboard.Attention 0}}沒有機器需要查看{{else}}分母內不是「在線」的機器{{end}}</span>
+      </div>
+    </a>
+    <a class="metric-card" id="kpi-findings" href="#findings">
+      <div class="metric-label">目前發現</div>
+      <div class="metric-value">{{.Dashboard.Findings}}</div>
+      <div class="metric-note">
+        <span class="metric-state"><span class="dot {{if eq .Dashboard.Findings 0}}grey{{else}}amber{{end}}" aria-hidden="true"></span>
+        {{if eq .Dashboard.Findings 0}}0 筆發現{{else}}包含警示與待確認項目{{end}}</span>
+      </div>
+    </a>
+  </div>
+</section>
+
+<div class="dashboard-grid">
+  <section class="panel" aria-labelledby="fleet-reading-title">
+    <div class="panel-title"><h2 id="fleet-reading-title">狀態判讀</h2><a href="#machines">檢視機器名冊 →</a></div>
+    <div class="headline">
+      {{range .Headline}}<p>{{.}}</p>{{end}}
+    </div>
+  </section>
+  <aside class="dashboard-stack" aria-label="部署摘要">
+    <section class="panel" aria-labelledby="deployment-summary-title">
+      <div class="panel-title"><h2 id="deployment-summary-title">部署</h2><a href="/deployments">檢視全部 →</a></div>
+      {{if .Dashboard.DeploymentsKnown}}
+      <p style="margin:0 0 10px"><b>{{.Dashboard.ActiveDeployments}}</b> 張進行中；<b>{{.Dashboard.StuckDeployments}}</b> 張卡住。</p>
+      {{end}}
+      <ul class="signal-list">
+      {{range .DeploymentHeadlines}}
+        <li {{if .Unknown}}data-state="unknown"{{end}}><span class="dot {{if .Unknown}}amber{{else if .Stuck}}red{{else}}blue{{end}}" aria-hidden="true"></span><span>
+          {{if .DeploymentID}}<a href="/deployments/{{.DeploymentID}}">{{.Text}}</a>{{else}}{{.Text}}{{end}}
+        </span></li>
+      {{end}}
+      </ul>
+    </section>
+  </aside>
+</div>
+
+{{if .HubInFleet}}
+<div class="caveat">
+  <b>Hub 與監控同在 {{.HubInFleet}}。</b>
+</div>
+{{end}}
+
+<details class="panel small" style="margin-top:14px">
+  <summary>Hub 這 24 小時對自己的紀錄（疑難排解）</summary>
+  <p style="margin:10px 0 4px"><a href="/audit">檢視動作紀錄 →</a></p>
+  {{if .HubEvents}}
+  <ul style="margin:4px 0 0 18px">
+    {{range .HubEvents}}<li><span class="mono dim">{{.At.Local.Format "01-02 15:04:05"}}</span> <span class="dim">{{hubEventLabel .Kind}}</span> {{.Detail}}</li>{{end}}
+  </ul>
+  {{else}}
+  <span class="dim">24 小時內 0 筆 Hub 事件。</span>
+  {{end}}
+</details>
+
+{{if .MachineIndex}}
+{{template "machines-index.html" .}}
+{{else}}
+<div class="section-title">
+  <h2 id="machines" class="section-anchor" tabindex="-1">名冊</h2>
+  {{if .MachineTable.Filter}}
+  <p class="active-filter" data-machine-filter="{{.MachineTable.Filter}}">
+    目前篩選：<b>{{.MachineTable.FilterLabel}}</b>（{{len .MachineTable.Rows}} 台）
+    <a href="/machines#machines">清除篩選</a>
+  </p>
+  {{end}}
+</div>
+<div class="panel" style="padding:4px 6px">
+<table>
+<thead><tr>
+  <th style="width:200px">機器</th><th style="width:110px">狀態</th>
+  <th>目前的判斷</th><th style="width:130px">最後回報</th><th style="width:150px">最近跑完</th>
+</tr></thead>
+<tbody>
+{{range .MachineTable.Rows}}
+<tr>
+  <td class="name">
+    <a href="/machines/{{.MachineID}}"><span class="dot {{color .State}}"></span>{{.DisplayName}}</a>
+    <span class="sub">
+      {{if .Hostname}}{{.Hostname}}{{else}}—{{end}}{{if .UnixUser}} · {{.UnixUser}}{{end}}
+      {{if .RetiredAt}} · 已退場{{end}}
+    </span>
+  </td>
+  <td class="st {{color .State}}">{{label .State}}</td>
+  <td class="reason">{{.Reason}}
+    {{$seen := index $.Tailnet.OnlineButSilent .MachineID}}
+    {{if $seen}}<br><span class="st amber">但 Tailscale 說它現在是 online（{{$seen.IP}}）</span>
+      <span class="dim small">；agent 未回報 Hub</span>{{end}}
+  </td>
+  <td class="small dim">
+    {{if .Facts.EverCheckedIn}}{{ago .Facts.LastCheckinReceived}}{{else}}從未回報{{end}}
+  </td>
+  <td class="small dim">
+    {{if .Facts.HasTaskSignal}}{{ago .Facts.LastTaskEnded}}跑完{{else}}沒有任務訊號{{end}}
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="5" class="empty">
+  {{if $.MachineTable.Filter}}
+  目前篩選沒有符合的機器。<a href="/machines#machines">清除篩選</a>
+  {{else}}
+  名冊是空的。
+  {{end}}
+</td></tr>
+{{end}}
+</tbody>
+</table>
+<div style="padding:6px 4px 2px">
+  <a href="/machines/enrollment">註冊新機器或查看 Tailnet 候選 →</a>
+  <span class="dim small">建立前會先預覽分母與一次性 secret 的影響。</span>
+</div>
+</div>
+
+<h2 id="retired" class="section-anchor" tabindex="-1">已退役</h2>
+{{if .Overview.Retired}}
+<div class="panel">
+  <p style="margin-top:0">
+    這 <b>{{len .Overview.Retired}}</b> 台不算分母、不亮燈、不進早報。
+    <span class="dim small">但它們留在這裡。</span>
+  </p>
+  <table>
+    <tr><th style="width:200px">機器</th><th style="width:150px">退役時間</th><th>當初的名字與位址</th></tr>
+    {{range .Overview.Retired}}
+    <tr>
+      <td class="name"><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a></td>
+      <td class="dim small">{{if .RetiredAt}}{{.RetiredAt.Local.Format "2006-01-02 15:04"}}{{else}}—{{end}}</td>
+      <td class="dim small">
+        {{if .Hostname}}{{.Hostname}}{{else}}—{{end}}
+        {{if .TailscaleIP}} · <span class="mono">{{.TailscaleIP}}</span>{{end}}
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{if .Tailnet.RetiredButOnline}}
+  <div class="caveat" style="margin-top:12px">
+    <b>兩邊講的不一樣：</b>這些機器已退役，但 Tailnet 仍顯示 online。
+    <ul style="margin-bottom:0">
+      {{range .Tailnet.RetiredButOnline}}
+      <li>
+        <a href="/machines/{{.MachineID}}">{{.DisplayName}}</a>
+        {{if .Peer.Hostname}}（{{.Peer.Hostname}}）{{end}}
+        {{if .Peer.IP}} · <span class="mono">{{.Peer.IP}}</span>{{end}}
+        <span class="dim small">；不在管理分母</span>
+      </li>
+      {{end}}
+    </ul>
+  </div>
+  {{end}}
+  <p class="dim small">點選機器可預覽恢復管理。</p>
+</div>
+{{else}}
+<div class="panel"><p class="empty">沒有已退役的機器。</p></div>
+{{end}}
+{{end}}
+
+<h2 id="findings" class="section-anchor" tabindex="-1">目前所有的發現</h2>
+<div class="panel">
+  <ul class="findings">
+  {{range .Overview.Findings}}
+    <li>
+      <span class="dot {{sevColor .Severity}}" style="margin-top:9px" aria-hidden="true"></span>
+      <span class="sr-only">嚴重度：{{sevLabel .Severity}}。</span>
+      <span class="who"><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a></span>
+      <span>{{.Message}}{{if .Advisory}} <span class="dim small">（不影響狀態）</span>{{end}}</span>
+    </li>
+  {{else}}<li class="empty">0 筆發現。</li>{{end}}
+  </ul>
+</div>
+
+<h2>機器註冊與名冊之外</h2>
+<div class="panel">
+{{if not .Tailnet.Available}}
+  <p><span class="st amber">Tailnet 清單不可用</span> —— {{.Tailnet.Unavailable}}</p>
+{{else if .Tailnet.Unenrolled}}
+  <p>Tailscale 上看得到 <b>{{len .Tailnet.Unenrolled}}</b> 台尚未納管的機器。</p>
+{{else}}
+  <p>Tailscale 上看得到的機器，名冊裡都有。</p>
+{{end}}
+  <p style="margin-bottom:0"><a href="/machines/enrollment">查看候選機器、差異證據與 enroll 預覽 →</a></p>
+</div>
+
+{{if .DoubleAgents}}
+<h2>有機器上不只一個 agent</h2>
+<div class="panel" id="double-agents">
+  <ul class="findings">
+  {{range .DoubleAgents}}
+    <li>
+      <span class="dot {{if .Ongoing}}red{{else}}amber{{end}}" style="margin-top:9px"></span>
+      <span class="who"><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a></span>
+      <span>
+        {{.Reason}}
+        <br>
+        <span class="dim small">
+          {{range .Runs}}<code class="mono">{{.First.Local.Format "15:04:05"}}–{{.Last.Local.Format "15:04:05"}}</code>
+          收到 {{.Checkins}} 顆心跳（它自己說 {{.StartedAt.Local.Format "15:04:05"}} 起來）<br>{{end}}
+        </span>
+      </span>
+    </li>
+  {{end}}
+  </ul>
+  <p class="dim small">紅點：啟動身分仍重疊；黃點：重疊已結束。時間範圍採 Hub received_at。</p>
+</div>
+{{end}}
+
+{{if .DeadSignals}}
+<h2>有證據管線已經斷了</h2>
+<div class="panel">
+  <ul class="findings">
+  {{range .DeadSignals}}
+    <li>
+      <span class="dot red" style="margin-top:9px"></span>
+      <span class="who"><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a></span>
+      <span><code>{{.Table}}.{{.Column}}</code>：{{.Reason}}</span>
+    </li>
+  {{end}}
+  </ul>
+</div>
+{{end}}
+
+{{if .Tools.Rows}}
+<h2 style="margin:18px 0 6px">工具版本</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th style="width:96px">工具</th>
+  {{range .Tools.Labels}}<th>{{.}}</th>{{end}}
+</tr></thead>
+<tbody>
+{{range .Tools.Rows}}
+  <tr>
+    <td>{{.Name}}</td>
+    {{range .Cells}}
+    <td class="small">
+      {{if eq .State "newest"}}<span class="mono">{{.Version}}</span>
+      {{else if eq .State "behind"}}<span class="st amber mono">{{.Version}}</span>
+      {{else if eq .State "incomparable"}}<span class="mono">{{.Version}}</span>
+        <span class="dim">（比不出來）</span>
+      {{else if eq .State "no_version"}}<span class="dim">裝了，問不到版號</span>
+      {{else if eq .State "absent"}}<span class="dim">沒有</span>
+      {{else if eq .State "unreported"}}<span class="st amber">沒回報過</span>
+      {{end}}
+      {{if .FromDisk}}<br><span class="dim">（檔案上讀的）</span>{{end}}
+      {{if .Shadowed}}<br><span class="dim">另有一份</span>{{end}}
+      {{if runtimeMisattributed .Runtime}}<br><span class="st amber">版號不是跑的那一份</span>{{end}}
+    </td>
+    {{end}}
+  </tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="dim small" style="margin:6px 0 0">{{if .Tools.Drifted}}{{.Tools.Drifted}} 個工具有版本差異。{{else}}工具版本一致。{{end}}
+{{if .Tools.Misattributed}}其中 {{.Tools.Misattributed}} 格的版號量的是沒在跑的那一份。{{end}}
+「最新」指的是這個機隊裡看到的最新版，不是上游發布的最新版。
+<a href="/reports/software">軟體清查</a>有每一台每一版的完整清單。</p>
+{{end}}
+
+<p class="dim small" style="margin:10px 0 0">
+{{if not .Retention.Known}}
+  觀測清理狀態未知。
+{{else if not .Retention.EverRun}}
+  尚未清理觀測資料；Hub 每 20 小時執行一次。
+{{else}}
+  舊資料上一次清理：{{.Retention.LastPrune.Local.Format "2006-01-02 15:04"}}，
+  清掉 {{.Retention.Rows}} 列。
+{{end}}
+</p>
+<p class="dim small" style="margin:6px 0 0">
+{{if not .RestoreDrill.Known}}
+  還原演練狀態未知。
+{{else if not .RestoreDrill.Done}}
+  <b>尚無還原演練紀錄。</b>
+{{else if .RestoreDrill.Overdue}}
+  上一次還原演練：{{.RestoreDrill.At.Local.Format "2006-01-02"}}（{{.RestoreDrill.Days}} 天前；已超過 90 天）。
+{{else}}
+  上一次還原演練：{{.RestoreDrill.At.Local.Format "2006-01-02"}}（{{.RestoreDrill.Days}} 天前；每 90 天一次）。
+{{end}}
+</p>
+
+{{template "foot" .}}{{end}}

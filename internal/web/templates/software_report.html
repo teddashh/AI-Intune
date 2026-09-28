@@ -1,0 +1,211 @@
+{{define "software_report.html"}}{{template "head" .}}
+{{$p := .SoftwareReport}}
+{{$r := $p.Report}}
+
+<div class="page-heading">
+  <div>
+    <h1>軟體清查</h1>
+    <p>機隊上裝了什麼、各是哪一版、哪幾台沒有，以及那個版號講的是不是正在跑的那一份。</p>
+  </div>
+  <div class="command-bar" aria-label="軟體清查命令列">
+    <a class="button secondary" href="{{$p.ExportHref}}">匯出</a>
+  </div>
+</div>
+
+<section class="metric-grid" aria-label="軟體清查摘要">
+  <article class="metric-card">
+    <div class="metric-label">分母</div>
+    <div class="metric-value">{{$r.Machines}}</div>
+    <div class="metric-note">名冊上未退役的機器</div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">回報過工具</div>
+    <div class="metric-value">{{$r.Reporting}} / {{$r.Machines}}</div>
+    <div class="metric-note">
+      <span class="metric-state"><span class="dot {{if eq $r.Reporting $r.Machines}}green{{else}}amber{{end}}" aria-hidden="true"></span>
+      {{if eq $r.Reporting $r.Machines}}分母裡每一台都回報過{{else}}有機器一個工具都沒回報過{{end}}</span>
+    </div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">版號不是跑的那一份</div>
+    <div class="metric-value">{{$r.Misattributed}}</div>
+    <div class="metric-note">
+      <span class="metric-state"><span class="dot {{if $r.Misattributed}}amber{{else}}green{{end}}" aria-hidden="true"></span>
+      {{if $r.Misattributed}}這幾格的版號量的是沒在跑的那一份{{else}}沒有一格的版號量的是沒在跑的那一份{{end}}</span>
+    </div>
+  </article>
+  <article class="metric-card">
+    <div class="metric-label">版號不一致</div>
+    <div class="metric-value">{{$r.Drifted}}</div>
+    <div class="metric-note">共 {{len $r.Tools}} 個工具</div>
+  </article>
+</section>
+
+<p class="small dim">{{$r.Caveat}}</p>
+{{if $r.NextStep}}<p class="small">{{$r.NextStep}}</p>{{end}}
+
+{{if $p.Misattributed}}
+<h2 id="misattributed" class="section-anchor" tabindex="-1">版號講的不是正在跑的那一份</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>工具</th><th>機器</th><th>畫面上那個版號</th><th>這一格是什麼</th>
+  <th>量版號的那個檔案</th><th>正在跑的那個檔案</th><th>下一步</th></tr></thead>
+<tbody>
+{{range $p.Misattributed}}
+<tr>
+  <td>{{.Tool}}</td>
+  <td><a href="/machines/{{.Row.MachineID}}">{{.Row.DisplayName}}</a></td>
+  <td class="small mono">{{if .Row.Version}}{{.Row.Version}}{{else}}—{{end}}</td>
+  <td class="small">{{.Row.Runtime.Title}}<div class="sub">{{.Row.Runtime.Meaning}}</div></td>
+  <td class="small mono">{{if .Row.Runtime.MeasuredFile}}{{.Row.Runtime.MeasuredFile}}{{else}}—{{end}}</td>
+  <td class="small mono">{{if .Row.Runtime.RunningFile}}{{.Row.Runtime.RunningFile}}{{else}}—{{end}}</td>
+  <td class="small">{{.Row.Runtime.NextStep}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">這幾格的版號量的是沒在跑的那一份，所以下面那張「誰比較新」比的是沒有人在用的檔案。</p>
+{{else}}
+<h2 id="misattributed" class="section-anchor" tabindex="-1">版號講的不是正在跑的那一份</h2>
+<p class="empty">沒有一格的版號量的是沒在跑的那一份。</p>
+{{end}}
+
+{{if $p.Drifted}}
+<h2 id="drifted" class="section-anchor" tabindex="-1">版號不一致的工具</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>工具</th><th>機隊裡最新</th><th>版號分佈</th><th>下一步</th></tr></thead>
+<tbody>
+{{range $p.Drifted}}
+<tr>
+  <td>{{.Name}}</td>
+  <td class="small mono">{{if .Newest}}{{.Newest}}{{else}}—{{end}}</td>
+  <td class="small">{{range .Versions}}<span class="mono">{{.Version}}</span> {{.Machines}} 台{{if .Newest}}（最新）{{end}}<br>{{end}}</td>
+  <td class="small">{{.NextStep}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{else}}
+<h2 id="drifted" class="section-anchor" tabindex="-1">版號不一致的工具</h2>
+<p class="empty">每一個工具在機隊上都是同一版。</p>
+{{end}}
+
+{{if $p.Missing}}
+<h2 id="missing" class="section-anchor" tabindex="-1">還沒回報過的工具</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>工具</th><th>沒回報過</th><th>這是什麼</th></tr></thead>
+<tbody>
+{{range $p.Missing}}
+<tr>
+  <td>{{.Name}}</td>
+  <td class="small">{{.UnreportedOn}} / {{$r.Machines}} 台</td>
+  <td class="small">這幾台從來沒回報過這個工具，所以裝沒裝都還不知道。</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">「沒回報過」跟「這台上沒有」是兩件事：前者要去看那台的 agent，後者要去裝東西。</p>
+{{end}}
+
+{{if $p.Matrix.Rows}}
+<h2 id="matrix" class="section-anchor" tabindex="-1">工具 × 機器</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th style="width:96px">工具</th>
+  {{range $p.Matrix.Labels}}<th>{{.}}</th>{{end}}
+</tr></thead>
+<tbody>
+{{range $p.Matrix.Rows}}
+<tr>
+  <td>{{.Name}}</td>
+  {{range .Cells}}
+  <td class="small">
+    {{if eq .State "newest"}}<span class="mono">{{.Version}}</span>
+    {{else if eq .State "behind"}}<span class="st amber mono">{{.Version}}</span>
+    {{else if eq .State "incomparable"}}<span class="mono">{{.Version}}</span>
+      <span class="dim">（比不出來）</span>
+    {{else if eq .State "no_version"}}<span class="dim">裝了，問不到版號</span>
+    {{else if eq .State "absent"}}<span class="dim">沒有</span>
+    {{else if eq .State "unreported"}}<span class="st amber">沒回報過</span>
+    {{end}}
+    {{if .FromDisk}}<br><span class="dim">（檔案上讀的）</span>{{end}}
+    {{if .Shadowed}}<br><span class="dim">另有一份</span>{{end}}
+    {{if runtimeMisattributed .Runtime}}<br><span class="st amber">版號不是跑的那一份</span>{{end}}
+  </td>
+  {{end}}
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{else}}
+<h2 id="matrix" class="section-anchor" tabindex="-1">工具 × 機器</h2>
+<p class="empty">{{$r.Headline}}</p>
+{{end}}
+
+<h2 id="states" class="section-anchor" tabindex="-1">每一格是什麼</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>這一格是什麼</th><th>幾格</th><th>意思</th><th>下一步</th></tr></thead>
+<tbody>
+{{range $p.States}}
+<tr>
+  <td>{{.Title}}</td>
+  <td>{{.Count}}</td>
+  <td class="small">{{.Meaning}}</td>
+  <td class="small">{{.NextStep}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+<h2 id="runtimes" class="section-anchor" tabindex="-1">版號講的是哪一份</h2>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>這一格是什麼</th><th>幾格</th><th>意思</th><th>下一步</th></tr></thead>
+<tbody>
+{{range $p.Runtimes}}
+<tr>
+  <td>{{.Title}}</td>
+  <td>{{.Count}}</td>
+  <td class="small">{{.Meaning}}</td>
+  <td class="small">{{.NextStep}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+<p class="small dim">只有裝著這個工具的那幾格有這一軸，因為沒有版號就沒有「這個版號講的是哪一份」可問。</p>
+
+{{range $r.Tools}}
+<h2 id="tool-{{.Name}}" class="section-anchor" tabindex="-1">{{.Name}}</h2>
+<p class="small">{{.Headline}}{{if .NextStep}} {{.NextStep}}{{end}}</p>
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr><th>機器</th><th>這一格是什麼</th><th>版號</th><th>版號講的是哪一份</th><th>機器量的時刻</th><th>Hub 收到的時刻</th></tr></thead>
+<tbody>
+{{range .Rows}}
+<tr>
+  <td><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a></td>
+  <td class="small">{{.Title}}{{if .NextStep}}<div class="sub">{{.NextStep}}</div>{{end}}</td>
+  <td class="small mono">{{if .Version}}{{.Version}}{{else}}—{{end}}{{if .FromDisk}}<div class="sub">檔案上讀的</div>{{end}}{{if .Shadowed}}<div class="sub">另有一份在別的 PATH 上</div>{{end}}</td>
+  <td class="small">{{with .Runtime}}{{if runtimeMisattributed .}}<span class="st amber">{{.Title}}</span>{{else}}{{.Title}}{{end}}
+    <div class="sub mono">量：{{if .MeasuredFile}}{{.MeasuredFile}}{{else}}—{{end}}</div>
+    {{if .RunningFile}}<div class="sub mono">跑：{{.RunningFile}}</div>{{end}}
+    {{if .NextStep}}<div class="sub">{{.NextStep}}</div>{{end}}{{else}}—{{end}}</td>
+  <td class="small mono">{{if .MeasuredAt}}{{.MeasuredAt.Local.Format "2006-01-02 15:04"}}{{else}}—{{end}}</td>
+  <td class="small mono">{{if .ObservedAt}}{{.ObservedAt.Local.Format "2006-01-02 15:04"}}{{else}}—{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{end}}
+
+{{template "foot" .}}{{end}}

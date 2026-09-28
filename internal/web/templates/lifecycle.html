@@ -1,0 +1,48 @@
+{{define "lifecycle.html"}}{{template "head" .}}
+<div class="page-heading"><div>
+  <h1>裝置生命週期</h1>
+  <p>管理 active 與 retired 狀態。</p>
+</div></div>
+
+<div class="kpis" style="margin-bottom:18px">
+  <div class="kpi"><span class="n">{{.Lifecycle.Active}}</span><span class="l">active 名冊列</span></div>
+  <div class="kpi"><span class="n">{{.Lifecycle.Retired}}</span><span class="l">retired 名冊列</span></div>
+</div>
+
+<div class="panel" style="padding:4px 6px;overflow-x:auto">
+<table>
+<thead><tr>
+  <th>裝置</th><th style="width:100px">狀態</th><th style="width:100px">revision</th>
+  <th style="width:130px">agent</th><th style="width:120px">channel</th><th style="min-width:310px">動作</th>
+</tr></thead>
+<tbody>
+{{range .Lifecycle.Rows}}
+  <tr>
+    <td><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a><div class="mono small dim">{{.MachineID}}</div></td>
+    <td>{{if eq .State "retired"}}<span class="st grey">retired</span>{{else}}<span class="st blue">active</span>{{end}}
+      {{with .RetiredAt}}<div class="small dim">{{.Local.Format "2006-01-02 15:04"}}</div>{{end}}
+    </td>
+    <td class="mono">{{.Revision}}</td>
+    <td>{{if .Enrolled}}已有 credential{{else}}尚未 enroll{{end}}</td>
+    <td>{{if .Channel}}<span class="mono">{{.Channel}}</span>{{else}}未指派{{end}}</td>
+    <td>
+      {{if $.Access.CanAdmin}}
+      <form class="action-form" method="post" action="/machines/{{.MachineID}}/lifecycle-preview" style="margin:0">
+        <input type="hidden" name="desired_state" value="{{.DesiredState}}">
+        <input type="hidden" name="expected_revision" value="{{.Revision}}">
+        <label><span class="field-label">理由</span>
+          <input type="text" name="reason" placeholder="為什麼要切換成 {{.DesiredLabel}}" autocomplete="off" required aria-required="true">
+        </label>
+        <button type="submit">{{.PreviewButton}}</button>
+      </form>
+      {{end}}
+    </td>
+  </tr>
+{{else}}
+  <tr><td colspan="6" class="empty">名冊是空的。</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+{{template "foot" .}}{{end}}

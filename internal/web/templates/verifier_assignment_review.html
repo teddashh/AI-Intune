@@ -1,0 +1,24 @@
+{{define "verifier_assignment_review.html"}}{{template "head" .}}
+{{$p := .VerifierAssignmentPreview}}
+<div class="page-heading"><div><h1>確認派工</h1><p>{{$p.VerifierName}} 驗 {{$p.MachineName}} 上的工作單 <span class="mono">{{$p.JobID}}</span></p></div></div>
+<div class="panel">
+<table><tbody>
+  <tr><th style="width:210px">verifier</th><td>{{$p.VerifierName}}（{{$p.VerifierKind}}）</td></tr>
+  <tr><th>verifier failure domain</th><td>{{$p.FailureDomain}}</td></tr>
+  <tr><th>工作單所在機器</th><td>{{$p.MachineName}}</td></tr>
+  <tr><th>工作單目前狀態</th><td>{{$p.JobState}}</td></tr>
+  <tr><th>什麼時候發給它</th><td>{{if $p.JobTerminalAt}}工作單已於 {{$p.JobTerminalAt.Local.Format "2006-01-02 15:04:05"}} 結束，派工後即可領取{{else}}等這張工作單結束才會發出{{end}}</td></tr>
+  <tr><th>什麼時候算完成</th><td>{{if $p.GrantsDeploymentGate}}這個 verifier 送齊三條必要規則的完整報告{{else}}這個 verifier 送出獨立證據{{end}}</td></tr>
+  <tr><th>對部署的影響</th><td>{{if $p.GrantsDeploymentGate}}完整報告會參與 stable promotion；派工本身不決定這張工作單成不成功。{{else}}這個 verifier kind 不授予 stable promotion；派工也不決定這張工作單成不成功。{{end}}</td></tr>
+  <tr><th>理由</th><td>{{$p.Reason}}</td></tr>
+</tbody></table>
+<form method="post" action="/jobs/{{$p.JobID}}/verifier-assignments" style="margin-top:18px">
+  <input type="hidden" name="verifier_id" value="{{$p.VerifierID}}">
+  <input type="hidden" name="preview_digest" value="{{$p.PreviewDigest}}">
+  <input type="hidden" name="reason" value="{{$p.Reason}}">
+  <input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+  <label><span class="field-label">輸入 {{$p.VerifierName}} 確認</span><input name="confirm_verifier_name" required autocomplete="off"></label>
+  <div class="command-bar" style="margin-top:14px"><button type="submit">指派</button><a class="button secondary" href="/jobs/{{$p.JobID}}">取消</a></div>
+</form>
+</div>
+{{template "foot" .}}{{end}}

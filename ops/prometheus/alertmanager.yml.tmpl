@@ -1,0 +1,80 @@
+# Alertmanager。這一份取代的是 internal/report 手刻的那幾件事。
+#
+# ⚠⚠ 這是**範本**，不是可以直接用的設定。__CHAT_ID__ 由
+# ops/prometheus/install-alertmanager.sh 在安裝時代入，bot token 走
+# bot_token_file 永遠不進這個檔案。倉庫裡不放密鑰，私有也一樣。
+#
+# 對照 clawctl 自己手刻的版本：
+#
+#   report.MaxLines = 5                → route.group_by（一台一則，不是砍到五行）
+#   7 天後 still broken since          → repeat_interval
+#   兩條同時失聯吃掉版面               → inhibit_rules（clawctl 完全沒有）
+#   （沒有）靜音 sampleagent1               → amtool silence add（clawctl 完全沒有）
+#   ops/notify-telegram.sh + 不准印 token 的測試 → telegram_configs
+#
+# ⚠ 現在是**兩套並行**：clawctl 的早報還在每天 08:00 送。同一件事會有兩則。
+#   那是刻意的，要比較才知道哪邊清楚。決定之後砍一邊。
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: telegram
+  # ⚠ 一台機器一則訊息，不是一個告警一則。
+  # clawctl 的 MaxLines=5 是拿「總行數」當額度，於是一台機器爆炸就會
+  # 把別台的消息擠掉（2026-09-04 實測：事件流那則掉進 +3 more）。
+  # group_by 是拿「機器」當額度，擠不掉別人。
+  group_by: [machine]
+  group_wait: 5m # 同一台上剛冒出來的其他告警，等它們一起
+  group_interval: 10m # 同一組有新東西時，最快隔多久再送
+  repeat_interval: 24h # 沒變化的話一天最多再吵一次
+  routes:
+    - matchers: [severity="info"]
+      receiver: telegram
+      repeat_interval: 72h
+
+# ⚠⚠ 這一段是 clawctl 完全沒有的東西，而且它正是早報最痛的那個問題。
+# 一台機器失聯的時候，它身上的憑證過期、產出物太舊、事件流沒資料
+# **全部都會同時觸發**，而那些全是同一件事的回音。
+inhibit_rules:
+  # 抓不到那台機器 → 它身上其他所有告警都是雜訊
+  - source_matchers: [alertname="MachineInRosterNotAnswering"]
+    target_matchers: [severity=~"warning|info"]
+    equal: [machine]
+
+  # 事件流解不開 → 計數是 0 但那個 0 沒有意義，不要拿它當好消息也不要當壞消息
+  - source_matchers: [alertname="EventRuleIsSilentlyBroken"]
+    target_matchers: [alertname="NotOKEventSeen"]
+    equal: [machine, unit, artifact]
+
+  # 產出物根本不在 → 再說「它太舊了」是廢話
+  - source_matchers: [alertname="DeclaredArtifactMissing"]
+    target_matchers: [alertname=~"ArtifactOlderThanDeclared|NotOKEventSeen"]
+    equal: [machine, unit, artifact]
+
+  # 已經過期 → 不用再說「六小時內會過期」
+  - source_matchers: [alertname="CredentialExpired"]
+    target_matchers: [alertname="CredentialExpiringSoon"]
+    equal: [machine, provider]
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token_file: /etc/prometheus/telegram.token
+        chat_id: __CHAT_ID__
+        send_resolved: true
+
+        # ⚠⚠ parse_mode 刻意設成空字串（純文字）。
+        # Alertmanager 預設是 HTML，而我們的 why 是人自由書寫的中文長句 ——
+        # 裡面出現一個 < 或 & 就會讓 Telegram 回 400，訊息**整則發不出去**。
+        # 而發不出去在 Alertmanager 這側只是一行 log，沒有人會看到。
+        # 一則因為排版字元而消失的告警，比沒有告警更糟。
+        parse_mode: ""
+
+        message: |-
+          {{ .Status | toUpper }} — {{ .CommonLabels.machine }}（{{ .Alerts | len }} 件）
+          {{ range .Alerts }}
+          ▸ {{ .Annotations.summary }}
+            {{ .Annotations.description }}
+          {{ end }}
+          靜音：amtool silence add machine={{ .CommonLabels.machine }} -d 24h -c "理由"

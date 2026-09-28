@@ -1,0 +1,34 @@
+{{define "configuration_policy_review.html"}}{{template "head" .}}
+{{$r := .SettingPolicyReview}}{{$p := $r.Preview}}
+<div class="page-heading"><div>
+  <h1>確認設定原則 {{$p.PolicyID}}</h1>
+  {{if $p.Unchanged}}
+  <p>這組值就是目前的 revision {{$p.CurrentRev}}；發佈不會產生新的 revision。</p>
+  {{else}}
+  <p>revision {{$p.CurrentRev}} → {{$p.NextRev}}；{{$p.AffectedMachines}} 台裝置會在下次報到時換成這個節奏。</p>
+  {{end}}
+</div></div>
+
+<div class="panel">
+<table><tbody>
+  <tr><th style="width:270px">原則</th><td class="mono">{{$p.PolicyID}}</td></tr>
+  <tr><th>revision</th><td class="mono">{{$p.CurrentRev}} → {{$p.NextRev}}</td></tr>
+  <tr><th>報到間隔</th><td>{{$p.Settings.CheckinIntervalSeconds}} 秒</td></tr>
+  <tr><th>量測間隔</th><td>{{$p.Settings.ObservationIntervalSeconds}} 秒</td></tr>
+  <tr><th>影響裝置</th><td>{{$p.AffectedMachines}} 台</td></tr>
+  <tr><th>設定身分</th><td class="mono small">{{$p.Digest}}</td></tr>
+  <tr><th>理由</th><td>{{$r.Reason}}</td></tr>
+</tbody></table>
+<form method="post" action="/machines/configuration/policies" style="margin-top:18px">
+  <input type="hidden" name="policy_id" value="{{$p.PolicyID}}">
+  <input type="hidden" name="checkin_interval_seconds" value="{{$p.Settings.CheckinIntervalSeconds}}">
+  <input type="hidden" name="observation_interval_seconds" value="{{$p.Settings.ObservationIntervalSeconds}}">
+  <input type="hidden" name="expected_revision" value="{{$p.CurrentRev}}">
+  <input type="hidden" name="preview_digest" value="{{$p.PreviewDigest}}">
+  <input type="hidden" name="idempotency_key" value="{{$r.IdempotencyKey}}">
+  <input type="hidden" name="reason" value="{{$r.Reason}}">
+  <label><span class="field-label">輸入 {{$p.PolicyID}} 確認</span><input name="confirm_policy_id" required autocomplete="off"></label>
+  <div class="command-bar" style="margin-top:14px"><button type="submit">發佈 revision {{$p.NextRev}}</button><a class="button secondary" href="/machines/configuration#publish">取消</a></div>
+</form>
+</div>
+{{template "foot" .}}{{end}}

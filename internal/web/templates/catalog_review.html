@@ -1,0 +1,50 @@
+{{define "catalog_review.html"}}{{template "head" .}}
+{{with .CatalogPackageReview}}
+<div class="page-heading"><div><h1>確認 Store package</h1><p class="mono">{{.PackageIdentity}}</p></div></div>
+<div class="panel"><dl class="facts">
+  <dt>類型</dt><dd>{{.Preview.Manifest.Kind}}</dd>
+  <dt>Artifact</dt><dd class="mono">{{.Preview.Manifest.Artifact.SHA256}}</dd>
+  <dt>平台</dt><dd>{{range .Preview.Manifest.Platforms}}<span class="mono">{{.OS}}/{{.Arch}}</span> {{end}}</dd>
+  <dt>相依</dt><dd>{{range .Preview.Manifest.Dependencies}}<span class="mono">{{.PackageID}}@{{.Version}}</span>{{else}}無{{end}}</dd>
+  <dt>互斥</dt><dd>{{range .Preview.Manifest.Conflicts}}<span class="mono">{{.}}</span>{{else}}無{{end}}</dd>
+  <dt>Store 狀態</dt><dd>{{if .Preview.AlreadyPublished}}已發布{{else}}新增固定版本{{end}}</dd>
+</dl></div>
+{{if .CanApply}}<div class="panel"><form method="post" action="/apps/store/packages">
+  <input type="hidden" name="manifest" value="{{.ManifestToken}}"><input type="hidden" name="preview_digest" value="{{.Preview.PreviewDigest}}">
+  <input type="hidden" name="reason" value="{{.Reason}}"><input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+  <label><span class="field-label">輸入 {{.PackageIdentity}} 確認</span><input name="confirm_package" autocomplete="off" required></label>
+  <button type="submit">Publish package</button>
+</form></div>{{end}}
+{{end}}
+
+{{with .CatalogProfileReview}}
+<div class="page-heading"><div><h1>確認 Profile</h1><p class="mono">{{.ProfileIdentity}}</p></div></div>
+<div class="panel"><h2 style="margin-top:0">直接套件</h2><ol>{{range .Preview.Profile.Packages}}<li class="mono">{{.PackageID}}@{{.Version}}</li>{{end}}</ol>
+<p>{{if .Preview.AlreadyPublished}}這個 revision 已發布。{{else}}發布這個固定 revision。{{end}}</p></div>
+{{if .CanApply}}<div class="panel"><form method="post" action="/apps/profiles">
+  <input type="hidden" name="profile" value="{{.ProfileToken}}"><input type="hidden" name="preview_digest" value="{{.Preview.PreviewDigest}}">
+  <input type="hidden" name="reason" value="{{.Reason}}"><input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+  <label><span class="field-label">輸入 {{.ProfileIdentity}} 確認</span><input name="confirm_profile" autocomplete="off" required></label>
+  <button type="submit">Publish profile</button>
+</form></div>{{end}}
+{{end}}
+
+{{with .CatalogAssignmentReview}}
+<div class="page-heading"><div><h1>確認 Profile Assignment</h1><p>{{.Preview.DisplayName}} · <span class="mono">{{.Preview.ProfileID}}@{{.Preview.ProfileRevision}}</span></p></div></div>
+<div class="metric-grid">
+  <div class="metric-card"><span class="metric-label">建立工作單</span><span class="metric-value">{{.Preview.CreatesJobs}}</span></div>
+  <div class="metric-card"><span class="metric-label">平台</span><span class="metric-value" style="font-size:20px">{{.Preview.Target.OS}}/{{.Preview.Target.Arch}}</span></div>
+  <div class="metric-card"><span class="metric-label">Active jobs</span><span class="metric-value">{{.Preview.ActiveJobCount}}</span></div>
+</div>
+<div class="panel"><table><caption class="sr-only">Dependency ordered package jobs</caption>
+<thead><tr><th scope="col">Package</th><th scope="col">直接選取</th><th scope="col">先決套件</th><th scope="col">Revision</th></tr></thead>
+<tbody>{{range .Preview.Packages}}<tr><th scope="row" class="mono">{{.PackageID}}@{{.PackageVersion}}</th><td>{{if .Direct}}是{{else}}否{{end}}</td><td>{{range .PrerequisitePackages}}<span class="mono">{{.}}</span>{{else}}—{{end}}</td><td>{{.CurrentRevision}} → {{.PlannedRevision}}</td></tr>{{end}}</tbody></table>
+{{if .Preview.Blockers}}<h2>無法套用</h2><ul>{{range .Preview.Blockers}}<li class="mono">{{.}}</li>{{end}}</ul>{{end}}</div>
+{{if .CanApply}}<div class="panel"><form method="post" action="/apps/profile-assignments">
+  <input type="hidden" name="machine_id" value="{{.Preview.MachineID}}"><input type="hidden" name="profile_id" value="{{.Preview.ProfileID}}"><input type="hidden" name="profile_revision" value="{{.Preview.ProfileRevision}}">
+  <input type="hidden" name="preview_digest" value="{{.Preview.PreviewDigest}}"><input type="hidden" name="reason" value="{{.Reason}}"><input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+  <label><span class="field-label">輸入 {{.Preview.DisplayName}} 確認</span><input name="confirm_name" autocomplete="off" required></label>
+  <button type="submit">Create assignment and jobs</button>
+</form></div>{{end}}
+{{end}}
+{{template "foot" .}}{{end}}

@@ -1,0 +1,52 @@
+{{define "updates.html"}}{{template "head" .}}
+{{$u := .Updates}}
+
+<div class="page-heading"><div><h1>更新</h1><p>Artifact catalog、channel 成員、最近部署與 rollout gate。</p></div></div>
+
+<div class="section-title"><h2 id="artifacts" class="section-anchor" tabindex="-1">Hub artifact catalog evidence</h2><p class="active-filter">本頁 {{len $u.Artifacts}} 項；符合條件共 {{$u.ArtifactTotal}} 項</p></div>
+<div class="panel" style="padding:4px 6px">
+{{if $u.Artifacts}}
+<table>
+<thead><tr><th>版本</th><th>狀態</th><th>sha256</th><th>大小</th><th>engines</th><th>部署引用</th><th>收下時間</th></tr></thead>
+<tbody>{{range $u.Artifacts}}
+<tr>
+  <td><a href="/apps/artifacts/{{.ArtifactID}}">{{.Version}}</a></td>
+  <td>{{.Status}}{{if .Issue}} · <span class="bad">{{.Issue}}</span>{{end}}</td>
+  <td class="mono">{{short .SHA256 12}}</td><td>{{if .SizeKnown}}{{bytes .Size}}{{else}}未知{{end}}</td><td class="mono">{{.EnginesNode}}</td>
+  <td>{{.ActiveDeploymentReferences}} active / {{.DeploymentReferences}} total</td>
+  <td class="small dim">{{if .FetchedAt}}{{.FetchedAt.Local.Format "2006-01-02 15:04:05"}}{{else}}未知{{end}}</td>
+</tr>
+{{end}}</tbody>
+</table>
+{{else if $u.Continuation}}<p class="empty">本頁沒有 artifact；catalog 可能已變更，或這個 cursor 已到結尾。</p>
+{{else}}<p class="empty">沒有 artifact。</p>{{end}}
+</div>
+{{if or $u.StartOverHref $u.NextHref}}<p class="small dim">
+  {{if $u.StartOverHref}}<a href="{{$u.StartOverHref}}">從第一頁重新開始</a>{{end}}
+  {{if and $u.StartOverHref $u.NextHref}} · {{end}}
+  {{if $u.NextHref}}<a href="{{$u.NextHref}}">下一頁</a>{{end}}
+</p>{{end}}
+
+{{range $u.Channels}}
+<h2 id="channel-{{.Name}}" class="section-anchor" tabindex="-1">{{.Name}} channel</h2>
+<div class="panel">
+  <h3>成員</h3>
+  {{if .Members}}
+  <table><thead><tr><th>機器</th><th>最後觀測版本</th><th>觀測收件時間</th></tr></thead><tbody>
+  {{range .Members}}<tr><td><a href="/machines/{{.MachineID}}">{{.DisplayName}}</a></td><td>{{if .LastObservedVersion}}{{.LastObservedVersion}}{{else}}未知{{end}}</td><td>{{if .LastObservationReceivedAt}}{{.LastObservationReceivedAt.Local.Format "2006-01-02 15:04:05"}}{{else}}沒有觀測{{end}}</td></tr>{{end}}
+  </tbody></table>
+  {{else}}<p class="empty">沒有成員</p>{{end}}
+  <p class="small dim">顯示 Hub 保存的最後一筆觀測。</p>
+  <h3>最近一張 deployment</h3>
+  {{if .Latest}}<p><a href="/deployments/{{.Latest.DeploymentID}}">{{if .Latest.Material.Version}}{{.Latest.Material.Version}}{{else}}版本未知{{end}} · {{.Latest.State}} · {{short .Latest.DeploymentID 8}}</a></p>
+  {{else}}<p class="empty">還沒有部署過</p>{{end}}
+  <h3>本頁每個 catalog evidence 的預覽</h3>
+  {{range .Previews}}<p><span class="mono">{{.Artifact.Version}}</span>：{{.Summary}}{{if .Promote}}<br>{{.Promote}}{{end}}</p>
+  {{if .PromotionTargets}}<table><thead><tr><th>Canary 機器</th><th>工作單</th><th>獨立證據</th><th>下一步</th></tr></thead><tbody>
+  {{range .PromotionTargets}}<tr><td>{{.DisplayName}}</td><td><a class="mono" href="/jobs/{{.JobID}}">{{short .JobID 8}}</a></td><td>{{.State}}</td><td>{{if eq .NextStep "none"}}無{{else if eq .NextStep "assign_verifier"}}到工作單指派跨故障域 verifier{{else if eq .NextStep "wait_for_verifier"}}等待已指派 verifier 完整回報{{else if eq .NextStep "rerun_verifier"}}重新執行已指派 verifier{{else if eq .NextStep "assign_active_verifier"}}到工作單指派仍有效的 verifier{{else if eq .NextStep "reassign_verifier"}}重新指派 verifier{{else if eq .NextStep "upgrade_and_reassign_verifier"}}升級後重新指派 verifier{{else if eq .NextStep "repair_and_rerun_canary"}}修復後重跑 canary{{else}}確認 artifact 後重跑 canary{{end}}</td></tr>{{end}}
+  </tbody></table>{{end}}
+  {{else}}<p class="empty">沒有預覽。</p>{{end}}
+</div>
+{{end}}
+
+{{template "foot" .}}{{end}}
