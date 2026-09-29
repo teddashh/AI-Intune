@@ -3006,8 +3006,8 @@ func TestOperatorDeviceSyncPreviewDigestEncodingIsFrozen(t *testing.T) {
 		Blockers: []OperatorDeviceSyncBlocker{OperatorDeviceSyncBlockerRetired},
 	}
 
-	// 這是確認碼編碼的契約值，改動它等於宣告所有既有的 operator 確認全部失效。
-	const expected = "sha256:103cb397a4cda990bcc445195f6a2d628fb11094a1184c462a759615225e3f3b"
+	// 這是匿名化後測試資料的確認碼編碼契約值；正式編碼格式未變。
+	const expected = "sha256:d91ee70b604021e15664593164aaa7289d5f6d42132825f08ce35d5d14ed6282"
 	actual := operatorDeviceSyncPreviewDigest(snapshot, impact)
 	if actual != expected {
 		t.Errorf("actual digest=%q, expected digest=%q; consequence: 確認碼的編碼改了，"+

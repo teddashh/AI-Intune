@@ -1127,15 +1127,18 @@ func TestOpenClawRetentionSkipsAllReleasesWhenCurrentIsBroken(t *testing.T) {
 	}
 }
 
-// ⚠ 守的是：health 等到 execution_timeout 用完才放棄時，退回**不能**用那個已到期的 ctx。
-// 真的 exec.CommandContext 對到期的 ctx 會直接失敗，daemon-reload／stop／start 一個都跑不了，
+// ⚠ 守的是：health 等待時 execution ctx 取消後，退回**不能**用那個已取消的 ctx。
+// 真的 exec.CommandContext 對已取消或到期的 ctx 會直接失敗，daemon-reload／stop／start 一個都跑不了，
 // 機器就停在「新 drop-in ＋ 起不來的 gateway」。原本的假 systemctl 不看 ctx，所以看不到這個洞；
 // 這裡的假 systemctl 跟真的一樣尊重 ctx。
-func TestRollbackStillRunsAfterExecutionBudgetExpired(t *testing.T) {
+func TestRollbackStillRunsAfterExecutionContextCanceled(t *testing.T) {
 	f := newExecFixture(t)
 	f.prepareProc()
 	f.healthOK = false
 	deps := f.deps()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	deps = cancelOnFirstRetry(deps, cancel)
 	realSystemctl := deps.systemctl
 	deps.systemctl = func(ctx context.Context, args ...string) (string, string, error) {
 		if err := ctx.Err(); err != nil {
@@ -1144,12 +1147,13 @@ func TestRollbackStillRunsAfterExecutionBudgetExpired(t *testing.T) {
 		return realSystemctl(ctx, args...)
 	}
 	job := f.job()
-	job.ExecutionTimeout = 1
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
+	job.ExecutionTimeout = 60
 	vs, err := (openclawExecutor{deps: deps}).Run(ctx, job)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		t.Fatal("health 等待時沒有取消執行預算")
 	}
 	wantActions := []string{"daemon-reload", "stop openclaw-gateway.service", "start openclaw-gateway.service",
 		"daemon-reload", "stop openclaw-gateway.service", "start openclaw-gateway.service"}
@@ -1165,6 +1169,24 @@ func TestRollbackStillRunsAfterExecutionBudgetExpired(t *testing.T) {
 	if _, err := os.Stat(f.path(dropIn)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("退回後 drop-in 還在：%v", err)
 	}
+}
+
+// Cancel only after the switch has completed and health starts retrying. A short
+// wall-clock timeout can expire during staging on a busy machine, before the
+// rollback scenario this test intends to exercise.
+func cancelOnFirstRetry(deps execDeps, cancel context.CancelFunc) execDeps {
+	canceled := false
+	deps.sleep = func(ctx context.Context, delay time.Duration) error {
+		if !canceled {
+			canceled = true
+			cancel()
+			return ctx.Err()
+		}
+		// The rollback health probe is expected to fail; keep the test independent
+		// of real-time waits and filesystem stalls on the test host.
+		return context.DeadlineExceeded
+	}
+	return deps
 }
 
 // ⚠ 守的是 artifact.url 必須是相對於 Hub 的路徑：agent 只從自己的 Hub 抓，spec 裡塞一個
@@ -1278,12 +1300,15 @@ func TestRollbackRestoresCurrentSymlink(t *testing.T) {
 		f := newExecFixture(t)
 		f.prepareProc()
 		f.healthOK = false
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		job := f.job()
-		job.ExecutionTimeout = 1
-		if _, err := (openclawExecutor{deps: f.deps()}).Run(ctx, job); err != nil {
+		job.ExecutionTimeout = 60
+		if _, err := (openclawExecutor{deps: cancelOnFirstRetry(f.deps(), cancel)}).Run(ctx, job); err != nil {
 			t.Fatal(err)
+		}
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			t.Fatal("health 等待時沒有取消執行預算")
 		}
 		if got, err := os.Readlink(f.path(current)); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("退回到 releases 以外的安裝後 current 還指著失敗的 release：%q err=%v", got, err)
@@ -1296,12 +1321,15 @@ func TestRollbackRestoresCurrentSymlink(t *testing.T) {
 		previous := filepath.Join(testHome, ".local", "share", "clawctl", "openclaw", "releases", "2026.6.6", "lib", "node_modules", "openclaw")
 		f.install.RunningDir = previous
 		f.install.ExecStart = testNode + " " + filepath.Join(previous, "dist", "index.js") + " gateway --port 18789"
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		job := f.job()
-		job.ExecutionTimeout = 1
-		if _, err := (openclawExecutor{deps: f.deps()}).Run(ctx, job); err != nil {
+		job.ExecutionTimeout = 60
+		if _, err := (openclawExecutor{deps: cancelOnFirstRetry(f.deps(), cancel)}).Run(ctx, job); err != nil {
 			t.Fatal(err)
+		}
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			t.Fatal("health 等待時沒有取消執行預算")
 		}
 		if got, err := os.Readlink(f.path(current)); err != nil || got != filepath.Join("releases", "2026.6.6") {
 			t.Errorf("current=%q err=%v；要 releases/2026.6.6", got, err)
