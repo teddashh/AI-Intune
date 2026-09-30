@@ -1,5 +1,7 @@
 # AI-Intune
 
+**English** · [繁體中文](README.zh-TW.md)
+
 AI-Intune is an evidence based control plane for machines running AI agents and coding tools. The Hub records inventory, observations, desired state, jobs, verification evidence, and audit events. Agents connect outbound from managed machines.
 
 [Project website](https://teddashh.github.io/AI-Intune/) · [Apache 2.0 license](LICENSE)

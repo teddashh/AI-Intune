@@ -8,8 +8,8 @@ function setLanguage(language) {
   root.dataset.lang = next;
   root.lang = next === "zh" ? "zh-Hant" : "en";
   document.title = next === "zh"
-    ? "AI-Intune — AI 機器的集中管理平臺"
-    : "AI-Intune — Control every AI machine from one place";
+    ? "AI-Intune · AI 機器的集中管理平臺"
+    : "AI-Intune · Control every AI machine from one place";
   languageButtons.forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.language === next));
   });

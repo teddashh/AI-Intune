@@ -1,0 +1,26 @@
+# AI-Intune
+
+[English](README.md) · **繁體中文**
+
+AI-Intune 是以證據為核心的控制平臺，管理執行 AI agent 與 coding tools 的機器。Hub 記錄機器清單、觀測資料、desired state、job、驗證證據與稽核事件。Agent 由受管機器主動連出。
+
+[專案介紹頁](https://teddashh.github.io/AI-Intune/?lang=zh) · [Apache 2.0 授權](LICENSE)
+
+## 建置與測試
+
+請在 Linux 上使用 Go 1.27.1：
+
+```sh
+git clone https://github.com/teddashh/AI-Intune.git
+cd AI-Intune
+make test vet
+make hub agent-bundles
+```
+
+Hub 執行檔是 `build/clawctl-hub`。Linux 版 Agent 執行檔與 bootstrap bundle 會產生在 `build/` 底下。`ops/` 另外收錄各平臺的 Agent 安裝程式與系統服務範本。
+
+## 運作模式
+
+Hub 預期部署在私有網路中。Operator 存取使用 Tailscale 身分與 capabilities；每個 Agent 都有自己的機器憑證。註冊時使用一次性 token。憑證與本機設定只留在 operator 或受管機器上，從不放進這個 repository。
+
+目前的 API 與行為請以原始碼與測試為準。部署前請先設定一套獨立的私有環境；程式碼與測試中的範例位址僅供說明。
