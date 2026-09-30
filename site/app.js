@@ -4,7 +4,7 @@ const menuButton = document.querySelector(".menu-button");
 const navigation = document.querySelector(".site-nav");
 
 function setLanguage(language) {
-  const next = language === "zh" ? "zh" : "en";
+  const next = String(language || "").toLowerCase().startsWith("zh") ? "zh" : "en";
   root.dataset.lang = next;
   root.lang = next === "zh" ? "zh-Hant" : "en";
   document.title = next === "zh"
