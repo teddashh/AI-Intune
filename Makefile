@@ -28,7 +28,7 @@ agent:
 	@mkdir -p build
 	$(BUILD) -o build/clawctl-agent ./cmd/clawctl-agent
 
-# 機隊裡有 x86_64 也有 aarch64（兩台 Oracle ARM + sampleagent3）。
+# 機隊是多台 Linux 主機，x86_64 與 aarch64 都有。
 cross:
 	@mkdir -p build
 	GOOS=linux GOARCH=amd64 $(BUILD) -o build/clawctl-agent-linux-amd64 ./cmd/clawctl-agent
