@@ -75,6 +75,16 @@
 
 <h2 id="deployment-actions" class="section-anchor" tabindex="-1">動作</h2>
 <div class="panel">
+  <h3 id="canary-rollout">Canary rollout</h3>
+  <dl class="facts">
+    <dt>Phase</dt><dd class="mono">{{$d.Rollout.Phase}}</dd>
+    <dt>Canary</dt><dd>{{if $d.Rollout.CanaryDisplayName}}{{$d.Rollout.CanaryDisplayName}}{{else}}—{{end}}</dd>
+    <dt>Hub job</dt><dd class="mono">{{if $d.Rollout.CanaryJobState}}{{$d.Rollout.CanaryJobState}}{{else}}not opened{{end}}</dd>
+    <dt>Cross-failure-domain</dt><dd class="mono">{{if $d.Rollout.CanaryIndependent}}{{$d.Rollout.CanaryIndependent}}{{else}}—{{end}}</dd>
+    <dt>Expand allowed</dt><dd>{{if $d.Rollout.ExpandAllowed}}yes{{else}}no{{end}}</dd>
+  </dl>
+  <p>{{$d.Rollout.Reason}}</p>
+  <ul class="small">{{range $d.Rollout.Rollback}}<li>{{.}}</li>{{end}}</ul>
   <p>{{$d.Status}}</p>
   {{if $v.BoundaryPause}}
   <p class="small">boundary kind：<span class="mono">{{$v.BoundaryPause.Kind}}</span></p>

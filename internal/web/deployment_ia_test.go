@@ -150,6 +150,7 @@ func TestDeploymentPagesExposeAccessibleIDsAndJobDrilldowns(t *testing.T) {
 		`aria-label="工作單 ` + jobs[0].JobID + `"`,
 		`/jobs?deployment_id=` + d.DeploymentID + `&amp;state=failed`,
 		`<caption class="sr-only">此 deployment 的 included targets、工作單與跨故障域證據</caption>`,
+		`id="canary-rollout"`, `canary_stopped`,
 	} {
 		if !strings.Contains(detail, want) {
 			t.Errorf("deployment detail missing accessible/drilldown evidence %q", want)

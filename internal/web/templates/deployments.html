@@ -28,11 +28,12 @@
         </label>
       </div>
       <div class="action-form">
-        <label><span class="field-label">Batch size</span><input type="number" name="batch_size" value="5" min="1" max="5" required></label>
+        <label><span class="field-label">Batch size</span><input type="number" name="batch_size" value="1" min="1" max="5" required></label>
         <label><span class="field-label">Execution timeout（秒）</span><input type="number" name="execution_timeout_seconds" value="600" min="1" max="86400" required></label>
         <label><span class="field-label">不可逆變更</span><select name="irreversible" required><option value="false">否</option><option value="true">是</option></select></label>
       </div>
       <label><span class="field-label">變更理由</span><input name="reason" maxlength="500" autocomplete="off"></label>
+      <p class="small">Batch size 1 puts one machine in the first batch. Hub opens the next batch after that job is succeeded. A failure pauses the deployment. Abandon stops further jobs.</p>
       <p><button type="submit">Preview deployment</button></p>
     </form>
     {{end}}

@@ -1,6 +1,6 @@
 # Open-source deploy guide — clawctl-hub (OSS / any cloud)
 
-Status: **Milestone 2 — enrollment hub URL and optional R2/S3 blobs**. This document describes how to run Hub on a
+Status: **Milestone 3 — operator MCP/CLI and canary rollout**. This document describes how to run Hub on a
 generic Linux host with Docker + Cloudflare Tunnel + Tailscale. It does **not**
 change the operator auth model.
 
@@ -184,21 +184,41 @@ Without Docker: `make hub` then `./ops/install-hub.sh --listen … --operator-ca
 
 ---
 
-## 8. Still later
+## 8. Operator MCP and CLI
 
-Done in this milestone:
+An agent on a tailnet node uses `clawctl-operator` (stdio MCP or `call`). It
+calls the same `/v1/operator/*` API as the Web UI. Contract, grants, canary
+phases, and rollback limits: [OPERATOR-AGENT.md](OPERATOR-AGENT.md). The
+agent procedure is `skills/clawctl-operator/SKILL.md`.
 
-1. **Enrollment** — ticket page shows one install command. `--hub` is the Tailscale `http://100.x:8787` address, or an experimental `https://<hostname>` tunnel URL for agent check-in only.
-2. **R2 / S3** — when `R2_*` or `S3_*` is complete, Hub stores Hub-hashed blobs and keeps digests in SQLite. Partial config refuses to start. Both groups at once is an error.
+```bash
+make operator
+export CLAWCTL_HUB_URL=http://100.x.y.z:8787
+./build/clawctl-operator tools
+./build/clawctl-operator mcp
+```
 
-Not implemented:
-
-3. **Cloudflare Access / OIDC** — Hub still does not trust `X-Forwarded-*` or `Authorization` for operator identity. Do not invent an operator login in front of the Tailscale listener.
-4. **Deleting the local tarball after upload** — the artifacts directory remains the working copy. Remote serve is only the fallback when that file is missing and the SQLite row matches.
+The process must run on a node that holds the Tailscale grants for this Hub.
+It sends no `Authorization` header and does not open the SQLite file.
 
 ---
 
-## 9. Security checklist
+## 9. Still later
+
+Done:
+
+1. **Enrollment** — ticket page shows one install command. `--hub` is the Tailscale `http://100.x:8787` address, or an experimental `https://<hostname>` tunnel URL for agent check-in only.
+2. **R2 / S3** — when `R2_*` or `S3_*` is complete, Hub stores Hub-hashed blobs and keeps digests in SQLite. Partial config refuses to start. Both groups at once is an error.
+3. **Operator MCP / CLI** — `clawctl-operator` reads fleet, jobs, deployments, software, and compliance, and writes enroll tickets, deployments, and profile assignments through the existing preview/apply API. Canary rollout is one machine, then Hub's job verdict, then the next batch.
+
+Not implemented:
+
+4. **Cloudflare Access / OIDC** — Hub still does not trust `X-Forwarded-*` or `Authorization` for operator identity. Do not invent an operator login in front of the Tailscale listener.
+5. **Deleting the local tarball after upload** — the artifacts directory remains the working copy. Remote serve is only the fallback when that file is missing and the SQLite row matches.
+
+---
+
+## 10. Security checklist
 
 - [ ] `hub.env` mode `0600`, not committed
 - [ ] No enroll tokens in git
