@@ -312,6 +312,11 @@ var optionalLedgerTables = []ledgerTableInvariant{
 			{"desired_id"}, {"job_id"}, {"assignment_id", "package_id"},
 		},
 	},
+	{
+		name: `object_blobs`,
+		requiredColumns: `digest:TEXT:0:-:1 size_bytes:INTEGER:1:-:0 object_key:TEXT:1:-:0
+			backend:TEXT:1:-:0 kind:TEXT:1:-:0 media_type:TEXT:1:-:0 created_at:TEXT:1:-:0`,
+	},
 }
 
 // additiveLedgerColumns extends identity checking to security-relevant columns

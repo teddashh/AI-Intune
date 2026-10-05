@@ -23,8 +23,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/blobstore"
 	"github.com/teddashh/AI-Intune/internal/expect"
 	"github.com/teddashh/AI-Intune/internal/ledgerlock"
+	"github.com/teddashh/AI-Intune/internal/objectref"
 	"github.com/teddashh/AI-Intune/internal/operator"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/operatorendpoint"
@@ -58,6 +60,10 @@ type hub struct {
 	// Machine download routes 只從這裡讀；只有受 admin 保護的 operator
 	// artifact-intake worker 會依固定 policy 連 production registry。
 	artifactsDir string
+
+	// blobs 是選擇性的 R2/S3 耐久副本。nil 代表沿用本機 artifacts 目錄，
+	// 不建立 object_blobs 列。有設定時，SQLite 只留 digest 與 object key。
+	blobs blobstore.Backend
 
 	// drillStamp：上一次還原演練蓋的章（restoredrill.go）。空字串 = 不看。
 	drillStamp string
@@ -438,6 +444,10 @@ func serve(argv []string) {
 	if why != "" {
 		log.Fatalf("operator console 位址設定不合法：%s", why)
 	}
+	objectBlobs, objectBlobSummary, err := blobstore.FromEnv(os.Getenv)
+	if err != nil {
+		log.Fatalf("object storage 設定不合法：%v", err)
+	}
 	// Own the exact configured address before opening/migrating SQLite. A
 	// syntactically valid 100.x address can belong to another tailnet peer; if
 	// we wait until the end of startup to bind it, a bad config can touch the
@@ -484,8 +494,12 @@ func serve(argv []string) {
 		StampPath:  drillStampPath(*dbPath),
 		Live:       st,
 	})
+	if objectBlobs != nil {
+		operatorService.SetArtifactBlobPublisher(objectref.Publisher{Backend: objectBlobs, Store: st})
+		log.Printf("object storage: %s", objectBlobSummary)
+	}
 	h := &hub{
-		store: st, tailnet: tailnetCache, artifactsDir: artifactsDir, operatorService: operatorService, publicURL: operatorBase,
+		store: st, tailnet: tailnetCache, artifactsDir: artifactsDir, blobs: objectBlobs, operatorService: operatorService, publicURL: operatorBase,
 		hubHost:   *hubHost,
 		startedAt: time.Now(), drillStamp: drillStampPath(*dbPath),
 		notifyCmd: *notify, reportAt: *reportAt, reportStamp: *stamp,

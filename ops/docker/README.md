@@ -15,7 +15,7 @@
 | 執行 | Docker Compose + 持久 volume `clawctl-data` |
 | Operator 身分 | **Tailscale grants app capability**（見 `docs/OPERATOR-AUTH.md`） |
 | 公網入口 | 可選 Cloudflare Tunnel（目前只適合作 **agent 實驗**；operator UI 仍走 Tailscale IP） |
-| 物件儲存 | SQLite = 狀態；未來 R2 = 大檔／證據；GitHub = 程式碼 |
+| 物件儲存 | SQLite = 狀態與 digest；有設 `R2_*` 或 `S3_*` 才把大檔放到物件儲存；否則沿用本機 artifacts。GitHub = 程式碼 |
 
 ### 硬性限制
 
@@ -67,7 +67,7 @@ Hub **不信任** `X-Forwarded-*`／`Forwarded` 做 operator 身分。
 - Docker Compose + volume `clawctl-data` for SQLite/state.
 - **Operator auth = Tailscale app capabilities** (join a free tailnet; see `docs/OPERATOR-AUTH.md`).
 - Optional **Cloudflare Tunnel** for experimental agent ingress only — Hub does **not** trust `X-Forwarded-*` for operator identity; operator UI stays on the Tailscale IP.
-- Storage split: SQLite = state; future R2 = large artifacts; GitHub = code only.
+- Storage split: SQLite = state and digests; optional R2/S3 = large blobs when configured; GitHub = code only.
 - **Not Oracle-only.** Any small Linux VM / Docker host works.
 - **Do not host the Hub on the Grok Bot box.**
 

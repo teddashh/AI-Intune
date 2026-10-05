@@ -33,6 +33,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/agenthub"
 	"github.com/teddashh/AI-Intune/internal/catalog"
 	"github.com/teddashh/AI-Intune/internal/model"
 	"github.com/teddashh/AI-Intune/internal/probe"
@@ -203,7 +204,7 @@ func unknownArgError(arg string) string {
 
 func runEnroll(args []string) {
 	fs := flag.NewFlagSet("enroll", flag.ExitOnError)
-	hub := fs.String("hub", "", "Hub base URL, e.g. http://100.x.y.z:8787 over Tailscale")
+	hub := fs.String("hub", "", "Hub base URL: http://100.x.y.z:8787 (Tailscale, same address as the operator UI) or https://hostname (experimental Cloudflare Tunnel, agent check-in only)")
 	tok := fs.String("token", "", "one-time enrollment token")
 	tokenFile := fs.String("token-file", "", "0600 file containing the one-time enrollment token")
 	_ = fs.Parse(args)
@@ -218,6 +219,11 @@ func runEnroll(args []string) {
 			log.Fatalf("讀取 enroll token 失敗：%v", err)
 		}
 	}
+	canonicalHub, err := agenthub.Parse(*hub)
+	if err != nil {
+		log.Fatalf("enroll --hub 不合法：%v", err)
+	}
+	*hub = canonicalHub
 
 	obs, err := probe.Collect(context.Background())
 	if err != nil {

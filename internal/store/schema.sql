@@ -1398,3 +1398,20 @@ CREATE TABLE IF NOT EXISTS enrollment_limit (
   updated_at   TEXT NOT NULL,
   updated_by   TEXT NOT NULL
 );
+
+-- object_blobs 是 Hub 自己量過的位元組的參考，不是機器自述。
+-- digest 是 Hub 在寫入 backend 之前算出的 SHA-256。這張表沒有 machine_id：
+-- 它不是某台機器的事實，只是 artifacts / evidence 大檔的位址。
+-- 本機 artifacts 目錄仍是工作複本。有設定 R2/S3 時，backend 才是耐久副本。
+CREATE TABLE IF NOT EXISTS object_blobs (
+  digest      TEXT PRIMARY KEY CHECK (
+    length(digest) = 64 AND digest GLOB '????????????????????????????????????????????????????????????????'
+      AND lower(digest) = digest
+  ),
+  size_bytes  INTEGER NOT NULL CHECK (size_bytes > 0 AND size_bytes <= 1073741824),
+  object_key  TEXT NOT NULL CHECK (object_key = 'blobs/' || digest),
+  backend     TEXT NOT NULL CHECK (backend IN ('r2','s3','dir','memory')),
+  kind        TEXT NOT NULL CHECK (kind IN ('artifact','evidence')),
+  media_type  TEXT NOT NULL CHECK (length(media_type) BETWEEN 1 AND 128),
+  created_at  TEXT NOT NULL CHECK (length(created_at) = 20 AND created_at GLOB '????-??-??T??:??:??Z')
+);

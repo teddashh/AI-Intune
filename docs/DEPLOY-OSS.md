@@ -1,6 +1,6 @@
 # Open-source deploy guide — clawctl-hub (OSS / any cloud)
 
-Status: **Milestone 1 packaging**. This document describes how to run Hub on a
+Status: **Milestone 2 — enrollment hub URL and optional R2/S3 blobs**. This document describes how to run Hub on a
 generic Linux host with Docker + Cloudflare Tunnel + Tailscale. It does **not**
 change the operator auth model.
 
@@ -60,7 +60,7 @@ The **site/** static pages (if any) can live on Pages/Vercel; the Hub cannot.
 | **Tailscale** | Operator identity + reachability; Hub binds its Tailscale IP |
 | **Cloudflare Tunnel** | Optional public ingress for **agent** experiments |
 | **SQLite volume** | Fleet state (machines, jobs, audit, …) |
-| **R2 (future)** | Large artifacts / evidence blobs — env scaffolded, code TODO |
+| **R2 or S3 (optional)** | Large artifacts / evidence blobs when configured; otherwise local files |
 | **GitHub** | Source code only — never enroll tokens or `hub.env` secrets |
 
 **Do not** run Hub on a machine it also manages as an enrolled agent if you can avoid it (see unit comments / PRODUCT). **Do not** run Hub on the Grok Bot build box.
@@ -111,9 +111,9 @@ Enable with compose profile `tunnel` and `CLOUDFLARE_TUNNEL_TOKEN` (see
 
 | Store | Contents |
 |---|---|
-| **SQLite** (`CLAWCTL_DB`, volume `clawctl-data`) | Registry, jobs, audit, tickets, settings — source of truth |
-| **Local artifacts dir** (next to DB) | Packaged agent bundles / artifact blobs Hub already keeps on disk |
-| **R2 (planned)** | Large evidence / artifact objects; env vars `R2_*` scaffolded in `hub.env.example` — **Milestone 2 wiring** |
+| **SQLite** (`CLAWCTL_DB`, volume `clawctl-data`) | Registry, jobs, audit, tickets, settings, and `object_blobs` digests — source of truth |
+| **Local artifacts dir** (next to DB) | Working copy of artifact tarballs. Catalog and deployments read this directory. |
+| **R2 or S3 (optional)** | Durable copy of large artifact and evidence blobs when `R2_*` or `S3_*` is complete. Hub hashes the bytes itself. Unset env keeps local files only. |
 | **GitHub** | Code, Dockerfiles, docs — no secrets, no live DBs |
 
 ### Backup / restore (volume)
@@ -136,16 +136,29 @@ then start Hub; validate with `/healthz` and operator homepage HTTP 200.
 ## 6. One-time enrollment flow
 
 Agents **outbound-push** check-ins; machines do not need inbound ports.
+Self-report is not proof: the machine page timestamp is the receipt.
 
-1. Operator opens `http://<CLAWCTL_LISTEN>/` (Tailscale).
-2. Create an enrollment ticket in the UI (or `clawctl-hub enroll-token <name>` with discovery).
-3. On the target machine, run the installer with the one-time token and Hub URL
-   (`http://<CLAWCTL_LISTEN>` today; public tunnel URL only for experiments).
-4. Agent redeems the ticket, stores machine bearer, then periodic check-in /
-   observation push.
-5. Confirm the machine appears in Machines with fresh check-in evidence.
+1. Operator opens `http://<CLAWCTL_LISTEN>/` on Tailscale. That address is the only operator UI.
+2. Create an enrollment ticket in the UI. The ticket page shows one install command, for example:
 
-Details: PRODUCT.md, install scripts under `ops/install-agent*.sh`.
+   ```bash
+   ./install-agent.sh --hub http://100.64.0.1:8787
+   ```
+
+   The one-time token is not embedded in that command. Paste it when the installer asks, or pass `--token-file` (mode `0600`).
+3. On the target machine, run that command. The installer enrolls, starts the agent, and runs `clawctl-agent verify` until Hub has received a check-in.
+4. Open the machine page. A check-in timestamp there is the evidence. The installer's own success line is not.
+
+`--hub` accepts two forms:
+
+| `--hub` | Who uses it |
+|---|---|
+| `http://<tailscale-ipv4>:<port>` | Default. Same address as the operator UI. |
+| `https://<hostname>[:port]` | Experimental Cloudflare Tunnel for **agent check-in only**. Do not log into the operator UI with this URL. |
+
+The Go agent also accepts a literal Tailscale IPv6 hub URL on `enroll`. The shell installers accept Tailscale IPv4 and https hostnames.
+
+Evidence excerpts stay in SQLite. Bulky evidence uses the same Hub-hashed blob path as artifacts (`object_blobs`, kind `evidence`) when object storage is configured.
 
 ---
 
@@ -171,13 +184,17 @@ Without Docker: `make hub` then `./ops/install-hub.sh --listen … --operator-ca
 
 ---
 
-## 8. Milestone 2 (next)
+## 8. Still later
 
-Not in this packaging milestone:
+Done in this milestone:
 
-1. **Enrollment UX** — polish ticket create → copy-paste install command for Docker/public URL cases; document agent `hub_url` choices (Tailscale vs tunnel).
-2. **R2 wiring** — Hub reads `R2_*`, uploads large artifacts/evidence, keeps SQLite references; backup story for objects + volume.
-3. **Optional operator path behind Access** — only if Hub gains an explicit trusted-proxy / OIDC mode (today: do not fake it with headers).
+1. **Enrollment** — ticket page shows one install command. `--hub` is the Tailscale `http://100.x:8787` address, or an experimental `https://<hostname>` tunnel URL for agent check-in only.
+2. **R2 / S3** — when `R2_*` or `S3_*` is complete, Hub stores Hub-hashed blobs and keeps digests in SQLite. Partial config refuses to start. Both groups at once is an error.
+
+Not implemented:
+
+3. **Cloudflare Access / OIDC** — Hub still does not trust `X-Forwarded-*` or `Authorization` for operator identity. Do not invent an operator login in front of the Tailscale listener.
+4. **Deleting the local tarball after upload** — the artifacts directory remains the working copy. Remote serve is only the fallback when that file is missing and the SQLite row matches.
 
 ---
 

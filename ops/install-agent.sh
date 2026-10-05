@@ -15,6 +15,10 @@ usage() {
   cat <<'EOF'
 Usage: ./install-agent.sh --hub URL [options]
 
+  --hub URL
+      http://<tailscale-ipv4>:<port>  (same address as the operator UI)
+      https://<hostname>[:port]       (experimental Cloudflare Tunnel; agent check-in only)
+
 Options:
   --token TOKEN                    one-time enrollment token
   --token-file FILE                0600 file containing the enrollment token
@@ -44,6 +48,90 @@ cleanup() {
 trap on_error ERR
 trap cleanup EXIT
 
+agent_hub_octet() {
+  local o="$1"
+  [[ "$o" =~ ^[0-9]+$ ]] || return 1
+  if [[ ${#o} -gt 1 && "${o:0:1}" == 0 ]]; then
+    return 1
+  fi
+  (( 10#$o <= 255 )) || return 1
+  return 0
+}
+
+agent_hub_port() {
+  local port="$1"
+  [[ "$port" =~ ^[0-9]+$ ]] || return 1
+  if [[ ${#port} -gt 1 && "${port:0:1}" == 0 ]]; then
+    return 1
+  fi
+  (( 10#$port >= 1 && 10#$port <= 65535 )) || return 1
+  return 0
+}
+
+# http:// is the operator UI address: a literal Tailscale IPv4 and an explicit port.
+# https:// is an experimental Cloudflare Tunnel for agent check-in only.
+accept_agent_hub_url() {
+  local rest ip port host o1 o2 o3 o4 extra
+  extra=""
+  case "$HUB" in
+    *[@?#]*|*' '*|*$'\t'*|*$'\n'*|*$'\r'*) fail "--hub must not include userinfo, a query, or a fragment" ;;
+  esac
+  case "$HUB" in
+    */) HUB="${HUB%/}" ;;
+  esac
+  case "$HUB" in
+    http://*)
+      rest="${HUB#http://}"
+      case "$rest" in
+        */*) fail "--hub must not include a path" ;;
+        *:*) ip="${rest%:*}"; port="${rest##*:}" ;;
+        *) fail "--hub http URL must be a Tailscale IPv4 and an explicit port" ;;
+      esac
+      case "$ip" in
+        *:*|*']'*) fail "--hub http URL must be a Tailscale IPv4 and an explicit port" ;;
+      esac
+      IFS=. read -r o1 o2 o3 o4 extra <<< "$ip"
+      [[ -z "$extra" && -n "$o1" && -n "$o2" && -n "$o3" && -n "$o4" ]] || fail "--hub http URL must be a Tailscale IPv4 and an explicit port"
+      agent_hub_octet "$o1" || fail "--hub http URL must be a Tailscale IPv4 and an explicit port"
+      agent_hub_octet "$o2" || fail "--hub http URL must be a Tailscale IPv4 and an explicit port"
+      agent_hub_octet "$o3" || fail "--hub http URL must be a Tailscale IPv4 and an explicit port"
+      agent_hub_octet "$o4" || fail "--hub http URL must be a Tailscale IPv4 and an explicit port"
+      agent_hub_port "$port" || fail "--hub http URL must be a Tailscale IPv4 and an explicit port"
+      if [[ "$o1" != 100 ]] || (( 10#$o2 < 64 || 10#$o2 > 127 )); then
+        fail "--hub http URL must be a Tailscale node IPv4"
+      fi
+      if [[ "$ip" == "100.100.100.100" || ( "$o2" == 115 && ( "$o3" == 92 || "$o3" == 93 ) ) ]]; then
+        fail "--hub http URL must be a Tailscale node IPv4"
+      fi
+      HUB="http://${o1}.${o2}.${o3}.${o4}:${port}"
+      ;;
+    https://*)
+      rest="${HUB#https://}"
+      case "$rest" in
+        */*) fail "--hub must not include a path" ;;
+        *:*) host="${rest%:*}"; port="${rest##*:}" ;;
+        *) host="$rest"; port="" ;;
+      esac
+      [[ -n "$host" && "$host" != *:* && "$host" != *'['* ]] || fail "--hub https URL must be a DNS hostname"
+      host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
+      [[ "$host" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]] || fail "--hub https URL must be a DNS hostname"
+      [[ "$host" =~ [a-z] ]] || fail "--hub https URL must be a DNS hostname"
+      case ".$host." in
+        *.localhost.*) fail "--hub https URL must be a DNS hostname" ;;
+      esac
+      if [[ -n "$port" ]]; then
+        agent_hub_port "$port" || fail "--hub https URL must be a DNS hostname and an explicit port"
+        HUB="https://${host}:${port}"
+      else
+        HUB="https://${host}"
+      fi
+      ;;
+    *)
+      fail "--hub must be http://<tailscale-ipv4>:<port> or https://<hostname>"
+      ;;
+  esac
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --hub) [[ $# -ge 2 ]] || fail "--hub requires a value"; HUB="$2"; shift 2 ;;
@@ -57,8 +145,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$HUB" ]] || { usage >&2; exit 2; }
-[[ "$HUB" != */ ]] || HUB="${HUB%/}"
-[[ "$HUB" == http://* || "$HUB" == https://* ]] || fail "--hub must be an HTTP(S) URL"
+accept_agent_hub_url
+# Ops test hook: validate --hub and stop. Not an operator feature.
+if [[ "${CLAWCTL_INSTALL_AGENT_CHECK_HUB:-}" == "1" ]]; then
+  printf '%s\n' "$HUB"
+  exit 0
+fi
 [[ $EUID -ne 0 ]] || fail "Run this installer as the account that will run clawctl-agent"
 UNAME_S="$(uname -s)"
 if [[ "$UNAME_S" != Linux ]]; then
