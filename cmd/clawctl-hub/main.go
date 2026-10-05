@@ -398,7 +398,7 @@ func runRollbackCompatibility(argv []string, out io.Writer) error {
 
 func serve(argv []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("listen", "127.0.0.1:8770", "監聽位址")
+	addr := fs.String("listen", serveListenDefault(), "監聽位址（literal Tailscale IP:port；預設讀 $CLAWCTL_LISTEN）")
 	dbPath := fs.String("db", defaultDB(), "SQLite 檔位置")
 	hubHost := fs.String("hub-host", hostname(), "這台的名字；用來偵測 Hub 是不是裝在它自己管的機器上")
 	notify := fs.String("notify-cmd", os.Getenv("CLAWCTL_NOTIFY_CMD"), "早報要餵給哪個指令（全文走 stdin）")
@@ -609,6 +609,17 @@ func serve(argv []string) {
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutCtx)
+}
+
+// serveListenDefault returns the --listen flag default: CLAWCTL_LISTEN when
+// set, otherwise the historical fail-closed loopback placeholder (still
+// rejected by ParseListen before the DB opens). Docker/distroless images have
+// no shell to expand ${CLAWCTL_LISTEN} in CMD, so the binary must read env.
+func serveListenDefault() string {
+	if v := os.Getenv("CLAWCTL_LISTEN"); v != "" {
+		return v
+	}
+	return "127.0.0.1:8770"
 }
 
 func operatorDestinationFromListen(listen string) (netip.Addr, error) {
