@@ -75,7 +75,7 @@ jobs:
           - name: agent
             packages: ./cmd/clawctl-agent/ ./internal/probe/
           - name: links
-            packages: ./internal/agenthub/ ./internal/operatorclient/
+            packages: ./internal/agentlink/ ./internal/agentrelay/ ./internal/agenthub/ ./internal/agentpty/ ./internal/operatorclient/
     steps:
       - uses: actions/checkout@v6
 

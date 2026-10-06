@@ -491,6 +491,7 @@ func runAgent() {
 
 	observationNudge := make(chan struct{}, 1)
 	startJobs(ctx, cfg, observationNudge)
+	go runTerminalLink(ctx, cfg)
 
 	// --- 心跳 goroutine。
 	go func() {

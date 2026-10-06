@@ -170,7 +170,7 @@ func runMachineLifecycleHTTP(ctx context.Context, client *operatorclient.Client,
 			preview.AgentCredentialPresent, preview.AgentAuthenticationBefore, preview.AgentAuthenticationAfter,
 			preview.PendingEnrollmentTokenCount, preview.PendingEnrollmentTokenExpiredCount,
 			preview.PendingEnrollmentRedemptionBefore, preview.PendingEnrollmentRedemptionAfter,
-			preview.ActiveJobCount, preview.Blockers, preview.PreviewDigest)
+			preview.ActiveJobCount, preview.OpenAgentSessionCount, preview.Blockers, preview.PreviewDigest)
 	}
 	if len(preview.Blockers) != 0 {
 		return fmt.Errorf("machine lifecycle preview 有 blocker %q；未送出 apply", strings.Join(preview.Blockers, ","))
@@ -179,6 +179,7 @@ func runMachineLifecycleHTTP(ctx context.Context, client *operatorclient.Client,
 	if err != nil {
 		return fmt.Errorf("產生 machine lifecycle request key：%w", err)
 	}
+	writeLifecycleRetireSessionNotice(errOut, inputs.DesiredState, preview.OpenAgentSessionCount)
 	return applyMachineLifecycleHTTP(ctx, client, inputs, revision, preview.PreviewDigest, key, out, errOut)
 }
 
@@ -288,7 +289,7 @@ func runMachineLifecycleDirect(ctx context.Context, dbPath string, inputs machin
 					preview.AgentCredentialPresent, preview.AgentAuthenticationBefore, preview.AgentAuthenticationAfter,
 					preview.PendingEnrollmentTokenCount, preview.PendingEnrollmentTokenExpiredCount,
 					preview.PendingEnrollmentRedemptionBefore, preview.PendingEnrollmentRedemptionAfter,
-					preview.ActiveJobCount, blockers, preview.PreviewDigest)
+					preview.ActiveJobCount, preview.OpenAgentSessionCount, blockers, preview.PreviewDigest)
 			}
 			if len(preview.Blockers) != 0 {
 				return fmt.Errorf("machine lifecycle preview 有 blocker %q；未送出 apply", preview.Blockers)
@@ -298,6 +299,7 @@ func runMachineLifecycleDirect(ctx context.Context, dbPath string, inputs machin
 			if err != nil {
 				return err
 			}
+			writeLifecycleRetireSessionNotice(errOut, inputs.DesiredState, preview.OpenAgentSessionCount)
 		}
 		fmt.Fprintf(errOut, "machine lifecycle private retry coordinates: idempotency-key=%s expected-revision=%d preview-digest=%s\n", key, revision, digest)
 		result, err := service.ChangeMachineLifecycle(operator.MachineLifecycleRequest{
@@ -406,18 +408,24 @@ func writeLifecycleRead(out io.Writer, source, machineID, displayName string, st
 func writeLifecyclePreview(out io.Writer, source, machineID, displayName string,
 	before, after store.MachineLifecycleState, revision, denominatorDelta int64,
 	credential, authBefore, authAfter bool, pending, pendingExpired int64,
-	redemptionBefore, redemptionAfter bool, activeJobs int64, blockers []string, digest string,
+	redemptionBefore, redemptionAfter bool, activeJobs, openAgentSessions int64, blockers []string, digest string,
 ) error {
 	blockerText := "none"
 	if len(blockers) != 0 {
 		blockerText = strings.Join(blockers, ",")
 	}
 	_, err := fmt.Fprintf(out,
-		"%s preview: %s (%s) %s → %s；lifecycle-revision=%d；denominator-delta=%d\nagent credential present=%t authentication=%t→%t；pending tickets=%d expired=%d redemption=%t→%t；nonterminal jobs=%d blockers=%s\npreview-digest=%s\n",
+		"%s preview: %s (%s) %s → %s；lifecycle-revision=%d；denominator-delta=%d\nagent credential present=%t authentication=%t→%t；pending tickets=%d expired=%d redemption=%t→%t；nonterminal jobs=%d；terminal sessions currently open=%d blockers=%s\npreview-digest=%s\n",
 		source, terminalSafe(displayName), terminalSafe(machineID), before, after, revision, denominatorDelta,
 		credential, authBefore, authAfter, pending, pendingExpired, redemptionBefore, redemptionAfter,
-		activeJobs, blockerText, digest)
+		activeJobs, openAgentSessions, blockerText, digest)
 	return err
+}
+
+func writeLifecycleRetireSessionNotice(errOut io.Writer, desired store.MachineLifecycleState, openAgentSessions int64) {
+	if desired == store.MachineLifecycleRetired && openAgentSessions > 0 {
+		fmt.Fprintf(errOut, "machine lifecycle notice: terminal sessions currently open: %d；retiring ends any still open when applied.\n", openAgentSessions)
+	}
 }
 
 func writeLifecycleApply(out io.Writer, source, machineID, displayName string,

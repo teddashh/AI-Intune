@@ -60,12 +60,13 @@ type MachineLifecycleImpact struct {
 }
 
 type MachineLifecyclePreviewResponse struct {
-	MachineID         string                      `json:"machine_id"`
-	DisplayName       string                      `json:"display_name"`
-	CurrentState      store.MachineLifecycleState `json:"current_state"`
-	DesiredState      store.MachineLifecycleState `json:"desired_state"`
-	LifecycleRevision int64                       `json:"lifecycle_revision"`
-	PreviewedAt       time.Time                   `json:"previewed_at"`
+	MachineID             string                      `json:"machine_id"`
+	DisplayName           string                      `json:"display_name"`
+	CurrentState          store.MachineLifecycleState `json:"current_state"`
+	DesiredState          store.MachineLifecycleState `json:"desired_state"`
+	LifecycleRevision     int64                       `json:"lifecycle_revision"`
+	PreviewedAt           time.Time                   `json:"previewed_at"`
+	OpenAgentSessionCount int64                       `json:"open_agent_session_count"`
 	MachineLifecycleImpact
 	PreviewDigest string `json:"preview_digest"`
 }
@@ -302,12 +303,13 @@ func decodeMachineLifecyclePreview(raw []byte) (MachineLifecyclePreviewResponse,
 	fields["machine_id"], fields["display_name"] = &result.MachineID, &result.DisplayName
 	fields["current_state"], fields["desired_state"] = &result.CurrentState, &result.DesiredState
 	fields["lifecycle_revision"], fields["previewed_at"] = &result.LifecycleRevision, &result.PreviewedAt
+	fields["open_agent_session_count"] = &result.OpenAgentSessionCount
 	fields["preview_digest"] = &result.PreviewDigest
 	seen, err := decodeExactJSONObject(raw, "machine lifecycle preview", fields)
 	if err != nil {
 		return result, err
 	}
-	required := append([]string{"machine_id", "display_name", "current_state", "desired_state", "lifecycle_revision", "previewed_at", "preview_digest"}, lifecycleImpactRequired...)
+	required := append([]string{"machine_id", "display_name", "current_state", "desired_state", "lifecycle_revision", "previewed_at", "open_agent_session_count", "preview_digest"}, lifecycleImpactRequired...)
 	if err := requireResponseFields("machine lifecycle preview", seen, required...); err != nil {
 		return result, err
 	}
@@ -415,7 +417,7 @@ func validateMachineLifecyclePreview(result MachineLifecyclePreviewResponse, mac
 	}
 	if !validLifecycleState(result.CurrentState) || result.DesiredState != request.DesiredState ||
 		result.LifecycleRevision != request.ExpectedRevision || !canonicalLifecycleTime(result.PreviewedAt) ||
-		!validSHA256Digest(result.PreviewDigest) {
+		result.OpenAgentSessionCount < 0 || !validSHA256Digest(result.PreviewDigest) {
 		return errors.New("operator client: lifecycle preview identity, time, or digest is invalid")
 	}
 	return validateMachineLifecycleImpact(result.MachineLifecycleImpact, result.CurrentState, result.DesiredState)

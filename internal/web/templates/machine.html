@@ -807,6 +807,18 @@
 {{end}}
 </div>
 
+{{with .TerminalOpen}}
+<h2 id="action-terminal" class="section-anchor" tabindex="-1">終端</h2>
+<div class="panel">
+  <p class="small dim" style="margin-top:0">{{.Effect}}</p>
+  <form class="action-form" method="post" action="/machines/{{$m.MachineID}}/terminals">
+    <input type="hidden" name="session_id" value="{{.SessionID}}">
+    <input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">
+    <button type="submit" style="padding:6px 14px">開啟終端</button>
+  </form>
+</div>
+{{end}}
+
 <h2 id="action-diagnostic" class="section-anchor" tabindex="-1">診斷</h2>
 <div class="panel">
   <p class="small dim" style="margin-top:0">開一張不改任何設定的工作單，走完整條派工與回報路徑。</p>

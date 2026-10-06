@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -3185,33 +3186,99 @@ func firstLine(s string) string {
 
 // PHASES.md Phase 3 的第二條判準：「瀏覽器與前端 log 裡找不到 BAT token」。
 //
-// ⚠⚠ 這條判準在這個設計裡是**架構上成立的**，不是靠小心翼翼維持的。
-// 那讓它很容易變成一個沒有人守的空條件，所以要把成立的理由寫成測試：
-//
-//  1. 沒有前端。整個 UI 是伺服器端算好的 HTML，一行 JavaScript 都沒有。
-//     沒有 JS 就沒有 console、沒有 XHR、沒有 sourcemap —— 「前端 log」
-//     這個東西根本不存在，所以裡面找不到任何東西。
-//  2. Hub 從來沒有拿到過 BAT 的憑證。它對 BAT 的全部知識是
-//     「bat-server.service 這個 unit 現在是什麼狀態」加上一個位址。
-//     拿不到的東西漏不出去。
-//  3. 那個位址是乾淨的 —— 沒有 query string、沒有 fragment。
-//     一旦有人為了「方便」在網址後面掛上任何參數，這裡就會紅。
-//
-// 會讓這個測試紅的那次修改，正好就是這條判準真正要擋的那次修改：
-// 把 BAT 嵌進來、或是幫使用者代打認證。
+// 終端那一頁有 script，也因此有 console。第一個理由不再涵蓋整個 UI。
+// 這個測試守的是例外只有那一頁：其餘每一個 operator HTML 頁面仍然沒有
+// script。判準本身現在靠的是第二個理由 —— Hub 沒有 BAT 的憑證，所以
+// 沒有前端可以把它交出去。會讓這個測試紅的修改，是讓第二個頁面開始跑
+// JavaScript。
 func TestNoFrontEndMeansNoFrontEndLog(t *testing.T) {
 	s, st := newServer(t)
 	id := onlineMachine(t, st, "samplehub1")
+	markers := []string{"<script", "javascript:", "onclick=", "onload=", "<iframe"}
 
 	for _, path := range []string{"/", "/machines/" + id, "/reports/tickets"} {
-		body := get(t, s, path)
-		low := strings.ToLower(body)
-		// ⚠ 連 <script> 開頭都不准出現。有一個就有第二個，
-		// 而第二個會是「只是加個複製按鈕」。
-		for _, bad := range []string{"<script", "javascript:", "onclick=", "onload=", "<iframe"} {
-			if strings.Contains(low, bad) {
-				t.Errorf("%s 出現了 %q —— 沒有前端才是「前端 log 裡找不到 token」的理由", path, bad)
-			}
+		assertHTMLHasNoScriptMarkers(t, path, get(t, s, path), markers)
+	}
+
+	entries, err := templateFS.ReadDir("templates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var scriptedTemplates []string
+	for _, entry := range entries {
+		name := entry.Name()
+		raw, err := templateFS.ReadFile("templates/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if htmlHasScriptMarker(string(raw), markers) {
+			scriptedTemplates = append(scriptedTemplates, name)
+		}
+	}
+	sort.Strings(scriptedTemplates)
+	if len(scriptedTemplates) != 1 || scriptedTemplates[0] != "terminal.html" {
+		t.Fatalf("script-bearing templates=%v, want only terminal.html", scriptedTemplates)
+	}
+
+	mux := http.NewServeMux()
+	patterns := s.Routes(mux)
+	scanned := map[string]struct{}{}
+	for _, pattern := range patterns {
+		path, ok := operatorHTMLProbePath(pattern, id)
+		if !ok {
+			continue
+		}
+		rec := httptest.NewRecorder()
+		req := verifiedWebRequest(httptest.NewRequest(http.MethodGet, path, nil), "example.com/cap/clawctl-view")
+		mux.ServeHTTP(rec, req)
+		if !strings.Contains(strings.ToLower(rec.Header().Get("Content-Type")), "text/html") {
+			continue
+		}
+		assertHTMLHasNoScriptMarkers(t, path, rec.Body.String(), markers)
+		scanned[path] = struct{}{}
+	}
+	for _, path := range []string{"/", "/machines/" + id, "/reports/tickets"} {
+		if _, ok := scanned[path]; !ok {
+			t.Errorf("widened HTML scan missed %s", path)
+		}
+	}
+	if len(scanned) < 10 {
+		t.Fatalf("scanned %d HTML pages, want the operator pages other than the terminal", len(scanned))
+	}
+}
+
+func operatorHTMLProbePath(pattern, machineID string) (string, bool) {
+	method, path, ok := strings.Cut(pattern, " ")
+	if !ok || method != http.MethodGet || path == "/machines/{id}/terminals/{session}" {
+		return "", false
+	}
+	path = strings.ReplaceAll(path, "{$}", "")
+	path = strings.ReplaceAll(path, "{id}", machineID)
+	path = strings.ReplaceAll(path, "{arch}", "amd64")
+	path = strings.ReplaceAll(path, "{locale}", "zh-Hant")
+	path = strings.ReplaceAll(path, "{sha256}", strings.Repeat("ab", 32))
+	if strings.Contains(path, "{") {
+		return "", false
+	}
+	return path, true
+}
+
+func htmlHasScriptMarker(body string, markers []string) bool {
+	low := strings.ToLower(body)
+	for _, marker := range markers {
+		if strings.Contains(low, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func assertHTMLHasNoScriptMarkers(t *testing.T, path, body string, markers []string) {
+	t.Helper()
+	low := strings.ToLower(body)
+	for _, marker := range markers {
+		if strings.Contains(low, marker) {
+			t.Errorf("%s 出現了 %q —— 終端以外的頁面仍然不能有前端", path, marker)
 		}
 	}
 }

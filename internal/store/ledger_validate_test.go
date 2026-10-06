@@ -126,6 +126,119 @@ func TestValidateExistingLedgerRejectsStructuralDecoysWithoutMutation(t *testing
 	}
 }
 
+func TestValidateExistingLedgerAgentSessions(t *testing.T) {
+	t.Run("absent", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "historical.sqlite")
+		createManifestLedger(t, path, ledgerFixtureOptions{})
+		if err := ValidateExistingLedger(path); err != nil {
+			t.Fatalf("ledger without agent_sessions: %v", err)
+		}
+	})
+
+	t.Run("open", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "current.sqlite")
+		st, err := Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		closeCheckpointedLedger(t, st, path)
+		if err := ValidateExistingLedger(path); err != nil {
+			t.Fatalf("ledger Open creates: %v", err)
+		}
+	})
+
+	for _, fixture := range []struct {
+		name string
+		ddl  string
+	}{
+		{
+			name: "missing column",
+			ddl: `CREATE TABLE agent_sessions (
+				session_id TEXT PRIMARY KEY,
+				machine_id TEXT NOT NULL REFERENCES machine_registry(machine_id),
+				operator_tailnet_user_id TEXT NOT NULL,
+				operator_tailnet_user_login TEXT NOT NULL,
+				closed_at TEXT,
+				close_reason TEXT,
+				CHECK ((closed_at IS NULL AND close_reason IS NULL) OR
+				       (closed_at IS NOT NULL AND close_reason IS NOT NULL AND close_reason <> ''))
+			)`,
+		},
+		{
+			name: "wrong type",
+			ddl: `CREATE TABLE agent_sessions (
+				session_id TEXT PRIMARY KEY,
+				machine_id TEXT NOT NULL REFERENCES machine_registry(machine_id),
+				operator_tailnet_user_id TEXT NOT NULL,
+				operator_tailnet_user_login TEXT NOT NULL,
+				opened_at INTEGER NOT NULL,
+				closed_at TEXT,
+				close_reason TEXT,
+				CHECK ((closed_at IS NULL AND close_reason IS NULL) OR
+				       (closed_at IS NOT NULL AND close_reason IS NOT NULL AND close_reason <> ''))
+			)`,
+		},
+		{
+			name: "missing machine_id foreign key",
+			ddl: `CREATE TABLE agent_sessions (
+				session_id TEXT PRIMARY KEY,
+				machine_id TEXT NOT NULL,
+				operator_tailnet_user_id TEXT NOT NULL,
+				operator_tailnet_user_login TEXT NOT NULL,
+				opened_at TEXT NOT NULL,
+				closed_at TEXT,
+				close_reason TEXT,
+				CHECK ((closed_at IS NULL AND close_reason IS NULL) OR
+				       (closed_at IS NOT NULL AND close_reason IS NOT NULL AND close_reason <> ''))
+			)`,
+		},
+		{
+			name: "session_id is not the primary key",
+			ddl: `CREATE TABLE agent_sessions (
+				session_id TEXT,
+				machine_id TEXT NOT NULL REFERENCES machine_registry(machine_id),
+				operator_tailnet_user_id TEXT NOT NULL,
+				operator_tailnet_user_login TEXT NOT NULL,
+				opened_at TEXT NOT NULL,
+				closed_at TEXT,
+				close_reason TEXT,
+				CHECK ((closed_at IS NULL AND close_reason IS NULL) OR
+				       (closed_at IS NOT NULL AND close_reason IS NOT NULL AND close_reason <> ''))
+			)`,
+		},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "candidate.sqlite")
+			st, err := Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.DB().Exec(`DROP TABLE agent_sessions`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.DB().Exec(fixture.ddl); err != nil {
+				t.Fatal(err)
+			}
+			closeCheckpointedLedger(t, st, path)
+			err = ValidateExistingLedger(path)
+			if err == nil || !strings.Contains(err.Error(), "agent_sessions") {
+				t.Fatalf("malformed agent_sessions error=%v", err)
+			}
+		})
+	}
+}
+
+func closeCheckpointedLedger(t *testing.T, st *Store, path string) {
+	t.Helper()
+	if _, err := st.DB().Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	removeCheckpointedFixtureSidecars(t, path)
+}
+
 func TestValidateExistingLedgerValidatesOptionalJobDependencyTableWhenPresent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad-job-dependencies.sqlite")
 	st, err := Open(path)

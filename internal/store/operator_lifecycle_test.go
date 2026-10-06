@@ -175,6 +175,24 @@ func TestOperatorMachineLifecycleReadPreviewApplyReplayRestoreAndNoOp(t *testing
 	}
 }
 
+func TestOperatorMachineLifecyclePreviewCountsOnlyThisMachinesOpenAgentSessions(t *testing.T) {
+	st := newTestStore(t)
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	targetID := agentSessionMachineAt(t, st, "lifecycle-session-target", "1", "assigned@example.com", now)
+	otherID := agentSessionMachineAt(t, st, "lifecycle-session-other", "1", "assigned@example.com", now)
+	openAssignedUserSessions(t, st, targetID, "target-open-a", "target-open-b", "target-closed")
+	openAssignedUserSessions(t, st, otherID, "other-open")
+	if _, err := st.CloseAgentSession(closeAgentSessionRequest(
+		"target-closed", targetID, "1", "assigned@example.com", "operator 已關閉", "close-target-session")); err != nil {
+		t.Fatal(err)
+	}
+
+	preview := lifecyclePreview(t, st, targetID, MachineLifecycleRetired)
+	if preview.OpenAgentSessionCount != 2 {
+		t.Fatalf("open agent session count=%d, want 2", preview.OpenAgentSessionCount)
+	}
+}
+
 func TestOperatorMachineLifecycleDTOIgnoresLegacyExpected(t *testing.T) {
 	st, machineID, _, _, _ := newOperatorLifecycleFixture(t, "lifecycle-legacy-false")
 	if _, err := st.DB().Exec(`UPDATE machine_registry SET expected=0 WHERE machine_id=?`, machineID); err != nil {
@@ -260,6 +278,16 @@ func TestOperatorMachineLifecycleV1ReceiptRemainsStrictlyReplayable(t *testing.T
 	}
 }
 
+func TestOperatorMachineLifecycleReceiptJSONExcludesOpenAgentSessionCount(t *testing.T) {
+	raw, err := json.Marshal(operatorMachineLifecycleReceipt{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "open_agent_session_count") {
+		t.Fatalf("lifecycle receipt bound preview-time open session count: %s", raw)
+	}
+}
+
 func TestOperatorMachineLifecycleActiveJobBlockerIsPreviewedAtomicAndReplayable(t *testing.T) {
 	st, machineID, _, _, createdAt := newOperatorLifecycleFixture(t, "lifecycle-job")
 	if _, err := st.db.Exec(`INSERT INTO jobs
@@ -341,6 +369,22 @@ func TestOperatorMachineLifecyclePreviewDigestBindsEveryAuthorityAndImpactCoordi
 	}
 	if got := digest(base, MachineLifecycleRetired); got == want {
 		t.Fatalf("desired state did not change preview digest %q", got)
+	}
+}
+
+func TestOperatorMachineLifecyclePreviewDigestDoesNotBindOpenAgentSessionCountToPreventDenialOfRevocation(t *testing.T) {
+	snapshot := operatorMachineLifecycleSnapshot{
+		MachineID: "machine-1", DisplayName: "samplehub1", State: MachineLifecycleActive,
+		Revision: 4, AgentCredential: true, agentCredentialHash: strings.Repeat("a", 64),
+		pendingIdentityDigest: strings.Repeat("b", 64), OpenAgentSessionCount: 1,
+	}
+	impact := operatorMachineLifecycleImpact(snapshot, MachineLifecycleRetired)
+	want := operatorMachineLifecyclePreviewDigest(snapshot, MachineLifecycleRetired, impact)
+	snapshot.OpenAgentSessionCount++
+	got := operatorMachineLifecyclePreviewDigest(snapshot, MachineLifecycleRetired,
+		operatorMachineLifecycleImpact(snapshot, MachineLifecycleRetired))
+	if got != want {
+		t.Fatalf("open agent session count changed preview digest: %q != %q", got, want)
 	}
 }
 

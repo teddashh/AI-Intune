@@ -109,6 +109,7 @@ func (s *Service) ChangeMachineLifecycle(req MachineLifecycleRequest) (MachineLi
 			log.Printf("operator lifecycle audit 寫入失敗 subject=%s: %v", entry.Subject, auditErr)
 		}
 	}
+	s.endClosedTerminalSessions(err, result.ClosedSessionIDs)
 	return result, err
 }
 

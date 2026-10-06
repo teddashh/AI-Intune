@@ -1298,6 +1298,30 @@ WHERE machine_id = ?`,
 	return machineID, agentTok, nil
 }
 
+// AgentTokenCurrent reports whether bearer is still machineID's agent token
+// on an unretired roster row. A long-lived connection authenticated once at
+// upgrade (the terminal link) calls this to notice a re-enrollment or
+// retirement that replaced or retired the credential it was opened with.
+// The comparison is constant time, like AuthenticateAgent.
+func (s *Store) AgentTokenCurrent(machineID, bearer string) (bool, error) {
+	if machineID == "" || bearer == "" {
+		return false, nil
+	}
+	var stored sql.NullString
+	err := s.rdb.QueryRow(`SELECT agent_token_hash FROM machine_registry
+	 WHERE machine_id=? AND retired_at IS NULL`, machineID).Scan(&stored)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: agent token check: %w", err)
+	}
+	if !stored.Valid || stored.String == "" {
+		return false, nil
+	}
+	return subtle.ConstantTimeCompare([]byte(stored.String), []byte(hashToken(bearer))) == 1, nil
+}
+
 // AuthenticateAgent 用 bearer token 換 machine_id。
 //
 // ⚠ 兩件事不能省：
@@ -1494,6 +1518,11 @@ ON CONFLICT(machine_id) DO UPDATE SET
 		nullStr(m.Notes), fmtTime(created), fmtTimePtr(m.EnrolledAt), retiredValue); err != nil {
 		return fmt.Errorf("store: upsert machine projection: %w", err)
 	}
+	if exists && !currentlyRetired && desiredRetired {
+		if _, err := closeOpenAgentSessionsForMachine(tx, m.MachineID, lifecycleAt, AgentSessionCloseReasonMachineRetired); err != nil {
+			return fmt.Errorf("store: close sessions after upsert machine retirement: %w", err)
+		}
+	}
 	if lifecycleEvent != "" {
 		if _, err := tx.Exec(`
 INSERT INTO machine_registry_lifecycle_events(machine_id,event_type,occurred_at)
@@ -1539,9 +1568,12 @@ func (s *Store) GetMachine(id string) (Machine, error) {
 
 // RetireMachine 讓一台機器離開分母。
 //
-// ⚠ 只寫 retired_at，不刪任何東西。心跳、觀測、狀態歷史全部留著 ——
+// ⚠ 不刪任何東西。心跳、觀測、狀態歷史全部留著 ——
 // 「這台退場之前發生了什麼」是事後唯一查得到的線索。
 // expected 也不動：那是當初的意圖，是事實的一部分。
+//
+// 除了 retired_at，它還會關掉這台機器還開著的 agent session：退役是
+// operator 的撤銷手段，留著已授權的 session 就等於沒撤銷。
 func (s *Store) RetireMachine(id string, now time.Time) error {
 	return s.setMachineLifecycle(id, true, now)
 }

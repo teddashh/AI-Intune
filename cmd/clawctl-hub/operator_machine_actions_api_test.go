@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/agentlink"
+	"github.com/teddashh/AI-Intune/internal/model"
 	"github.com/teddashh/AI-Intune/internal/operator"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
 )
@@ -102,6 +104,16 @@ func TestOperatorMachineActionsListsEveryActionWithItsPathAndBlocker(t *testing.
 func TestEveryOperatorAPIMachineActionMatchesItsRegisteredRoute(t *testing.T) {
 	f := observedOperatorFixture(t)
 	recordDiagnosticCheckin(t, f)
+	if _, err := f.store.DB().Exec(`UPDATE machine_registry SET assigned_user_id=? WHERE machine_id=?`,
+		"42", f.machine.id); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.RecordObservation(f.machine.id, model.ObservationBatch{
+		SchemaVersion: model.SchemaVersion, MeasuredAt: jobsTestNow.Add(time.Minute),
+		Identity: model.Identity{Hostname: "cnode-operator", OS: "linux", Arch: "amd64", UnixUser: "example-user"},
+	}, jobsTestNow.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 	seen := make(map[operator.MachineActionKind]struct{})
 	checkCatalogue := func() {
 		rec := machineActionsRequest(t, f, "/v1/operator/machines/"+f.machine.id+"/actions", true, true)
@@ -189,6 +201,63 @@ func TestOperatorMachineActionsShowsAViewOnlyOperatorNothingToPress(t *testing.T
 	if len(operateOnly.Actions) != 2 {
 		t.Fatalf("operate-only actions=%+v", operateOnly.Actions)
 	}
+}
+
+func TestOperatorMachineActionsOffersOpenTerminalToTheAssignedUser(t *testing.T) {
+	f := newJobsFixture(t, "cnode-operator")
+	h := &hub{store: f.store, artifactsDir: f.artifactsDir, agentLinks: agentlink.New()}
+	h.operatorRoutes(f.mux)
+	if _, err := f.store.DB().Exec(`UPDATE machine_registry SET assigned_user_id=?, assigned_user_login=? WHERE machine_id=?`,
+		"42", "ted@example.com", f.machine.id); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.RecordObservation(f.machine.id, model.ObservationBatch{
+		SchemaVersion: model.SchemaVersion, MeasuredAt: jobsTestNow,
+		Identity: model.Identity{Hostname: "cnode-operator", OS: "linux", Arch: "amd64", UnixUser: "example-user"},
+	}, jobsTestNow); err != nil {
+		t.Fatal(err)
+	}
+	path := "/v1/operator/machines/" + f.machine.id + "/actions"
+	unlinked := machineActionByKind(t, decodeMachineActions(t, machineActionsRequest(t, f, path, true, true)),
+		operator.MachineActionOpenTerminal)
+	if unlinked.Available || unlinked.Blocker != operator.MachineActionBlockerTerminalNotLinked ||
+		unlinked.Situation != "這台的終端連線目前沒有接上 Hub。" {
+		t.Fatalf("unlinked=%+v", unlinked)
+	}
+	if _, err := h.agentLinks.Attach(f.machine.id, terminalOpenProbeLink{}); err != nil {
+		t.Fatal(err)
+	}
+	linked := machineActionByKind(t, decodeMachineActions(t, machineActionsRequest(t, f, path, true, true)),
+		operator.MachineActionOpenTerminal)
+	if !linked.Available || linked.Blocker != "" || linked.Surface != operator.MachineActionSurfaceWeb ||
+		linked.Method != "" || linked.Path != "" {
+		t.Fatalf("linked=%+v", linked)
+	}
+	for _, assignee := range []struct{ id, login any }{{"99", "other@example.com"}, {nil, nil}} {
+		if _, err := f.store.DB().Exec(`UPDATE machine_registry SET assigned_user_id=?, assigned_user_login=? WHERE machine_id=?`,
+			assignee.id, assignee.login, f.machine.id); err != nil {
+			t.Fatal(err)
+		}
+		for _, action := range decodeMachineActions(t, machineActionsRequest(t, f, path, true, true)).Actions {
+			if action.Kind == operator.MachineActionOpenTerminal {
+				t.Fatalf("指派給 %v 的機器對 42 列出了開啟終端：%+v", assignee.id, action)
+			}
+		}
+	}
+}
+
+func machineActionByKind(t *testing.T, catalogue operator.MachineActionCatalogue, kind operator.MachineActionKind) operator.MachineAction {
+	t.Helper()
+	for i, action := range catalogue.Actions {
+		if action.Kind == kind {
+			if i == 0 || catalogue.Actions[i-1].Kind != operator.MachineActionConnect {
+				t.Fatalf("%s 沒有緊接在連線後面：%v", kind, catalogue.Actions)
+			}
+			return action
+		}
+	}
+	t.Fatalf("目錄裡沒有 %s：%+v", kind, catalogue.Actions)
+	return operator.MachineAction{}
 }
 
 func TestOperatorMachineActionsRefusesUnknownMachinesAndQueries(t *testing.T) {

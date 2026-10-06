@@ -26,6 +26,7 @@ type machineActionRow struct {
 // 一旦列出某件事可以做，操作員就必須在同一頁按得到它。
 var machineActionAnchors = map[operator.MachineActionKind]string{
 	operator.MachineActionConnect:           "action-connect",
+	operator.MachineActionOpenTerminal:      "action-terminal",
 	operator.MachineActionDiagnosticNoop:    "action-diagnostic",
 	operator.MachineActionRename:            "action-rename",
 	operator.MachineActionNotes:             "action-notes",
@@ -33,6 +34,13 @@ var machineActionAnchors = map[operator.MachineActionKind]string{
 	operator.MachineActionRevokeEnrollToken: "action-enrollment",
 	operator.MachineActionRetire:            "action-lifecycle",
 	operator.MachineActionRestore:           "action-lifecycle",
+}
+
+// machineTerminalOpen is the form shown when 開啟終端 is available.
+type machineTerminalOpen struct {
+	Effect         string
+	SessionID      string
+	IdempotencyKey string
 }
 
 func machineActionsViewFrom(catalogue operator.MachineActionCatalogue) *machineActionsView {

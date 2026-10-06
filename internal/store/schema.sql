@@ -47,6 +47,23 @@ CREATE INDEX IF NOT EXISTS ix_registry_expected
 CREATE INDEX IF NOT EXISTS ix_registry_change_read
   ON machine_registry (created_at DESC, machine_id);
 
+-- 即時 agent session 的授權投影。BAT Server 沒有使用者 ACL，所以每一列都要
+-- 留下 Hub 實際核對過的 tailnet 使用者；關閉後保留作為稽核與留存揭露。
+CREATE TABLE IF NOT EXISTS agent_sessions (
+  session_id                  TEXT PRIMARY KEY, -- session 的穩定識別碼
+  machine_id                  TEXT NOT NULL REFERENCES machine_registry(machine_id), -- session 所連線的機器
+  operator_tailnet_user_id    TEXT NOT NULL, -- 開啟 session 的 operator tailnet 穩定使用者 ID
+  operator_tailnet_user_login TEXT NOT NULL, -- 開啟 session 時看到的 operator tailnet login
+  opened_at                   TEXT NOT NULL, -- Hub 核准並建立 session 的 UTC 時刻
+  closed_at                   TEXT, -- Hub 關閉 session 的 UTC 時刻；NULL 表示仍開著
+  close_reason                TEXT, -- session 關閉原因；仍開著時為 NULL
+  CHECK ((closed_at IS NULL AND close_reason IS NULL) OR
+         (closed_at IS NOT NULL AND close_reason IS NOT NULL AND close_reason <> ''))
+);
+
+CREATE INDEX IF NOT EXISTS ix_agent_sessions_machine_open
+  ON agent_sessions (machine_id, closed_at, opened_at DESC, session_id);
+
 -- Registry lifecycle is append-only evidence.  machine_registry.retired_at is
 -- still the current projection used by hot paths, but it cannot answer
 -- "retired, restored, then retired again" because unretire clears the value.

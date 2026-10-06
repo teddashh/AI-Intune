@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -264,6 +265,155 @@ func TestAssignedUserRejectsFreeTextIdentity(t *testing.T) {
 		t.Fatalf("free text err=%v", err)
 	}
 	assertAssignedUser(t, st, id, "", "", 0)
+}
+
+func TestAssignedUserChangeReturnsClosedSessionIDs(t *testing.T) {
+	st := newTestStore(t)
+	machineID := assignedUserSessionMachine(t, st, "samplehub1")
+	openAssignedUserSessions(t, st, machineID, "session-z", "session-a", "session-m")
+
+	result, err := applyAssignedUser(t, st, machineID, "samplehub1", "2", "next@example.com", "change-user", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"session-a", "session-m", "session-z"}
+	if !slices.Equal(result.ClosedSessionIDs, want) {
+		t.Fatalf("closed session IDs=%v, want %v", result.ClosedSessionIDs, want)
+	}
+}
+
+func TestAssignedUserChangeClosesRowsAsBefore(t *testing.T) {
+	st := newTestStore(t)
+	machineID := assignedUserSessionMachine(t, st, "samplehub1")
+	sessionIDs := []string{"session-z", "session-a", "session-m"}
+	openAssignedUserSessions(t, st, machineID, sessionIDs...)
+
+	if _, err := applyAssignedUser(t, st, machineID, "samplehub1", "2", "next@example.com", "change-user", 1); err != nil {
+		t.Fatal(err)
+	}
+	for _, sessionID := range sessionIDs {
+		session := mustAgentSession(t, st, sessionID)
+		if session.ClosedAt == nil || session.CloseReason != AgentSessionCloseReasonAssignedUserChanged {
+			t.Fatalf("session %q was not closed as before: %+v", sessionID, session)
+		}
+	}
+}
+
+func TestReplayReturnsNoClosedSessionIDs(t *testing.T) {
+	st := newTestStore(t)
+	machineID := assignedUserSessionMachine(t, st, "samplehub1")
+	openAssignedUserSessions(t, st, machineID, "old-session")
+
+	if _, err := applyAssignedUser(t, st, machineID, "samplehub1", "2", "next@example.com", "change-user", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.OpenAgentSession(openAgentSessionRequest(
+		"new-user-session", machineID, "2", "next@example.com", "open-new-user")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Returning session IDs on replay would make the Hub disconnect connections
+	// that the newly assigned user opened after the original operation.
+	replayed, err := applyAssignedUser(t, st, machineID, "samplehub1", "2", "next@example.com", "change-user", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !replayed.Replayed || len(replayed.ClosedSessionIDs) != 0 {
+		t.Fatalf("replay=%+v", replayed)
+	}
+	if session := mustAgentSession(t, st, "new-user-session"); session.ClosedAt != nil {
+		t.Fatalf("new user's session was closed: %+v", session)
+	}
+}
+
+func TestSameUserAssignmentClosesNothing(t *testing.T) {
+	st := newTestStore(t)
+	machineID := assignedUserSessionMachine(t, st, "samplehub1")
+	openAssignedUserSessions(t, st, machineID, "session-a")
+
+	result, err := applyAssignedUser(t, st, machineID, "samplehub1", "1", "assigned@example.com", "same-user", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.ClosedSessionIDs) != 0 {
+		t.Fatalf("same-user assignment returned closed sessions: %v", result.ClosedSessionIDs)
+	}
+	if session := mustAgentSession(t, st, "session-a"); session.ClosedAt != nil {
+		t.Fatalf("same-user assignment closed session: %+v", session)
+	}
+}
+
+func TestNoOpenSessionsYieldsEmptySlice(t *testing.T) {
+	st := newTestStore(t)
+	machineID := assignedUserSessionMachine(t, st, "samplehub1")
+
+	result, err := applyAssignedUser(t, st, machineID, "samplehub1", "2", "next@example.com", "change-user", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.ClosedSessionIDs) != 0 {
+		t.Fatalf("closed session IDs=%v, want empty", result.ClosedSessionIDs)
+	}
+}
+
+func TestClosedSessionIDsNeverEnterIdempotencyCache(t *testing.T) {
+	st := newTestStore(t)
+	machineID := assignedUserSessionMachine(t, st, "samplehub1")
+	sessionIDs := []string{"cache-secret-session-a", "cache-secret-session-b"}
+	openAssignedUserSessions(t, st, machineID, sessionIDs...)
+
+	if _, err := applyAssignedUser(t, st, machineID, "samplehub1", "2", "next@example.com", "change-user", 1); err != nil {
+		t.Fatal(err)
+	}
+	var responseJSON string
+	if err := st.DB().QueryRow(`SELECT response_json FROM operator_idempotency WHERE idempotency_key=?`,
+		"change-user").Scan(&responseJSON); err != nil {
+		t.Fatal(err)
+	}
+	for _, sessionID := range sessionIDs {
+		if strings.Contains(responseJSON, sessionID) {
+			t.Fatalf("idempotency response contains closed session ID %q: %s", sessionID, responseJSON)
+		}
+	}
+}
+
+func TestOnlyThisMachineSessionsAreClosed(t *testing.T) {
+	st := newTestStore(t)
+	targetID := assignedUserSessionMachine(t, st, "samplehub1")
+	otherID := assignedUserSessionMachine(t, st, "sampleagent1")
+	openAssignedUserSessions(t, st, targetID, "target-session")
+	openAssignedUserSessions(t, st, otherID, "other-session")
+
+	result, err := applyAssignedUser(t, st, targetID, "samplehub1", "2", "next@example.com", "change-user", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(result.ClosedSessionIDs, []string{"target-session"}) {
+		t.Fatalf("closed session IDs=%v", result.ClosedSessionIDs)
+	}
+	if session := mustAgentSession(t, st, "other-session"); session.ClosedAt != nil {
+		t.Fatalf("other machine's session was closed: %+v", session)
+	}
+}
+
+func assignedUserSessionMachine(t *testing.T, st *Store, name string) string {
+	t.Helper()
+	now := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	machineID := mustEnroll(t, st, name, now)
+	if _, err := applyAssignedUser(t, st, machineID, name, "1", "assigned@example.com", "assign-"+name, 0); err != nil {
+		t.Fatal(err)
+	}
+	return machineID
+}
+
+func openAssignedUserSessions(t *testing.T, st *Store, machineID string, sessionIDs ...string) {
+	t.Helper()
+	for _, sessionID := range sessionIDs {
+		if _, err := st.OpenAgentSession(openAgentSessionRequest(
+			sessionID, machineID, "1", "assigned@example.com", "open-"+sessionID)); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func applyAssignedUser(t *testing.T, st *Store, machineID, name, userID, login, key string, revision int64) (OperatorMachineAssignedUserResult, error) {

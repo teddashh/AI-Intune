@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -123,6 +124,77 @@ func TestLifecycleWebPreviewMakesBearerImpactExplicitAndApplyReplays(t *testing.
 	}
 	if got, err := st.AuthenticateAgent(agentToken); err != nil || got != machineID {
 		t.Fatalf("restored retained bearer authentication=%q err=%v", got, err)
+	}
+}
+
+func TestLifecycleWebRetireDisclosesOpenTerminalSessionsAndRestoreDoesNot(t *testing.T) {
+	s, st := newServer(t)
+	machineID := onlineMachine(t, st, "lifecycle-terminal-disclosure")
+	insertLifecycleOpenSession(t, st, machineID, "web-terminal-a")
+	insertLifecycleOpenSession(t, st, machineID, "web-terminal-b")
+
+	retirePreview, _ := previewMachineLifecycleForm(t, s, machineID, store.MachineLifecycleRetired, "replace machine")
+	retireBody := retirePreview.Body.String()
+	for _, want := range []string{
+		"退役會停止 agent 驗證、結束套用時仍開啟的終端工作階段，並移出管理分母；credential、ticket、channel 與歷史保留。",
+		"開啟中的終端工作階段</th><td>2",
+	} {
+		if !strings.Contains(retireBody, want) {
+			t.Errorf("retire preview missing %q: %s", want, retireBody)
+		}
+	}
+
+	if err := st.RetireMachine(machineID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	insertLifecycleOpenSession(t, st, machineID, "web-terminal-after-retire")
+	restorePreview, _ := previewMachineLifecycleForm(t, s, machineID, store.MachineLifecycleActive, "restore machine")
+	restoreBody := restorePreview.Body.String()
+	for _, forbidden := range []string{"開啟中的終端工作階段", "結束套用時仍開啟的終端工作階段"} {
+		if strings.Contains(restoreBody, forbidden) {
+			t.Errorf("restore preview rendered retire-only terminal disclosure %q: %s", forbidden, restoreBody)
+		}
+	}
+}
+
+func TestLifecycleTerminalDisclosureCopyExcludesImplementationVocabulary(t *testing.T) {
+	templateRaw, err := templateFS.ReadFile("templates/lifecycle_preview.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cliRaw, err := os.ReadFile("../../cmd/clawctl-hub/machinelifecyclecmd.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var disclosureLines []string
+	for _, source := range []string{string(templateRaw), string(cliRaw)} {
+		for _, line := range strings.Split(source, "\n") {
+			if strings.Contains(line, "終端工作階段") || strings.Contains(line, "terminal sessions") {
+				disclosureLines = append(disclosureLines, line)
+			}
+		}
+	}
+	if len(disclosureLines) != 4 {
+		t.Fatalf("terminal disclosure lines=%d, want 4: %q", len(disclosureLines), disclosureLines)
+	}
+	for _, line := range disclosureLines {
+		lower := strings.ToLower(line)
+		for _, forbidden := range []string{
+			"ledger", "registry", "session row", "socket", "relay", "reconciler", "closemachine",
+		} {
+			if strings.Contains(lower, forbidden) {
+				t.Errorf("terminal disclosure contains forbidden vocabulary %q: %s", forbidden, line)
+			}
+		}
+	}
+}
+
+func insertLifecycleOpenSession(t *testing.T, st *store.Store, machineID, sessionID string) {
+	t.Helper()
+	if _, err := st.DB().Exec(`INSERT INTO agent_sessions
+		(session_id,machine_id,operator_tailnet_user_id,operator_tailnet_user_login,opened_at)
+		VALUES (?,?,?,?,?)`, sessionID, machineID, "web-user", "web@example.com", time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -24,12 +24,13 @@ type TailnetSource interface {
 }
 
 type Service struct {
-	store           *store.Store
-	artifactsDir    string
-	artifactFetcher artifactFetchBackend
-	tailnetSource   TailnetSource
-	restoreDrill    *restoredrill.Runner
-	blobPublisher   ArtifactBlobPublisher
+	store                 *store.Store
+	artifactsDir          string
+	artifactFetcher       artifactFetchBackend
+	tailnetSource         TailnetSource
+	restoreDrill          *restoredrill.Runner
+	terminalSessionCloser func([]string)
+	blobPublisher         ArtifactBlobPublisher
 }
 
 func (s *Service) ConfigureRestoreDrill(runner restoredrill.Runner) {
@@ -59,6 +60,13 @@ func NewControlPlane(st *store.Store, artifactsDir string, source TailnetSource)
 	return service
 }
 
+// SetTerminalSessionCloser records how this service ends live terminal routes.
+// Every constructor leaves it unset. The Hub sets it once on the
+// process-lifetime service. Direct-database commands never set it.
+func (s *Service) SetTerminalSessionCloser(close func(sessionIDs []string)) {
+	s.terminalSessionCloser = close
+}
+
 // ArtifactBlobPublisher stores Hub-measured artifact bytes outside the local
 // artifacts directory. A nil publisher keeps local files only.
 type ArtifactBlobPublisher interface {
@@ -72,6 +80,15 @@ func (s *Service) SetArtifactBlobPublisher(publisher ArtifactBlobPublisher) {
 		return
 	}
 	s.blobPublisher = publisher
+}
+
+// endClosedTerminalSessions runs only after the store apply has returned.
+// The ledger rows are already committed. A replay carries no session ids.
+func (s *Service) endClosedTerminalSessions(err error, sessionIDs []string) {
+	if err != nil || s.terminalSessionCloser == nil || len(sessionIDs) == 0 {
+		return
+	}
+	s.terminalSessionCloser(sessionIDs)
 }
 
 const (

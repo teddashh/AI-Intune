@@ -191,6 +191,15 @@ type OpenClawSpec struct {
 
 const NodeRuntimeBundleLayoutV1 = "node-runtime-bundle:v1"
 
+// AI-Intune runs its own bat-server under its own user unit and loopback
+// port, apart from any BAT server the machine's user runs as
+// bat-server.service. The executor, the terminal link, the probe, and the
+// Hub's evidence check share these names.
+const (
+	BATServerUnit = "clawctl-bat-server.service"
+	BATServerPort = 19876
+)
+
 // BATServerRoot holds AI-Intune's bat-server releases, token, data, and unit file.
 func BATServerRoot(home string) string {
 	return filepath.Join(home, ".local", "share", "clawctl", "bat-server")
@@ -198,6 +207,10 @@ func BATServerRoot(home string) string {
 
 func BATServerDataDir(home string) string {
 	return filepath.Join(BATServerRoot(home), "data")
+}
+
+func BATServerTokenFile(home string) string {
+	return filepath.Join(BATServerRoot(home), "credentials", "token")
 }
 
 const HermesOCIBundleLayoutV1 = "hermes-oci-bundle:v1"

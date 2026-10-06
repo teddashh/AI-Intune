@@ -3,6 +3,7 @@ module github.com/teddashh/AI-Intune
 go 1.27.1
 
 require (
+	github.com/coder/websocket v1.8.14
 	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.58.0
 	tailscale.com v1.102.2
@@ -11,7 +12,6 @@ require (
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/akutz/memconn v0.1.0 // indirect
-	github.com/coder/websocket v1.8.14 // indirect
 	github.com/dblohm7/wingoes v0.0.0-20240119213807-a09d6be7affa // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect

@@ -6,6 +6,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/agentrelay"
+	appcatalog "github.com/teddashh/AI-Intune/internal/catalog"
 	"github.com/teddashh/AI-Intune/internal/store"
 )
 
@@ -21,15 +23,18 @@ import (
 // 同一個固定 blocker 寫兩套算法，遲早會出現「目錄說可以、按下去被拒絕」。
 //
 // 目錄也不重讀已經在畫面上的東西：detail、connect、lifecycle 由呼叫端傳進來，
-// 所以目錄講的那台機器，就是同一頁其他面板講的那台機器。
+// 所以目錄講的那台機器，就是同一頁其他面板講的那台機器。終端這一個讀
+// OpenAgentSessionCount（寫入路徑拿來跟上限比的同一個函式）與
+// MachinePlatformIdentity；呼叫端是不是指派使用者、終端連線接沒接上，由呼叫端傳進來。
 
-const MachineActionsSchemaVersion = 4
+const MachineActionsSchemaVersion = 5
 
 // MachineActionKind is one named thing an operator can do to one machine.
 type MachineActionKind string
 
 const (
 	MachineActionConnect           MachineActionKind = "connect"
+	MachineActionOpenTerminal      MachineActionKind = "open_terminal"
 	MachineActionDiagnosticNoop    MachineActionKind = "diagnostic_noop"
 	MachineActionRename            MachineActionKind = "rename"
 	MachineActionNotes             MachineActionKind = "notes"
@@ -69,24 +74,27 @@ const (
 type MachineActionBlocker string
 
 const (
-	MachineActionBlockerRetired           MachineActionBlocker = "machine_retired"
-	MachineActionBlockerNeverReported     MachineActionBlocker = "machine_never_reported"
-	MachineActionBlockerExecutionUnknown  MachineActionBlocker = "agent_execution_unknown"
-	MachineActionBlockerExecutionDisabled MachineActionBlocker = "agent_execution_disabled"
-	MachineActionBlockerActiveJobs        MachineActionBlocker = "nonterminal_jobs"
-	MachineActionBlockerNoPendingToken    MachineActionBlocker = "enrollment_token_not_pending"
-	MachineActionBlockerNoConnectAddress  MachineActionBlocker = "connect_address_unavailable"
+	MachineActionBlockerRetired              MachineActionBlocker = "machine_retired"
+	MachineActionBlockerNeverReported        MachineActionBlocker = "machine_never_reported"
+	MachineActionBlockerExecutionUnknown     MachineActionBlocker = "agent_execution_unknown"
+	MachineActionBlockerExecutionDisabled    MachineActionBlocker = "agent_execution_disabled"
+	MachineActionBlockerActiveJobs           MachineActionBlocker = "nonterminal_jobs"
+	MachineActionBlockerNoPendingToken       MachineActionBlocker = "enrollment_token_not_pending"
+	MachineActionBlockerNoConnectAddress     MachineActionBlocker = "connect_address_unavailable"
+	MachineActionBlockerTerminalNotLinked    MachineActionBlocker = "terminal_not_linked"
+	MachineActionBlockerTerminalLimitReached MachineActionBlocker = "terminal_limit_reached"
 )
 
 var machineActionOrder = map[MachineActionKind]int{
 	MachineActionConnect:           0,
-	MachineActionDiagnosticNoop:    1,
-	MachineActionRename:            2,
-	MachineActionNotes:             3,
-	MachineActionChannel:           4,
-	MachineActionRevokeEnrollToken: 5,
-	MachineActionRetire:            6,
-	MachineActionRestore:           7,
+	MachineActionOpenTerminal:      1,
+	MachineActionDiagnosticNoop:    2,
+	MachineActionRename:            3,
+	MachineActionNotes:             4,
+	MachineActionChannel:           5,
+	MachineActionRevokeEnrollToken: 6,
+	MachineActionRetire:            7,
+	MachineActionRestore:           8,
 }
 
 type machineActionShape struct {
@@ -106,6 +114,13 @@ var machineActionShapes = map[MachineActionKind]machineActionShape{
 	MachineActionConnect: {
 		label:      "連到這台的 BAT",
 		effect:     "取得這台的 bat-server 位址並留下一筆動作紀錄；機器本身不變。",
+		capability: MachineActionCapabilityOperate,
+		surface:    MachineActionSurfaceWeb,
+		confirm:    MachineActionConfirmNone,
+	},
+	MachineActionOpenTerminal: {
+		label:      "開啟終端",
+		effect:     "在這台機器上開一個終端，由你直接輸入。關閉或重新整理終端頁、或連線中斷，都會結束終端裡正在執行的工作。",
 		capability: MachineActionCapabilityOperate,
 		surface:    MachineActionSurfaceWeb,
 		confirm:    MachineActionConfirmNone,
@@ -212,6 +227,10 @@ func MachineActionBlockerNextStep(blocker MachineActionBlocker) string {
 		return "等未結束的工作單收尾，或到工作單頁處理掉。"
 	case MachineActionBlockerNoConnectAddress:
 		return "等 agent 回報 bat-server 的監聽位址。"
+	case MachineActionBlockerTerminalNotLinked:
+		return "確認這台機器上的 agent 與 bat-server 都在執行。"
+	case MachineActionBlockerTerminalLimitReached:
+		return "先關閉其中一個終端的分頁。"
 	default:
 		return ""
 	}
@@ -275,6 +294,14 @@ type MachineActionsRequest struct {
 	Connect   MachineConnectResult
 	Lifecycle MachineLifecycleReadResult
 	Granted   MachineActionGrant
+	// OperatorTailnetUserID is the caller's Principal.TailnetUserID. It is not
+	// the login and not StableSubject().
+	OperatorTailnetUserID string
+	// AssignedUserID is the UserID from the same MachineAssignedUser read the
+	// page shows. It is not the web label.
+	AssignedUserID string
+	// TerminalLinked is the caller's HasLink(machineID) answer.
+	TerminalLinked bool
 }
 
 // MachineActions answers "what can I do to this machine right now".
@@ -356,6 +383,14 @@ func (s *Service) machineActionVerdicts(req MachineActionsRequest) (map[MachineA
 		}
 	}
 
+	terminal, includeTerminal, err := s.openTerminalVerdict(req)
+	if err != nil {
+		return nil, err
+	}
+	if includeTerminal {
+		out[MachineActionOpenTerminal] = terminal
+	}
+
 	// 診斷工作單：blocker 只跟機器狀態有關，跟操作員之後填的 timeout 無關，
 	// 所以目錄用預設 timeout 問到的答案，對任何合法 timeout 都成立。
 	diagnostic, err := s.store.PreviewOperatorDiagnosticNoop(machineID,
@@ -428,6 +463,52 @@ func (s *Service) machineActionVerdicts(req MachineActionsRequest) (map[MachineA
 		break
 	}
 	return out, nil
+}
+
+// openTerminalVerdict is omitted unless this caller is the assigned user and
+// the machine can hold a terminal. The first matching state blocks it.
+func (s *Service) openTerminalVerdict(req MachineActionsRequest) (machineActionVerdict, bool, error) {
+	if req.AssignedUserID == "" || req.OperatorTailnetUserID != req.AssignedUserID {
+		return machineActionVerdict{}, false, nil
+	}
+	machineID := req.Detail.Item.MachineID
+	osDisplay, unameArch, err := s.store.MachinePlatformIdentity(machineID)
+	if err != nil {
+		return machineActionVerdict{}, false, fmt.Errorf("operator: machine action terminal platform: %w", err)
+	}
+	target, err := catalogPlatformFromMachine(store.Machine{OS: osDisplay, Arch: unameArch})
+	if err != nil {
+		var resolutionErr *appcatalog.ResolutionError
+		if errors.As(err, &resolutionErr) {
+			return machineActionVerdict{}, false, nil
+		}
+		return machineActionVerdict{}, false, fmt.Errorf("operator: machine action terminal platform: %w", err)
+	}
+	if target.OS != agentrelay.TerminalOS {
+		return machineActionVerdict{}, false, nil
+	}
+	if req.Lifecycle.State == MachineLifecycleStateRetired {
+		return machineActionVerdict{
+			blocker: MachineActionBlockerRetired, situation: machineRetiredSituation(req.Lifecycle),
+		}, true, nil
+	}
+	if !req.TerminalLinked {
+		return machineActionVerdict{
+			blocker:   MachineActionBlockerTerminalNotLinked,
+			situation: "這台的終端連線目前沒有接上 Hub。",
+		}, true, nil
+	}
+	count, err := s.store.OpenAgentSessionCount(machineID)
+	if err != nil {
+		return machineActionVerdict{}, false, fmt.Errorf("operator: machine action terminal open count: %w", err)
+	}
+	if count >= store.MaxOpenAgentSessionsPerMachine {
+		return machineActionVerdict{
+			blocker:   MachineActionBlockerTerminalLimitReached,
+			situation: fmt.Sprintf("這台已有 %d 個開啟中的終端，已達上限。", count),
+		}, true, nil
+	}
+	return machineActionVerdict{}, true, nil
 }
 
 func diagnosticNoopActionVerdict(blocker store.OperatorDiagnosticNoopBlocker, activeJobs int64) (machineActionVerdict, error) {

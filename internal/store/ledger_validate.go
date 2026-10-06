@@ -314,6 +314,15 @@ var optionalLedgerTables = []ledgerTableInvariant{
 		},
 	},
 	{
+		name: `agent_sessions`,
+		requiredColumns: `session_id:TEXT:0:-:1 machine_id:TEXT:1:-:0
+			operator_tailnet_user_id:TEXT:1:-:0 operator_tailnet_user_login:TEXT:1:-:0
+			opened_at:TEXT:1:-:0 closed_at:TEXT:0:-:0 close_reason:TEXT:0:-:0`,
+		foreignKeys: []ledgerForeignKeyInvariant{
+			ledgerForeignKey("machine_id", "machine_registry", "machine_id"),
+		},
+	},
+	{
 		name: `object_blobs`,
 		requiredColumns: `digest:TEXT:0:-:1 size_bytes:INTEGER:1:-:0 object_key:TEXT:1:-:0
 			backend:TEXT:1:-:0 kind:TEXT:1:-:0 media_type:TEXT:1:-:0 created_at:TEXT:1:-:0`,
