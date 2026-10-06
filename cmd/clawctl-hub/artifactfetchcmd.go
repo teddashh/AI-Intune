@@ -93,7 +93,7 @@ func runArtifactFetchMutationCommandWithDeps(ctx context.Context, argv []string,
 		fmt.Fprintln(errOut, "      clawctl-hub artifact fetch PACKAGE@VERSION --preview [--json] [--hub-url URL | --db PATH]")
 		fmt.Fprintln(errOut, "      clawctl-hub artifact fetch --recovery-file ABSOLUTE_PATH [--wait] [--json]")
 		fmt.Fprintln(errOut, "      clawctl-hub artifact fetch list|show ...")
-		fmt.Fprintln(errOut, "  PACKAGE: openclaw、hermes-agent 或 node-runtime；VERSION 必須是完整版本。")
+		fmt.Fprintln(errOut, "  PACKAGE: openclaw、hermes-agent、node-runtime、claude-code、codex、grok、bat-server 或 antigravity；VERSION 必須是完整版本。")
 		fs.PrintDefaults()
 	}
 	hubURL := fs.String("hub-url", "", "HTTP operator API base URL（省略時自動發現）")
@@ -226,6 +226,10 @@ func executeArtifactFetchMutation(ctx context.Context, input artifactFetchCLIInp
 			Name: input.name, Version: input.version,
 		})
 		if err != nil {
+			var upstream *artifact.UpstreamVersionError
+			if errors.As(err, &upstream) && upstream.OperatorSentence() != "" {
+				return fmt.Errorf("artifact fetch preview 失敗（%s）：%s", backend.source, upstream.OperatorSentence())
+			}
 			return fmt.Errorf("artifact fetch preview 失敗（%s）：%w", backend.source, err)
 		}
 		if input.previewOnly {
@@ -349,7 +353,7 @@ func runArtifactFetchReadCommandWithDeps(ctx context.Context, argv []string, out
 	hubURL := fs.String("hub-url", "", "HTTP operator API base URL（省略時自動發現）")
 	dbPath := fs.String("db", "", "stopped-service direct DB break-glass 的既有 SQLite 檔位置")
 	state := fs.String("state", "", "只看 queued、running、succeeded 或 failed")
-	name := fs.String("name", "", "只看 package（openclaw、hermes-agent 或 node-runtime）")
+	name := fs.String("name", "", "只看 package（openclaw、hermes-agent、node-runtime、claude-code、codex、grok、bat-server 或 antigravity）")
 	version := fs.String("version", "", "只看 exact semver")
 	limit := fs.Int("limit", store.DefaultArtifactFetchReadLimit, "最多幾筆（1..100）")
 	jsonOutput := fs.Bool("json", false, "輸出 stable operator JSON DTO")
@@ -419,8 +423,10 @@ func runArtifactFetchReadCommandWithDeps(ctx context.Context, argv []string, out
 		request.State != store.ArtifactFetchFailed {
 		return errors.New("artifact fetch list: --state 只接受 queued、running、succeeded 或 failed")
 	}
-	if request.Name != "" && request.Name != "openclaw" && request.Name != "hermes-agent" && request.Name != "node-runtime" {
-		return errors.New("artifact fetch list: --name 只接受 openclaw、hermes-agent 或 node-runtime")
+	if request.Name != "" && request.Name != "openclaw" && request.Name != "hermes-agent" &&
+		request.Name != "node-runtime" && request.Name != "claude-code" && request.Name != "codex" &&
+		request.Name != "grok" && request.Name != "bat-server" && request.Name != "antigravity" {
+		return errors.New("artifact fetch list: --name 只接受 openclaw、hermes-agent、node-runtime、claude-code、codex、grok、bat-server 或 antigravity")
 	}
 	if request.Version != "" && !artifactFetchCLIExactVersion.MatchString(request.Version) {
 		return errors.New("artifact fetch list: --version 必須是 exact semver")
@@ -691,10 +697,20 @@ func parseArtifactFetchCLITarget(target string) (string, string, error) {
 			valid = artifact.ValidNodeRuntimeVersion(version)
 		case "hermes-agent":
 			valid = artifact.ValidHermesVersion(version)
+		case "claude-code":
+			valid = artifact.ValidClaudeCodeVersion(version)
+		case "codex":
+			valid = artifact.ValidCodexVersion(version)
+		case "grok":
+			valid = artifact.ValidGrokVersion(version)
+		case "bat-server":
+			valid = artifact.ValidBATServerVersion(version)
+		case "antigravity":
+			valid = artifact.ValidAntigravityVersion(version)
 		}
 	}
 	if !valid {
-		return "", "", fmt.Errorf("artifact fetch: target 必須是 openclaw@<exact-semver>、hermes-agent@<major.minor.patch> 或 node-runtime@<major.minor.patch>，拿到 %s", terminalSafe(target))
+		return "", "", fmt.Errorf("artifact fetch: target 必須是 openclaw@<exact-semver>、hermes-agent@<major.minor.patch>、node-runtime@<major.minor.patch>、claude-code@<major.minor.patch>、codex@<major.minor.patch>、grok@<major.minor.patch>、bat-server@<major.minor.patch> 或 antigravity@<major.minor.patch>，拿到 %s", terminalSafe(target))
 	}
 	return name, version, nil
 }

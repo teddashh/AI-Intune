@@ -1237,6 +1237,36 @@ func validArtifactFetchSource(name, kind, plan, enginesNode string) bool {
 			return false
 		}
 		return true
+	case artifact.ArtifactSourceClaudeCode:
+		if name != "claude-code" || enginesNode != "" || len(plan) == 0 ||
+			len(plan) > artifact.MaxArtifactSourcePlanBytes || !artifact.ValidClaudeCodeSourcePlan(plan) {
+			return false
+		}
+		return true
+	case artifact.ArtifactSourceCodex:
+		if name != "codex" || enginesNode != "" || len(plan) == 0 ||
+			len(plan) > artifact.MaxArtifactSourcePlanBytes || !artifact.ValidCodexSourcePlan(plan) {
+			return false
+		}
+		return true
+	case artifact.ArtifactSourceGrok:
+		if name != "grok" || enginesNode != "" || len(plan) == 0 ||
+			len(plan) > artifact.MaxArtifactSourcePlanBytes || !artifact.ValidGrokSourcePlan(plan) {
+			return false
+		}
+		return true
+	case artifact.ArtifactSourceBATServer:
+		if name != "bat-server" || enginesNode != "" || len(plan) == 0 ||
+			len(plan) > artifact.MaxArtifactSourcePlanBytes || !artifact.ValidBATServerSourcePlan(plan) {
+			return false
+		}
+		return true
+	case artifact.ArtifactSourceAntigravity:
+		if name != "antigravity" || enginesNode != "" || len(plan) == 0 ||
+			len(plan) > artifact.MaxArtifactSourcePlanBytes || !artifact.ValidAntigravitySourcePlan(plan) {
+			return false
+		}
+		return true
 	default:
 		return false
 	}

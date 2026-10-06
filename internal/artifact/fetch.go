@@ -129,21 +129,31 @@ type Fetcher struct {
 	serial          *sync.Mutex
 	nodeRuntime     *NodeRuntimeFetcher
 	hermesImage     *HermesImageFetcher
+	claudeCode      *ClaudeCodeFetcher
+	codex           *CodexFetcher
+	grok            *GrokFetcher
+	batServer       *BATServerFetcher
+	antigravity     *AntigravityFetcher
 }
 
 type fetcherConfig struct {
-	artifactsDir         string
-	registryURL          string
-	client               *http.Client
-	metadataMax          int64
-	artifactMax          int64
-	metadataTimeout      time.Duration
-	downloadTimeout      time.Duration
-	allowHTTP            bool // tests only; the exported constructor never enables it.
-	now                  func() time.Time
-	nodeOriginURL        string
-	hermesRegistryURL    string
-	hermesTokenOriginURL string
+	artifactsDir                 string
+	registryURL                  string
+	client                       *http.Client
+	metadataMax                  int64
+	artifactMax                  int64
+	metadataTimeout              time.Duration
+	downloadTimeout              time.Duration
+	allowHTTP                    bool // tests only; the exported constructor never enables it.
+	now                          func() time.Time
+	nodeOriginURL                string
+	claudeOriginURL              string
+	codexOriginURL               string
+	hermesRegistryURL            string
+	hermesTokenOriginURL         string
+	batServerOriginURL           string
+	antigravityManifestOriginURL string
+	antigravityDownloadOriginURL string
 }
 
 var fetchDirectoryLocks sync.Map // canonical directory -> *sync.Mutex
@@ -244,6 +254,93 @@ func newFetcher(config fetcherConfig) (*Fetcher, error) {
 		return nil, err
 	}
 	fetcher.hermesImage = hermesImage
+	claudeOriginURL := config.claudeOriginURL
+	if claudeOriginURL == "" {
+		claudeOriginURL = ProductionClaudeCodeOrigin
+		if config.allowHTTP {
+			claudeOriginURL = config.registryURL
+		}
+	}
+	claudeCode, err := newClaudeCodeFetcher(claudeCodeFetcherConfig{
+		artifactsDir: dir, originURL: claudeOriginURL, client: config.client,
+		metadataMax: config.metadataMax, sourceMax: DefaultClaudeCodeSourceMaxBytes,
+		bundleMax: DefaultClaudeCodeBundleMaxBytes, metadataTimeout: config.metadataTimeout,
+		downloadTimeout: config.downloadTimeout, allowHTTP: config.allowHTTP, now: config.now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	fetcher.claudeCode = claudeCode
+	codexOriginURL := config.codexOriginURL
+	if codexOriginURL == "" {
+		codexOriginURL = ProductionCodexOrigin
+		if config.allowHTTP {
+			codexOriginURL = config.registryURL
+		}
+	}
+	codex, err := newCodexFetcher(codexFetcherConfig{
+		artifactsDir: dir, originURL: codexOriginURL, client: config.client,
+		metadataMax: config.metadataMax, sourceMax: DefaultCodexSourceMaxBytes,
+		checksumMax: DefaultCodexChecksumMaxBytes, bundleMax: DefaultCodexBundleMaxBytes,
+		metadataTimeout: config.metadataTimeout, downloadTimeout: config.downloadTimeout,
+		allowHTTP: config.allowHTTP, now: config.now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	fetcher.codex = codex
+	grok, err := newGrokFetcher(grokFetcherConfig{
+		artifactsDir: dir, originURL: config.registryURL, client: config.client,
+		metadataMax: config.metadataMax, sourceMax: DefaultGrokSourceMaxBytes,
+		bundleMax: DefaultGrokBundleMaxBytes, metadataTimeout: config.metadataTimeout,
+		downloadTimeout: config.downloadTimeout, allowHTTP: config.allowHTTP, now: config.now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	fetcher.grok = grok
+	batOriginURL := config.batServerOriginURL
+	if batOriginURL == "" {
+		batOriginURL = ProductionBATServerOrigin
+		if config.allowHTTP {
+			batOriginURL = config.registryURL
+		}
+	}
+	batServer, err := newBATServerFetcher(batServerFetcherConfig{
+		artifactsDir: dir, originURL: batOriginURL, client: config.client,
+		metadataMax: config.metadataMax, sourceMax: DefaultBATServerSourceMaxBytes,
+		bundleMax: DefaultBATServerBundleMaxBytes, metadataTimeout: config.metadataTimeout,
+		downloadTimeout: config.downloadTimeout, allowHTTP: config.allowHTTP, now: config.now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	fetcher.batServer = batServer
+	manifestOriginURL := config.antigravityManifestOriginURL
+	if manifestOriginURL == "" {
+		manifestOriginURL = ProductionAntigravityManifestOrigin
+		if config.allowHTTP {
+			manifestOriginURL = config.registryURL
+		}
+	}
+	downloadOriginURL := config.antigravityDownloadOriginURL
+	if downloadOriginURL == "" {
+		downloadOriginURL = ProductionAntigravityDownloadOrigin
+		if config.allowHTTP {
+			downloadOriginURL = config.registryURL
+		}
+	}
+	antigravity, err := newAntigravityFetcher(antigravityFetcherConfig{
+		artifactsDir: dir, manifestURL: manifestOriginURL, downloadURL: downloadOriginURL,
+		client: config.client, metadataMax: config.metadataMax,
+		sourceMax: DefaultAntigravitySourceMaxBytes, bundleMax: DefaultAntigravityBundleMaxBytes,
+		metadataTimeout: config.metadataTimeout, downloadTimeout: config.downloadTimeout,
+		allowHTTP: config.allowHTTP, now: config.now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	fetcher.antigravity = antigravity
 	return fetcher, nil
 }
 
@@ -371,6 +468,106 @@ func (f *Fetcher) PreviewPlan(ctx context.Context, name, version string) (Previe
 			PreviewDigest: plan.PreviewDigest, SourcePlan: string(raw),
 		}, nil
 	}
+	if name == "claude-code" {
+		if f.claudeCode == nil {
+			return PreviewPlan{}, fmt.Errorf("%w: Claude Code fetcher is unavailable", ErrInvalidFetchRequest)
+		}
+		plan, err := f.claudeCode.PreviewPlan(ctx, version)
+		if err != nil {
+			return PreviewPlan{}, err
+		}
+		raw, err := marshalCompactNoEscape(plan)
+		if err != nil || len(raw) > MaxArtifactSourcePlanBytes {
+			return PreviewPlan{}, fmt.Errorf("%w: encode Claude Code source plan", ErrInvalidFetchRequest)
+		}
+		return PreviewPlan{
+			PolicyVersion: plan.PolicyVersion, SourceKind: ArtifactSourceClaudeCode,
+			Name: plan.Name, Version: plan.Version, RegistryOrigin: plan.SourceOrigin,
+			TarballURL: plan.ChecksumURL, SHA512Integrity: plan.SourceIdentity,
+			MaxBytes: plan.BundleMaxBytes, PreviewedAt: plan.PreviewedAt,
+			PreviewDigest: plan.PreviewDigest, SourcePlan: string(raw),
+		}, nil
+	}
+	if name == "codex" {
+		if f.codex == nil {
+			return PreviewPlan{}, fmt.Errorf("%w: Codex fetcher is unavailable", ErrInvalidFetchRequest)
+		}
+		plan, err := f.codex.PreviewPlan(ctx, version)
+		if err != nil {
+			return PreviewPlan{}, err
+		}
+		raw, err := marshalCompactNoEscape(plan)
+		if err != nil || len(raw) > MaxArtifactSourcePlanBytes {
+			return PreviewPlan{}, fmt.Errorf("%w: encode Codex source plan", ErrInvalidFetchRequest)
+		}
+		return PreviewPlan{
+			PolicyVersion: plan.PolicyVersion, SourceKind: ArtifactSourceCodex,
+			Name: plan.Name, Version: plan.Version, RegistryOrigin: plan.SourceOrigin,
+			TarballURL: plan.ChecksumURL, SHA512Integrity: plan.SourceIdentity,
+			MaxBytes: plan.BundleMaxBytes, PreviewedAt: plan.PreviewedAt,
+			PreviewDigest: plan.PreviewDigest, SourcePlan: string(raw),
+		}, nil
+	}
+	if name == "grok" {
+		if f.grok == nil {
+			return PreviewPlan{}, fmt.Errorf("%w: Grok fetcher is unavailable", ErrInvalidFetchRequest)
+		}
+		plan, err := f.grok.PreviewPlan(ctx, version)
+		if err != nil {
+			return PreviewPlan{}, err
+		}
+		raw, err := marshalCompactNoEscape(plan)
+		if err != nil || len(raw) > MaxArtifactSourcePlanBytes {
+			return PreviewPlan{}, fmt.Errorf("%w: encode Grok source plan", ErrInvalidFetchRequest)
+		}
+		return PreviewPlan{
+			PolicyVersion: plan.PolicyVersion, SourceKind: ArtifactSourceGrok,
+			Name: plan.Name, Version: plan.Version, RegistryOrigin: plan.SourceOrigin,
+			TarballURL: plan.VersionDocumentURL, SHA512Integrity: plan.SourceIdentity,
+			MaxBytes: plan.BundleMaxBytes, PreviewedAt: plan.PreviewedAt,
+			PreviewDigest: plan.PreviewDigest, SourcePlan: string(raw),
+		}, nil
+	}
+	if name == "bat-server" {
+		if f.batServer == nil {
+			return PreviewPlan{}, fmt.Errorf("%w: bat-server fetcher is unavailable", ErrInvalidFetchRequest)
+		}
+		plan, err := f.batServer.PreviewPlan(ctx, version)
+		if err != nil {
+			return PreviewPlan{}, err
+		}
+		raw, err := marshalCompactNoEscape(plan)
+		if err != nil || len(raw) > MaxArtifactSourcePlanBytes {
+			return PreviewPlan{}, fmt.Errorf("%w: encode bat-server source plan", ErrInvalidFetchRequest)
+		}
+		return PreviewPlan{
+			PolicyVersion: plan.PolicyVersion, SourceKind: ArtifactSourceBATServer,
+			Name: plan.Name, Version: plan.Version, RegistryOrigin: plan.SourceOrigin,
+			TarballURL: plan.VersionDocumentURL, SHA512Integrity: plan.SourceIdentity,
+			MaxBytes: plan.BundleMaxBytes, PreviewedAt: plan.PreviewedAt,
+			PreviewDigest: plan.PreviewDigest, SourcePlan: string(raw),
+		}, nil
+	}
+	if name == "antigravity" {
+		if f.antigravity == nil {
+			return PreviewPlan{}, fmt.Errorf("%w: Antigravity fetcher is unavailable", ErrInvalidFetchRequest)
+		}
+		plan, err := f.antigravity.PreviewPlan(ctx, version)
+		if err != nil {
+			return PreviewPlan{}, err
+		}
+		raw, err := marshalCompactNoEscape(plan)
+		if err != nil || len(raw) > MaxArtifactSourcePlanBytes {
+			return PreviewPlan{}, fmt.Errorf("%w: encode Antigravity source plan", ErrInvalidFetchRequest)
+		}
+		return PreviewPlan{
+			PolicyVersion: plan.PolicyVersion, SourceKind: ArtifactSourceAntigravity,
+			Name: plan.Name, Version: plan.Version, RegistryOrigin: plan.ManifestOrigin,
+			TarballURL: plan.ReleaseDirectory, SHA512Integrity: plan.SourceIdentity,
+			MaxBytes: plan.BundleMaxBytes, PreviewedAt: plan.PreviewedAt,
+			PreviewDigest: plan.PreviewDigest, SourcePlan: string(raw),
+		}, nil
+	}
 	if name == "hermes-agent" {
 		if f.hermesImage == nil {
 			return PreviewPlan{}, fmt.Errorf("%w: Hermes image fetcher is unavailable", ErrInvalidFetchRequest)
@@ -392,7 +589,7 @@ func (f *Fetcher) PreviewPlan(ctx context.Context, name, version string) (Previe
 		}, nil
 	}
 	if name != "openclaw" || !validExactNPMVersion(version) {
-		return PreviewPlan{}, fmt.Errorf("%w: target must be exact openclaw, node-runtime, or hermes-agent", ErrInvalidFetchRequest)
+		return PreviewPlan{}, fmt.Errorf("%w: target must be exact openclaw, node-runtime, hermes-agent, claude-code, codex, grok, bat-server, or antigravity", ErrInvalidFetchRequest)
 	}
 	requestCtx, cancel := context.WithTimeout(ctx, f.metadataTimeout)
 	defer cancel()
@@ -598,6 +795,76 @@ func (f *Fetcher) FetchExact(ctx context.Context, plan PreviewPlan, fetchedBy st
 			return Sidecar{}, false, fmt.Errorf("%w: Node runtime source plan does not match preview", ErrInvalidFetchRequest)
 		}
 		return f.nodeRuntime.FetchExact(ctx, nodePlan, fetchedBy, progress)
+	}
+	if plan.SourceKind == ArtifactSourceClaudeCode {
+		if f.claudeCode == nil {
+			return Sidecar{}, false, fmt.Errorf("%w: Claude Code fetcher is unavailable", ErrInvalidFetchRequest)
+		}
+		claudePlan, err := decodeClaudeCodeSourcePlan(plan.SourcePlan)
+		if err != nil || claudePlan.PolicyVersion != plan.PolicyVersion || claudePlan.Name != plan.Name ||
+			claudePlan.Version != plan.Version || claudePlan.SourceOrigin != plan.RegistryOrigin ||
+			claudePlan.ChecksumURL != plan.TarballURL || claudePlan.SourceIdentity != plan.SHA512Integrity ||
+			claudePlan.BundleMaxBytes != plan.MaxBytes || claudePlan.PreviewDigest != plan.PreviewDigest ||
+			plan.EnginesNode != "" {
+			return Sidecar{}, false, fmt.Errorf("%w: Claude Code source plan does not match preview", ErrInvalidFetchRequest)
+		}
+		return f.claudeCode.FetchExact(ctx, claudePlan, fetchedBy, progress)
+	}
+	if plan.SourceKind == ArtifactSourceCodex {
+		if f.codex == nil {
+			return Sidecar{}, false, fmt.Errorf("%w: Codex fetcher is unavailable", ErrInvalidFetchRequest)
+		}
+		codexPlan, err := decodeCodexSourcePlan(plan.SourcePlan)
+		if err != nil || codexPlan.PolicyVersion != plan.PolicyVersion || codexPlan.Name != plan.Name ||
+			codexPlan.Version != plan.Version || codexPlan.SourceOrigin != plan.RegistryOrigin ||
+			codexPlan.ChecksumURL != plan.TarballURL || codexPlan.SourceIdentity != plan.SHA512Integrity ||
+			codexPlan.BundleMaxBytes != plan.MaxBytes || codexPlan.PreviewDigest != plan.PreviewDigest ||
+			plan.EnginesNode != "" {
+			return Sidecar{}, false, fmt.Errorf("%w: Codex source plan does not match preview", ErrInvalidFetchRequest)
+		}
+		return f.codex.FetchExact(ctx, codexPlan, fetchedBy, progress)
+	}
+	if plan.SourceKind == ArtifactSourceGrok {
+		if f.grok == nil {
+			return Sidecar{}, false, fmt.Errorf("%w: Grok fetcher is unavailable", ErrInvalidFetchRequest)
+		}
+		grokPlan, err := decodeGrokSourcePlan(plan.SourcePlan)
+		if err != nil || grokPlan.PolicyVersion != plan.PolicyVersion || grokPlan.Name != plan.Name ||
+			grokPlan.Version != plan.Version || grokPlan.SourceOrigin != plan.RegistryOrigin ||
+			grokPlan.VersionDocumentURL != plan.TarballURL || grokPlan.SourceIdentity != plan.SHA512Integrity ||
+			grokPlan.BundleMaxBytes != plan.MaxBytes || grokPlan.PreviewDigest != plan.PreviewDigest ||
+			plan.EnginesNode != "" {
+			return Sidecar{}, false, fmt.Errorf("%w: Grok source plan does not match preview", ErrInvalidFetchRequest)
+		}
+		return f.grok.FetchExact(ctx, grokPlan, fetchedBy, progress)
+	}
+	if plan.SourceKind == ArtifactSourceBATServer {
+		if f.batServer == nil {
+			return Sidecar{}, false, fmt.Errorf("%w: bat-server fetcher is unavailable", ErrInvalidFetchRequest)
+		}
+		batPlan, err := decodeBATServerSourcePlan(plan.SourcePlan)
+		if err != nil || batPlan.PolicyVersion != plan.PolicyVersion || batPlan.Name != plan.Name ||
+			batPlan.Version != plan.Version || batPlan.SourceOrigin != plan.RegistryOrigin ||
+			batPlan.VersionDocumentURL != plan.TarballURL || batPlan.SourceIdentity != plan.SHA512Integrity ||
+			batPlan.BundleMaxBytes != plan.MaxBytes || batPlan.PreviewDigest != plan.PreviewDigest ||
+			plan.EnginesNode != "" {
+			return Sidecar{}, false, fmt.Errorf("%w: bat-server source plan does not match preview", ErrInvalidFetchRequest)
+		}
+		return f.batServer.FetchExact(ctx, batPlan, fetchedBy, progress)
+	}
+	if plan.SourceKind == ArtifactSourceAntigravity {
+		if f.antigravity == nil {
+			return Sidecar{}, false, fmt.Errorf("%w: Antigravity fetcher is unavailable", ErrInvalidFetchRequest)
+		}
+		antigravityPlan, err := decodeAntigravitySourcePlan(plan.SourcePlan)
+		if err != nil || antigravityPlan.PolicyVersion != plan.PolicyVersion || antigravityPlan.Name != plan.Name ||
+			antigravityPlan.Version != plan.Version || antigravityPlan.ManifestOrigin != plan.RegistryOrigin ||
+			antigravityPlan.ReleaseDirectory != plan.TarballURL || antigravityPlan.SourceIdentity != plan.SHA512Integrity ||
+			antigravityPlan.BundleMaxBytes != plan.MaxBytes || antigravityPlan.PreviewDigest != plan.PreviewDigest ||
+			plan.EnginesNode != "" {
+			return Sidecar{}, false, fmt.Errorf("%w: Antigravity source plan does not match preview", ErrInvalidFetchRequest)
+		}
+		return f.antigravity.FetchExact(ctx, antigravityPlan, fetchedBy, progress)
 	}
 	if plan.SourceKind == ArtifactSourceHermesImage {
 		if f.hermesImage == nil {
@@ -987,11 +1254,24 @@ func (f *Fetcher) ReconcileStaleTemps(before time.Time) (int, error) {
 	return removed, nil
 }
 
+var artifactTempNamePrefixes = []string{
+	artifactFetchTempPrefix,
+	artifactSidecarTempPrefix,
+	nodeRuntimeSourceTempPrefix,
+	claudeCodeSourceTempPrefix,
+	codexSourceTempPrefix,
+	grokSourceTempPrefix,
+	batServerSourceTempPrefix,
+	antigravitySourceTempPrefix,
+	".artifact-",
+	".sidecar-",
+}
+
 func isArtifactTempName(name string) bool {
 	if !strings.HasSuffix(name, ".tmp") {
 		return false
 	}
-	for _, prefix := range []string{artifactFetchTempPrefix, artifactSidecarTempPrefix, nodeRuntimeSourceTempPrefix, ".artifact-", ".sidecar-"} {
+	for _, prefix := range artifactTempNamePrefixes {
 		if strings.HasPrefix(name, prefix) {
 			return true
 		}

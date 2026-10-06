@@ -1,6 +1,9 @@
 package operator
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/base64"
@@ -14,10 +17,111 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andybalholm/brotli"
 	"github.com/teddashh/AI-Intune/internal/artifact"
 	appcatalog "github.com/teddashh/AI-Intune/internal/catalog"
 	"github.com/teddashh/AI-Intune/internal/store"
 )
+
+func writeCodexStandardArtifact(t *testing.T, dir, version string) artifact.Sidecar {
+	t.Helper()
+	body := codexStandardBundle(t, version)
+	sum := sha256.Sum256(body)
+	source := sha512.Sum512([]byte("codex standard " + version))
+	digest := hex.EncodeToString(sum[:])
+	record := artifact.Sidecar{
+		Name: "codex", Version: version,
+		TarballURL:      "https://releases.openai.com/codex/releases/" + version + "/release.json",
+		SHA512Integrity: "sha512-" + base64.StdEncoding.EncodeToString(source[:]),
+		SHA256:          digest, Size: int64(len(body)), FetchedAt: time.Now().UTC(), FetchedBy: "operator:test",
+	}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, digest+".json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, digest+".tgz"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return record
+}
+
+func codexStandardBundle(t *testing.T, version string) []byte {
+	t.Helper()
+	script := []byte("#!/bin/sh\necho codex-cli " + version + "\n")
+	platforms := []struct{ osName, arch string }{
+		{"linux", "amd64"}, {"linux", "arm64"},
+		{"darwin", "amd64"}, {"darwin", "arm64"},
+		{"windows", "amd64"}, {"windows", "arm64"},
+	}
+	var lines []string
+	entries := []codexStandardEntry{{name: "codex/", mode: 0o755, dir: true}}
+	for _, platform := range platforms {
+		filename, ok := artifact.CodexPackageFilename(platform.osName, platform.arch)
+		if !ok {
+			t.Fatalf("missing %s/%s", platform.osName, platform.arch)
+		}
+		var packageEntries []codexStandardEntry
+		for _, relative := range artifact.CodexPackageRequiredPaths(platform.osName) {
+			body := script
+			mode := int64(0o755)
+			if relative == "codex-package.json" {
+				body = []byte("{}\n")
+				mode = 0o644
+			}
+			packageEntries = append(packageEntries, codexStandardEntry{name: relative, mode: mode, body: body})
+		}
+		pkg := codexStandardGzip(t, packageEntries)
+		sum := sha256.Sum256(pkg)
+		lines = append(lines, hex.EncodeToString(sum[:])+"  "+filename)
+		entries = append(entries,
+			codexStandardEntry{name: "codex/" + platform.osName + "-" + platform.arch + "/", mode: 0o755, dir: true},
+			codexStandardEntry{name: "codex/" + platform.osName + "-" + platform.arch + "/" + filename, mode: 0o644, body: pkg},
+		)
+	}
+	sums := strings.Join(lines, "\n") + "\n"
+	entries = append(entries, codexStandardEntry{name: "codex/" + artifact.CodexChecksumAssetName(), mode: 0o644, body: []byte(sums)})
+	return codexStandardGzip(t, entries)
+}
+
+type codexStandardEntry struct {
+	name string
+	mode int64
+	body []byte
+	dir  bool
+}
+
+func codexStandardGzip(t *testing.T, entries []codexStandardEntry) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	gz := gzip.NewWriter(&output)
+	tw := tar.NewWriter(gz)
+	for _, entry := range entries {
+		flag := byte(tar.TypeReg)
+		size := int64(len(entry.body))
+		if entry.dir {
+			flag = tar.TypeDir
+			size = 0
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: entry.name, Typeflag: flag, Mode: entry.mode, Size: size}); err != nil {
+			t.Fatal(err)
+		}
+		if size > 0 {
+			if _, err := tw.Write(entry.body); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
+}
 
 func writeHermesArtifact(t *testing.T, dir, version string) artifact.Sidecar {
 	t.Helper()
@@ -43,6 +147,388 @@ func writeHermesArtifact(t *testing.T, dir, version string) artifact.Sidecar {
 		t.Fatal(err)
 	}
 	return record
+}
+
+func TestStandardCatalogPublishesCodexWithoutNodeDependency(t *testing.T) {
+	service, _, dir, _ := catalogManifestService(t)
+	record := writeCodexStandardArtifact(t, dir, "0.155.1")
+	preview, err := service.PreviewStandardCatalogManifest(t.Context(), StandardCatalogManifestPreviewRequest{
+		ArtifactSHA256: record.SHA256,
+	})
+	if err != nil || preview.Manifest.ID != "codex" || preview.Manifest.Title != "Codex" ||
+		preview.Manifest.Kind != appcatalog.KindApp || preview.Manifest.Source.Catalog != "releases.openai.com" ||
+		preview.Manifest.Source.Revision != "rust-v0.155.1" ||
+		preview.Manifest.Source.UpstreamURL != "https://releases.openai.com/codex/releases/0.155.1/release.json" ||
+		len(preview.Manifest.Platforms) != 6 || len(preview.Manifest.Dependencies) != 0 ||
+		preview.EnginesNode != nil || !slices.Equal(preview.Manifest.Provides, []string{"cli.codex"}) {
+		t.Fatalf("preview=%+v err=%v", preview, err)
+	}
+	result, err := service.PublishStandardCatalogManifest(t.Context(), standardCatalogPublishRequest(preview, "standard-codex"))
+	if err != nil || result.Record.Manifest.ID != "codex" || result.Record.Digest != preview.ManifestDigest {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+func TestStandardCatalogPublishesGrokWithoutNodeDependency(t *testing.T) {
+	service, _, dir, _ := catalogManifestService(t)
+	record := writeGrokStandardArtifact(t, dir, "1.0.40")
+	preview, err := service.PreviewStandardCatalogManifest(t.Context(), StandardCatalogManifestPreviewRequest{
+		ArtifactSHA256: record.SHA256,
+	})
+	if err != nil || preview.Manifest.ID != "grok" || preview.Manifest.Title != "Grok" ||
+		preview.Manifest.Kind != appcatalog.KindApp || preview.Manifest.Source.Catalog != "registry.npmjs.org" ||
+		preview.Manifest.Source.Revision != "1.0.40" || preview.Manifest.Source.License != "Apache-2.0" ||
+		preview.Manifest.Source.UpstreamURL != "https://registry.npmjs.org/@xai-official/grok/1.0.40" ||
+		len(preview.Manifest.Dependencies) != 0 || preview.EnginesNode != nil ||
+		!slices.Equal(preview.Manifest.Provides, []string{"cli.grok"}) ||
+		!slices.Equal(preview.Manifest.Platforms, []appcatalog.Platform{
+			{OS: "darwin", Arch: "amd64"}, {OS: "darwin", Arch: "arm64"},
+			{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"},
+			{OS: "windows", Arch: "amd64"}, {OS: "windows", Arch: "arm64"},
+		}) {
+		t.Fatalf("preview=%+v err=%v", preview, err)
+	}
+	result, err := service.PublishStandardCatalogManifest(t.Context(), standardCatalogPublishRequest(preview, "standard-grok"))
+	if err != nil || result.Record.Manifest.ID != "grok" || result.Record.Digest != preview.ManifestDigest {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if _, err := service.PreviewStandardCatalogManifest(t.Context(), StandardCatalogManifestPreviewRequest{
+		ArtifactSHA256: record.SHA256, NodeRuntimeVersion: "24.21.0",
+	}); !errors.Is(err, ErrInvalidStandardCatalogPreview) {
+		t.Fatalf("Grok accepted Node dependency: %v", err)
+	}
+}
+
+func TestStandardCatalogPublishesBATServerWithoutNodeDependency(t *testing.T) {
+	service, _, dir, _ := catalogManifestService(t)
+	record := writeBATServerStandardArtifact(t, dir, "3.2.10")
+	preview, err := service.PreviewStandardCatalogManifest(t.Context(), StandardCatalogManifestPreviewRequest{
+		ArtifactSHA256: record.SHA256,
+	})
+	if err != nil || preview.Manifest.ID != "bat-server" || preview.Manifest.Title != "BAT Server" ||
+		preview.Manifest.Kind != appcatalog.KindApp ||
+		preview.Manifest.Source.Catalog != "github.com/tony1223/better-agent-terminal" ||
+		preview.Manifest.Source.Revision != "3.2.10" || preview.Manifest.Source.License != "MIT" ||
+		preview.Manifest.Source.UpstreamURL != "https://github.com/tony1223/better-agent-terminal/releases/tag/v3.2.10" ||
+		len(preview.Manifest.Dependencies) != 0 || preview.EnginesNode != nil ||
+		!slices.Equal(preview.Manifest.Provides, []string{"service.bat-server"}) ||
+		!slices.Equal(preview.Manifest.Platforms, []appcatalog.Platform{
+			{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"},
+		}) {
+		t.Fatalf("preview=%+v err=%v", preview, err)
+	}
+	result, err := service.PublishStandardCatalogManifest(t.Context(), standardCatalogPublishRequest(preview, "standard-bat-server"))
+	if err != nil || result.Record.Manifest.ID != "bat-server" || result.Record.Digest != preview.ManifestDigest {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if _, err := service.PreviewStandardCatalogManifest(t.Context(), StandardCatalogManifestPreviewRequest{
+		ArtifactSHA256: record.SHA256, NodeRuntimeVersion: "24.21.0",
+	}); !errors.Is(err, ErrInvalidStandardCatalogPreview) {
+		t.Fatalf("BAT Server accepted Node dependency: %v", err)
+	}
+}
+
+func writeBATServerStandardArtifact(t *testing.T, dir, version string) artifact.Sidecar {
+	t.Helper()
+	body := batServerStandardBundle(t)
+	sum := sha256.Sum256(body)
+	source := sha512.Sum512([]byte("bat-server standard " + version))
+	digest := hex.EncodeToString(sum[:])
+	record := artifact.Sidecar{
+		Name: "bat-server", Version: version,
+		TarballURL:      "https://api.github.com/repos/tony1223/better-agent-terminal/releases/tags/v" + version,
+		SHA512Integrity: "sha512-" + base64.StdEncoding.EncodeToString(source[:]),
+		SHA256:          digest, Size: int64(len(body)), FetchedAt: time.Now().UTC(), FetchedBy: "operator:test",
+	}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, digest+".json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, digest+".tgz"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return record
+}
+
+func batServerStandardBundle(t *testing.T) []byte {
+	t.Helper()
+	members := map[string][]byte{
+		"bat-server/linux-amd64/bat-server.tar.gz": batServerStandardInner(t, "bat-server-linux-x86_64", []byte("amd64-bat")),
+		"bat-server/linux-arm64/bat-server.tar.gz": batServerStandardInner(t, "bat-server-linux-aarch64", []byte("arm64-bat")),
+	}
+	var output bytes.Buffer
+	gz := gzip.NewWriter(&output)
+	tw := tar.NewWriter(gz)
+	for _, name := range []string{
+		"bat-server/linux-amd64/bat-server.tar.gz",
+		"bat-server/linux-arm64/bat-server.tar.gz",
+	} {
+		body := members[name]
+		if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
+}
+
+func batServerStandardInner(t *testing.T, root string, binary []byte) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	gz := gzip.NewWriter(&output)
+	tw := tar.NewWriter(gz)
+	if err := tw.WriteHeader(&tar.Header{Name: root + "/bat-server", Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len(binary))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(binary); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
+}
+
+func writeGrokStandardArtifact(t *testing.T, dir, version string) artifact.Sidecar {
+	t.Helper()
+	body := grokStandardBundle(t)
+	sum := sha256.Sum256(body)
+	source := sha512.Sum512([]byte("grok standard " + version))
+	digest := hex.EncodeToString(sum[:])
+	record := artifact.Sidecar{
+		Name: "grok", Version: version,
+		TarballURL:      "https://registry.npmjs.org/@xai-official/grok/" + version,
+		SHA512Integrity: "sha512-" + base64.StdEncoding.EncodeToString(source[:]),
+		SHA256:          digest, Size: int64(len(body)), FetchedAt: time.Now().UTC(), FetchedBy: "operator:test",
+	}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, digest+".json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, digest+".tgz"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return record
+}
+
+func grokStandardBundle(t *testing.T) []byte {
+	t.Helper()
+	payload := []byte("#!/bin/sh\necho grok\n")
+	var compressed bytes.Buffer
+	writer := brotli.NewWriterLevel(&compressed, brotli.BestSpeed)
+	if _, err := writer.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	body := compressed.Bytes()
+	var output bytes.Buffer
+	gz := gzip.NewWriter(&output)
+	tw := tar.NewWriter(gz)
+	for _, platform := range []struct{ osName, arch string }{
+		{"linux", "amd64"}, {"linux", "arm64"},
+		{"darwin", "amd64"}, {"darwin", "arm64"},
+		{"windows", "amd64"}, {"windows", "arm64"},
+	} {
+		name, ok := artifact.GrokBundleMember(platform.osName, platform.arch)
+		if !ok {
+			t.Fatalf("missing %s/%s", platform.osName, platform.arch)
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
+}
+
+func TestStandardCatalogPublishesAntigravityWithoutNodeDependency(t *testing.T) {
+	service, _, dir, _ := catalogManifestService(t)
+	record := writeAntigravityStandardArtifact(t, dir, "1.2.14")
+	preview, err := service.PreviewStandardCatalogManifest(t.Context(), StandardCatalogManifestPreviewRequest{
+		ArtifactSHA256: record.SHA256,
+	})
+	if err != nil || preview.Manifest.ID != "antigravity" || preview.Manifest.Title != "Antigravity" ||
+		preview.Manifest.Kind != appcatalog.KindApp || preview.Manifest.Source.Catalog != "storage.googleapis.com" ||
+		preview.Manifest.Source.Revision != "1.2.14" || preview.Manifest.Source.License != "proprietary" ||
+		preview.Manifest.Source.UpstreamURL != record.TarballURL ||
+		len(preview.Manifest.Dependencies) != 0 || preview.EnginesNode != nil ||
+		!slices.Equal(preview.Manifest.Provides, []string{"cli.agy"}) ||
+		!slices.Equal(preview.Manifest.Platforms, []appcatalog.Platform{
+			{OS: "darwin", Arch: "amd64"}, {OS: "darwin", Arch: "arm64"},
+			{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"},
+			{OS: "windows", Arch: "amd64"}, {OS: "windows", Arch: "arm64"},
+		}) {
+		t.Fatalf("preview=%+v err=%v", preview, err)
+	}
+	result, err := service.PublishStandardCatalogManifest(t.Context(), standardCatalogPublishRequest(preview, "standard-antigravity"))
+	if err != nil || result.Record.Manifest.ID != "antigravity" || result.Record.Digest != preview.ManifestDigest {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if _, err := service.PreviewStandardCatalogManifest(t.Context(), StandardCatalogManifestPreviewRequest{
+		ArtifactSHA256: record.SHA256, NodeRuntimeVersion: "24.21.0",
+	}); !errors.Is(err, ErrInvalidStandardCatalogPreview) {
+		t.Fatalf("Antigravity accepted Node dependency: %v", err)
+	}
+}
+
+func TestStandardCatalogRefusesTamperedAntigravityBundle(t *testing.T) {
+	service, _, dir, _ := catalogManifestService(t)
+	record := writeAntigravityStandardRecord(t, dir, "1.2.14",
+		"https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.14-4571742832820224/",
+		antigravityStandardBundle(t, "1.2.14", "cli_linux_x64.tar.gz"))
+	var rejection *store.OperatorRequestError
+	if _, err := service.PreviewStandardCatalogManifest(t.Context(), StandardCatalogManifestPreviewRequest{
+		ArtifactSHA256: record.SHA256,
+	}); !errors.As(err, &rejection) || rejection.Code != store.OperatorCodeCatalogArtifactMismatch {
+		t.Fatalf("preview err=%v", err)
+	}
+	manifest, err := service.standardManifestFromRecord(record, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := CatalogManifestPublishRequest{
+		Manifest: manifest, ConfirmPackageID: manifest.ID, ConfirmVersion: manifest.Version,
+		PreviewDigest: standardCatalogPreviewDigest(manifest), Reason: "add package to standard store",
+		IdempotencyKey: "standard-antigravity-tampered", Actor: verifiedDeploymentActor(),
+	}
+	if _, err := service.PublishStandardCatalogManifest(t.Context(), request); !errors.As(err, &rejection) ||
+		rejection.Code != store.OperatorCodeCatalogArtifactMismatch {
+		t.Fatalf("publish err=%v", err)
+	}
+}
+
+func TestStandardCatalogRefusesAntigravitySourceOutsideReleaseDirectory(t *testing.T) {
+	service, _, dir, _ := catalogManifestService(t)
+	for _, tarballURL := range []string{
+		"https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.14-4571742832820224/linux-x64/cli_linux_x64.tar.gz",
+		"https://storage.googleapis.com/antigravity-public/antigravity-cli/1.2.13-4571742832820224/",
+	} {
+		record := writeAntigravityStandardRecord(t, dir, "1.2.14", tarballURL, antigravityStandardBundle(t, "1.2.14", ""))
+		if _, err := service.PreviewStandardCatalogManifest(t.Context(), StandardCatalogManifestPreviewRequest{
+			ArtifactSHA256: record.SHA256,
+		}); !errors.Is(err, ErrInvalidStandardCatalogPreview) {
+			t.Fatalf("%s: err=%v", tarballURL, err)
+		}
+	}
+}
+
+func writeAntigravityStandardArtifact(t *testing.T, dir, version string) artifact.Sidecar {
+	t.Helper()
+	return writeAntigravityStandardRecord(t, dir, version,
+		"https://storage.googleapis.com/antigravity-public/antigravity-cli/"+version+"-4571742832820224/",
+		antigravityStandardBundle(t, version, ""))
+}
+
+func writeAntigravityStandardRecord(t *testing.T, dir, version, tarballURL string, body []byte) artifact.Sidecar {
+	t.Helper()
+	sum := sha256.Sum256(body)
+	source := sha512.Sum512([]byte("antigravity standard " + version))
+	digest := hex.EncodeToString(sum[:])
+	record := artifact.Sidecar{
+		Name: "antigravity", Version: version,
+		TarballURL:      tarballURL,
+		SHA512Integrity: "sha512-" + base64.StdEncoding.EncodeToString(source[:]),
+		SHA256:          digest, Size: int64(len(body)), FetchedAt: time.Now().UTC(), FetchedBy: "operator:test",
+	}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, digest+".json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, digest+".tgz"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return record
+}
+
+func antigravityStandardBundle(t *testing.T, version, tamperedFile string) []byte {
+	t.Helper()
+	type platform struct{ osName, arch, dir, file string }
+	platforms := []platform{
+		{"linux", "amd64", "linux-x64", "cli_linux_x64.tar.gz"},
+		{"linux", "arm64", "linux-arm", "cli_linux_arm64.tar.gz"},
+		{"darwin", "amd64", "darwin-x64", "cli_mac_x64.tar.gz"},
+		{"darwin", "arm64", "darwin-arm", "cli_mac_arm64.tar.gz"},
+		{"windows", "amd64", "windows-x64", "cli_windows_x64.exe"},
+		{"windows", "arm64", "windows-arm", "cli_windows_arm64.exe"},
+	}
+	var output bytes.Buffer
+	gz := gzip.NewWriter(&output)
+	tw := tar.NewWriter(gz)
+	writeDir := func(name string) {
+		t.Helper()
+		if err := tw.WriteHeader(&tar.Header{Name: name + "/", Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeDir("antigravity")
+	for _, platform := range platforms {
+		writeDir("antigravity/" + platform.osName + "-" + platform.arch)
+	}
+	for _, platform := range platforms {
+		body := []byte("antigravity-bytes-" + platform.file)
+		sum := sha512.Sum512(body)
+		if platform.file == tamperedFile {
+			sum = sha512.Sum512([]byte("tampered-" + platform.file))
+		}
+		base := "antigravity/" + platform.osName + "-" + platform.arch
+		if err := tw.WriteHeader(&tar.Header{Name: base + "/" + platform.file, Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(body); err != nil {
+			t.Fatal(err)
+		}
+		manifest, err := json.Marshal(map[string]string{
+			"version": version,
+			"url":     "https://storage.googleapis.com/antigravity-public/antigravity-cli/" + version + "-4571742832820224/" + platform.dir + "/" + platform.file,
+			"sha512":  hex.EncodeToString(sum[:]),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: base + "/manifest.json", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(manifest))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(manifest); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
 }
 
 func TestStandardCatalogPublishesHermesWithoutNodeDependency(t *testing.T) {

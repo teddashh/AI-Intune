@@ -56,22 +56,21 @@ func (s *Service) RunArtifactFetchOperation(ctx context.Context, operationID str
 	if err != nil {
 		return store.ArtifactFetchOperation{}, err
 	}
+	sourceKind := claim.Operation.SourceKind
+	if sourceKind == "" {
+		sourceKind = artifact.ArtifactSourceNPM
+	}
+	policyVersion, err := artifact.PolicyVersionForSourceKind(sourceKind)
+	if err != nil {
+		return s.finishArtifactFetchFailure(ctx, claim, err)
+	}
 	plan := artifact.PreviewPlan{
-		PolicyVersion: artifact.FetchPolicyVersion, SourceKind: claim.Operation.SourceKind,
+		PolicyVersion: policyVersion, SourceKind: sourceKind,
 		Name: claim.Operation.Name, Version: claim.Operation.Version,
 		RegistryOrigin: claim.Operation.RegistryOrigin, TarballURL: claim.TarballURL,
 		SHA512Integrity: claim.Operation.SHA512Integrity, EnginesNode: claim.Operation.EnginesNode,
 		MaxBytes: claim.Operation.MaxBytes, PreviewedAt: claim.Operation.CreatedAt,
 		PreviewDigest: claim.Operation.PreviewDigest, SourcePlan: claim.SourcePlan,
-	}
-	if plan.SourceKind == "" {
-		plan.SourceKind = artifact.ArtifactSourceNPM
-	}
-	if plan.SourceKind == artifact.ArtifactSourceNode {
-		plan.PolicyVersion = artifact.NodeRuntimeFetchPolicyVersion
-	}
-	if plan.SourceKind == artifact.ArtifactSourceHermesImage {
-		plan.PolicyVersion = artifact.HermesImageFetchPolicyVersion
 	}
 	progress := artifactFetchProgressWriter{
 		ctx: ctx, store: s.store, operationID: claim.Operation.OperationID,

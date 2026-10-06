@@ -217,6 +217,21 @@ func validateArtifactFetchTarget(name, version string) error {
 	if name == "hermes-agent" {
 		valid = artifact.ValidHermesVersion(version)
 	}
+	if name == "claude-code" {
+		valid = artifact.ValidClaudeCodeVersion(version)
+	}
+	if name == "codex" {
+		valid = artifact.ValidCodexVersion(version)
+	}
+	if name == "grok" {
+		valid = artifact.ValidGrokVersion(version)
+	}
+	if name == "bat-server" {
+		valid = artifact.ValidBATServerVersion(version)
+	}
+	if name == "antigravity" {
+		valid = artifact.ValidAntigravityVersion(version)
+	}
 	if !valid {
 		return errors.New("operator client: artifact fetch requires a supported package and exact version")
 	}
@@ -439,6 +454,26 @@ func validArtifactFetchSourceResult(name, version, sourceKind, origin, policy st
 		return name == "hermes-agent" && artifact.ValidHermesVersion(version) &&
 			origin == artifact.ProductionHermesRegistryOrigin && policy == artifact.HermesImageFetchPolicyVersion &&
 			enginesNode == nil
+	case artifact.ArtifactSourceClaudeCode:
+		return name == "claude-code" && artifact.ValidClaudeCodeVersion(version) &&
+			origin == artifact.ProductionClaudeCodeOrigin && policy == artifact.ClaudeCodeFetchPolicyVersion &&
+			enginesNode == nil
+	case artifact.ArtifactSourceCodex:
+		return name == "codex" && artifact.ValidCodexVersion(version) &&
+			origin == artifact.ProductionCodexOrigin && policy == artifact.CodexFetchPolicyVersion &&
+			enginesNode == nil
+	case artifact.ArtifactSourceGrok:
+		return name == "grok" && artifact.ValidGrokVersion(version) &&
+			origin == artifact.ProductionRegistryOrigin && policy == artifact.GrokFetchPolicyVersion &&
+			enginesNode == nil
+	case artifact.ArtifactSourceBATServer:
+		return name == "bat-server" && artifact.ValidBATServerVersion(version) &&
+			origin == artifact.ProductionBATServerOrigin && policy == artifact.BATServerFetchPolicyVersion &&
+			enginesNode == nil
+	case artifact.ArtifactSourceAntigravity:
+		return name == "antigravity" && artifact.ValidAntigravityVersion(version) &&
+			origin == artifact.ProductionAntigravityManifestOrigin && policy == artifact.AntigravityFetchPolicyVersion &&
+			enginesNode == nil
 	default:
 		return false
 	}
@@ -457,6 +492,26 @@ func validArtifactFetchOperationSource(operation store.ArtifactFetchOperation) b
 		return operation.Name == "hermes-agent" && artifact.ValidHermesVersion(operation.Version) &&
 			operation.RegistryOrigin == artifact.ProductionHermesRegistryOrigin && operation.EnginesNode == "" &&
 			operation.MaxBytes == artifact.DefaultHermesImageBundleMaxBytes
+	case artifact.ArtifactSourceClaudeCode:
+		return operation.Name == "claude-code" && artifact.ValidClaudeCodeVersion(operation.Version) &&
+			operation.RegistryOrigin == artifact.ProductionClaudeCodeOrigin && operation.EnginesNode == "" &&
+			operation.MaxBytes == artifact.DefaultClaudeCodeBundleMaxBytes
+	case artifact.ArtifactSourceCodex:
+		return operation.Name == "codex" && artifact.ValidCodexVersion(operation.Version) &&
+			operation.RegistryOrigin == artifact.ProductionCodexOrigin && operation.EnginesNode == "" &&
+			operation.MaxBytes == artifact.DefaultCodexBundleMaxBytes
+	case artifact.ArtifactSourceGrok:
+		return operation.Name == "grok" && artifact.ValidGrokVersion(operation.Version) &&
+			operation.RegistryOrigin == artifact.ProductionRegistryOrigin && operation.EnginesNode == "" &&
+			operation.MaxBytes == artifact.DefaultGrokBundleMaxBytes
+	case artifact.ArtifactSourceBATServer:
+		return operation.Name == "bat-server" && artifact.ValidBATServerVersion(operation.Version) &&
+			operation.RegistryOrigin == artifact.ProductionBATServerOrigin && operation.EnginesNode == "" &&
+			operation.MaxBytes == artifact.DefaultBATServerBundleMaxBytes
+	case artifact.ArtifactSourceAntigravity:
+		return operation.Name == "antigravity" && artifact.ValidAntigravityVersion(operation.Version) &&
+			operation.RegistryOrigin == artifact.ProductionAntigravityManifestOrigin && operation.EnginesNode == "" &&
+			operation.MaxBytes == artifact.DefaultAntigravityBundleMaxBytes
 	default:
 		return false
 	}
@@ -470,6 +525,16 @@ func validArtifactFetchPreviewMaxBytes(sourceKind string, maxBytes int64) bool {
 		return maxBytes == artifact.DefaultNodeRuntimeBundleMaxBytes
 	case artifact.ArtifactSourceHermesImage:
 		return maxBytes == artifact.DefaultHermesImageBundleMaxBytes
+	case artifact.ArtifactSourceClaudeCode:
+		return maxBytes == artifact.DefaultClaudeCodeBundleMaxBytes
+	case artifact.ArtifactSourceCodex:
+		return maxBytes == artifact.DefaultCodexBundleMaxBytes
+	case artifact.ArtifactSourceGrok:
+		return maxBytes == artifact.DefaultGrokBundleMaxBytes
+	case artifact.ArtifactSourceBATServer:
+		return maxBytes == artifact.DefaultBATServerBundleMaxBytes
+	case artifact.ArtifactSourceAntigravity:
+		return maxBytes == artifact.DefaultAntigravityBundleMaxBytes
 	default:
 		return false
 	}

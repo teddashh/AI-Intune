@@ -307,7 +307,7 @@ func TestArtifactFetchWebNodeRuntimePreviewAndApply(t *testing.T) {
 		t.Fatal(err)
 	}
 	page := renderWithCapabilities(t, s, "/apps?view=fetch", names)
-	for _, want := range []string{`<select name="name" required>`, `value="openclaw"`, `value="hermes-agent"`, `value="node-runtime"`} {
+	for _, want := range []string{`<select name="name" required>`, `value="openclaw"`, `value="hermes-agent"`, `value="node-runtime"`, `value="claude-code"`, `value="codex"`, `value="grok"`, `value="bat-server"`, `value="antigravity"`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("fetch page missing %q: %s", want, page)
 		}
@@ -347,6 +347,94 @@ func TestArtifactFetchWebNodeRuntimePreviewAndApply(t *testing.T) {
 	if got := fake.applyCalls[0]; got.Name != "node-runtime" || got.Version != "24.21.0" ||
 		got.ConfirmName != got.Name || got.ConfirmVersion != got.Version {
 		t.Fatalf("node apply=%+v", got)
+	}
+}
+
+func TestArtifactFetchWebGrokPreview(t *testing.T) {
+	s, _ := newServer(t)
+	fake := &fakeArtifactWebOperator{
+		operationID: "grok-fetch-operation-123",
+		preview: operator.ArtifactFetchPreviewResult{
+			SchemaVersion:   operator.ArtifactFetchPreviewSchemaVersion,
+			PolicyVersion:   artifact.GrokFetchPolicyVersion,
+			SourceKind:      artifact.ArtifactSourceGrok,
+			PreviewedAt:     time.Now().UTC(),
+			Name:            "grok",
+			Version:         "1.0.40",
+			RegistryOrigin:  artifact.ProductionRegistryOrigin,
+			SHA512Integrity: "sha512-" + base64.StdEncoding.EncodeToString(make([]byte, sha512.Size)),
+			MaxBytes:        artifact.DefaultGrokBundleMaxBytes,
+			PreviewDigest:   "sha256:" + strings.Repeat("e", 64),
+			EnqueueAllowed:  true,
+			Blockers:        []string{},
+		},
+	}
+	s.artifactOperator = fake
+	preview := postForm(t, s, "/apps/artifact-fetches/preview", url.Values{
+		"name": {"grok"}, "version": {"1.0.40"}, "reason": {"official grok bundle"},
+	})
+	if preview.Code != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", preview.Code, preview.Body.String())
+	}
+	body := preview.Body.String()
+	for _, want := range []string{"grok@1.0.40", artifact.ArtifactSourceGrok, artifact.GrokFetchPolicyVersion} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("grok preview missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "Node engines") {
+		t.Fatalf("grok preview exposed node engines: %s", body)
+	}
+	rejected := postForm(t, s, "/apps/artifact-fetches/preview", url.Values{
+		"name": {"grok"}, "version": {"1.0.40-alpha.1"}, "reason": {"official grok bundle"},
+	})
+	if rejected.Code != http.StatusBadRequest {
+		t.Fatalf("prerelease status=%d body=%s", rejected.Code, rejected.Body.String())
+	}
+}
+
+func TestArtifactFetchWebBATServerPreview(t *testing.T) {
+	s, _ := newServer(t)
+	fake := &fakeArtifactWebOperator{
+		operationID: "bat-server-fetch-operation-123",
+		preview: operator.ArtifactFetchPreviewResult{
+			SchemaVersion:   operator.ArtifactFetchPreviewSchemaVersion,
+			PolicyVersion:   artifact.BATServerFetchPolicyVersion,
+			SourceKind:      artifact.ArtifactSourceBATServer,
+			PreviewedAt:     time.Now().UTC(),
+			Name:            "bat-server",
+			Version:         "3.2.10",
+			RegistryOrigin:  artifact.ProductionBATServerOrigin,
+			SHA512Integrity: "sha512-" + base64.StdEncoding.EncodeToString(make([]byte, sha512.Size)),
+			MaxBytes:        artifact.DefaultBATServerBundleMaxBytes,
+			PreviewDigest:   "sha256:" + strings.Repeat("f", 64),
+			EnqueueAllowed:  true,
+			Blockers:        []string{},
+		},
+	}
+	s.artifactOperator = fake
+	preview := postForm(t, s, "/apps/artifact-fetches/preview", url.Values{
+		"name": {"bat-server"}, "version": {"3.2.10"}, "reason": {"bat-server bundle"},
+	})
+	if preview.Code != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", preview.Code, preview.Body.String())
+	}
+	body := preview.Body.String()
+	for _, want := range []string{"bat-server@3.2.10", artifact.ArtifactSourceBATServer, artifact.BATServerFetchPolicyVersion} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("bat-server preview missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "Node engines") || strings.Contains(body, "browser_download_url") {
+		t.Fatalf("bat-server preview exposed a private field: %s", body)
+	}
+	for _, version := range []string{"v3.2.10", "3.2.11-pre.4", "3.2"} {
+		rejected := postForm(t, s, "/apps/artifact-fetches/preview", url.Values{
+			"name": {"bat-server"}, "version": {version}, "reason": {"bat-server bundle"},
+		})
+		if rejected.Code != http.StatusBadRequest {
+			t.Fatalf("version %s status=%d body=%s", version, rejected.Code, rejected.Body.String())
+		}
 	}
 }
 

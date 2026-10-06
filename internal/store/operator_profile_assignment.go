@@ -663,6 +663,17 @@ func validPreparedAssignmentSpec(contract agentadapter.Contract, manifest appcat
 			spec.Artifact.SHA256 == manifest.Artifact.SHA256 && spec.Artifact.Size == manifest.Artifact.Size &&
 			spec.Artifact.URL == "/v1/artifacts/"+manifest.Artifact.SHA256 && spec.Artifact.EnginesNode == "" &&
 			spec.Artifact.UpstreamTarball == "" && spec.Artifact.SHA512 == ""
+	case agentadapter.ExecutorKindAntigravity:
+		var spec model.AntigravitySpec
+		if !decodeCanonicalProfileAssignmentSpec(raw, &spec) {
+			return false
+		}
+		return spec.Kind == contract.ExecutorKind && spec.Version == manifest.Version &&
+			spec.TargetOS == target.OS && spec.TargetArch == target.Arch &&
+			spec.BundleLayout == model.AntigravityBundleLayoutV1 && spec.Artifact != nil &&
+			spec.Artifact.SHA256 == manifest.Artifact.SHA256 && spec.Artifact.Size == manifest.Artifact.Size &&
+			spec.Artifact.URL == "/v1/artifacts/"+manifest.Artifact.SHA256 && spec.Artifact.EnginesNode == "" &&
+			spec.Artifact.UpstreamTarball == "" && spec.Artifact.SHA512 == ""
 	case agentadapter.ExecutorKindHermes:
 		var spec model.HermesSpec
 		if !decodeCanonicalProfileAssignmentSpec(raw, &spec) {

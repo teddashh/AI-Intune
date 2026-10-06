@@ -484,7 +484,39 @@ func TestArtifactFetchCLIDiscoveryFailureNeverFallsBackToDB(t *testing.T) {
 }
 
 func TestArtifactFetchCLIParsesNodeRuntimeAndWritesGenericSource(t *testing.T) {
-	name, version, err := parseArtifactFetchCLITarget("node-runtime@24.21.0")
+	name, version, err := parseArtifactFetchCLITarget("claude-code@2.1.278")
+	if err != nil || name != "claude-code" || version != "2.1.278" {
+		t.Fatalf("claude target=%s@%s err=%v", name, version, err)
+	}
+	if _, _, err := parseArtifactFetchCLITarget("claude-code@latest"); err == nil {
+		t.Fatal("accepted claude-code@latest")
+	}
+	name, version, err = parseArtifactFetchCLITarget("codex@0.155.1")
+	if err != nil || name != "codex" || version != "0.155.1" {
+		t.Fatalf("codex target=%s@%s err=%v", name, version, err)
+	}
+	if _, _, err := parseArtifactFetchCLITarget("codex@latest"); err == nil {
+		t.Fatal("accepted codex@latest")
+	}
+	name, version, err = parseArtifactFetchCLITarget("grok@1.0.40")
+	if err != nil || name != "grok" || version != "1.0.40" {
+		t.Fatalf("grok target=%s@%s err=%v", name, version, err)
+	}
+	for _, target := range []string{"grok@latest", "grok@1.0", "grok@1.0.40-alpha.1", "grok@1.0.40-beta.1"} {
+		if _, _, err := parseArtifactFetchCLITarget(target); err == nil {
+			t.Fatalf("accepted grok target %q", target)
+		}
+	}
+	name, version, err = parseArtifactFetchCLITarget("bat-server@3.2.10")
+	if err != nil || name != "bat-server" || version != "3.2.10" {
+		t.Fatalf("bat-server target=%s@%s err=%v", name, version, err)
+	}
+	for _, target := range []string{"bat-server@latest", "bat-server@v3.2.10", "bat-server@3.2.11-pre.4", "bat-server@3.2"} {
+		if _, _, err := parseArtifactFetchCLITarget(target); err == nil {
+			t.Fatalf("accepted bat-server target %q", target)
+		}
+	}
+	name, version, err = parseArtifactFetchCLITarget("node-runtime@24.21.0")
 	if err != nil || name != "node-runtime" || version != "24.21.0" {
 		t.Fatalf("target=%s@%s err=%v", name, version, err)
 	}

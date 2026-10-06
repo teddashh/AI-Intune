@@ -1014,7 +1014,17 @@ func TestKindExecutorImplementsEveryRegisteredCatalogExecutorKind(t *testing.T) 
 		}),
 		executorFunc(func(context.Context, model.JobResponse) ([]model.JobVerificationRequest, error) {
 			return nil, nil
-		}))
+		})).withKind(agentadapter.ExecutorKindClaudeCode, executorFunc(func(context.Context, model.JobResponse) ([]model.JobVerificationRequest, error) {
+		return nil, nil
+	})).withKind(agentadapter.ExecutorKindCodex, executorFunc(func(context.Context, model.JobResponse) ([]model.JobVerificationRequest, error) {
+		return nil, nil
+	})).withKind(agentadapter.ExecutorKindGrok, executorFunc(func(context.Context, model.JobResponse) ([]model.JobVerificationRequest, error) {
+		return nil, nil
+	})).withKind(agentadapter.ExecutorKindBATServer, executorFunc(func(context.Context, model.JobResponse) ([]model.JobVerificationRequest, error) {
+		return nil, nil
+	})).withKind(agentadapter.ExecutorKindAntigravity, executorFunc(func(context.Context, model.JobResponse) ([]model.JobVerificationRequest, error) {
+		return nil, nil
+	}))
 	for _, kind := range agentadapter.ExecutorKinds() {
 		if exec.executors[kind] == nil {
 			t.Errorf("registered catalog executor kind %q has no dispatcher", kind)

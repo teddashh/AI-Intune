@@ -3,6 +3,7 @@ module github.com/teddashh/AI-Intune
 go 1.27.1
 
 require (
+	github.com/andybalholm/brotli v1.2.4
 	github.com/coder/websocket v1.8.14
 	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.58.0

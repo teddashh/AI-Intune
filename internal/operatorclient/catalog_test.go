@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/agentadapter"
 	appcatalog "github.com/teddashh/AI-Intune/internal/catalog"
 	"github.com/teddashh/AI-Intune/internal/deploy"
 	"github.com/teddashh/AI-Intune/internal/operator"
@@ -230,6 +231,41 @@ func TestCatalogClientRoutesSchemasAndReplayEvidence(t *testing.T) {
 }
 
 func boolPtr(value bool) *bool { return &value }
+
+// Hub 的 standardManifestFromRecord 只讓 openclaw 帶 Node runtime 依賴，其他每一個註冊的
+// adapter 都是零依賴。用戶端的依賴形狀清單是手寫的：新 adapter 沒進清單時，
+// `catalog package add` 會把 Hub 已經接受的 preview 當成不一致而拒收。
+func TestStandardCatalogPreviewClientAcceptsEveryRegisteredPackage(t *testing.T) {
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	for _, contract := range agentadapter.Contracts() {
+		t.Run(contract.PackageID, func(t *testing.T) {
+			manifest := catalogClientManifest()
+			manifest.ID, manifest.Kind, manifest.Title = contract.PackageID, contract.PackageKind, contract.PackageID
+			manifest.Adapter, manifest.Platforms = contract.Adapter, contract.Platforms
+			request := operator.StandardCatalogManifestPreviewRequest{ArtifactSHA256: manifest.Artifact.SHA256}
+			var enginesNode *string
+			if contract.PackageID == "openclaw" {
+				request.NodeRuntimeVersion = "24.21.0"
+				manifest.Dependencies = []appcatalog.PackageRef{{PackageID: "node-runtime", Version: "24.21.0"}}
+				engines := ">=22.14.0"
+				enginesNode = &engines
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				catalogClientHeaders(w)
+				_ = json.NewEncoder(w).Encode(operator.StandardCatalogManifestPreviewResult{
+					SchemaVersion: operator.StandardCatalogPreviewSchemaVersion, Manifest: manifest,
+					ManifestDigest: catalogManifestWireDigest(manifest), EnginesNode: enginesNode,
+					PreviewedAt: now, PreviewDigest: "sha256:" + strings.Repeat("d", 64),
+				})
+			}))
+			defer server.Close()
+			preview, err := operatorClientForServer(t, server).PreviewStandardCatalogManifest(t.Context(), request)
+			if err != nil || preview.Manifest.ID != contract.PackageID {
+				t.Fatalf("preview=%+v err=%v", preview, err)
+			}
+		})
+	}
+}
 
 func TestProfileAssignmentClientAcceptsDarwinTargets(t *testing.T) {
 	now := time.Date(2026, 9, 20, 5, 30, 0, 0, time.UTC)

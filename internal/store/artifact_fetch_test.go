@@ -123,6 +123,100 @@ func TestOperatorArtifactFetchPersistsPrivateNodeRuntimePlan(t *testing.T) {
 	}
 }
 
+func TestApplyOperatorArtifactFetchAcceptsClaudeCodeBundleBudget(t *testing.T) {
+	s := newTestStore(t)
+	req := artifactFetchTestRequest("artifact-fetch-claude-code-budget", "e")
+	req.Name, req.Version = "claude-code", "2.1.50"
+	checksumURL := artifact.ProductionClaudeCodeOrigin + "/claude-code-releases/" + req.Version + "/manifest.json"
+	sourcePlanBytes, err := json.Marshal(artifact.ClaudeCodeFetchPlan{
+		PolicyVersion: artifact.ClaudeCodeFetchPolicyVersion,
+		Name:          req.Name,
+		Version:       req.Version,
+		SourceOrigin:  artifact.ProductionClaudeCodeOrigin,
+		ChecksumURL:   checksumURL,
+		Sources: []artifact.ClaudeCodeSource{
+			{TargetOS: "linux", TargetArch: "amd64", Platform: "linux-x64", Filename: "claude", SHA256: strings.Repeat("a", 64), Size: 1024},
+			{TargetOS: "linux", TargetArch: "arm64", Platform: "linux-arm64", Filename: "claude", SHA256: strings.Repeat("b", 64), Size: 1024},
+		},
+		SourceIdentity: "sha512-" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x5a}, 64)),
+		SourceMaxBytes: 1 << 20,
+		BundleMaxBytes: artifact.DefaultClaudeCodeBundleMaxBytes,
+		PreviewedAt:    time.Date(2026, 9, 8, 20, 0, 0, 0, time.UTC),
+		PreviewDigest:  req.PreviewDigest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := ArtifactFetchPrepared{
+		Name: req.Name, Version: req.Version, SourceKind: artifact.ArtifactSourceClaudeCode,
+		SourcePlan: string(sourcePlanBytes), RegistryOrigin: artifact.ProductionClaudeCodeOrigin,
+		TarballURL:      checksumURL,
+		SHA512Integrity: "sha512-" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x6b}, 64)),
+		MaxBytes:        artifact.DefaultClaudeCodeBundleMaxBytes, CurrentPreviewDigest: req.PreviewDigest,
+	}
+	created, err := s.ApplyOperatorArtifactFetch(req, func() (ArtifactFetchPrepared, error) {
+		return prepared, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Replayed || !created.Audited || created.Operation.State != ArtifactFetchQueued ||
+		created.Operation.SourceKind != artifact.ArtifactSourceClaudeCode ||
+		created.Operation.MaxBytes != artifact.DefaultClaudeCodeBundleMaxBytes {
+		t.Fatalf("created=%+v", created)
+	}
+	stored, err := s.GetArtifactFetchOperation(created.Operation.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.MaxBytes != artifact.DefaultClaudeCodeBundleMaxBytes || stored.State != ArtifactFetchQueued {
+		t.Fatalf("stored=%+v", stored)
+	}
+}
+
+func TestApplyOperatorArtifactFetchAcceptsBATServerBundleBudget(t *testing.T) {
+	s := newTestStore(t)
+	req := artifactFetchTestRequest("artifact-fetch-bat-server-budget", "f")
+	req.Name, req.Version = "bat-server", "3.2.10"
+	documentURL := artifact.ProductionBATServerOrigin + "/repos/tony1223/better-agent-terminal/releases/tags/v3.2.10"
+	sourcePlanBytes, err := json.Marshal(artifact.BATServerFetchPlan{
+		PolicyVersion: artifact.BATServerFetchPolicyVersion, Name: req.Name, Version: req.Version,
+		SourceOrigin: artifact.ProductionBATServerOrigin, VersionDocumentURL: documentURL,
+		Sources: []artifact.BATServerSource{
+			{TargetOS: "linux", TargetArch: "amd64", Asset: "bat-server-linux-x86_64.tar.gz", Size: 281802770, Digest: "sha256:" + strings.Repeat("a", 64)},
+			{TargetOS: "linux", TargetArch: "arm64", Asset: "bat-server-linux-aarch64.tar.gz", Size: 271350544, Digest: "sha256:" + strings.Repeat("b", 64)},
+		},
+		SourceIdentity: "sha512-" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x5a}, 64)),
+		SourceMaxBytes: artifact.DefaultBATServerSourceMaxBytes, BundleMaxBytes: artifact.DefaultBATServerBundleMaxBytes,
+		PreviewedAt:   time.Date(2026, 9, 21, 16, 0, 0, 0, time.UTC),
+		PreviewDigest: req.PreviewDigest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !artifact.ValidBATServerSourcePlan(string(sourcePlanBytes)) {
+		t.Fatalf("source plan is not canonical: %s", sourcePlanBytes)
+	}
+	prepared := ArtifactFetchPrepared{
+		Name: req.Name, Version: req.Version, SourceKind: artifact.ArtifactSourceBATServer,
+		SourcePlan: string(sourcePlanBytes), RegistryOrigin: artifact.ProductionBATServerOrigin,
+		TarballURL: documentURL, SHA512Integrity: "sha512-" + base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x6b}, 64)),
+		MaxBytes: artifact.DefaultBATServerBundleMaxBytes, CurrentPreviewDigest: req.PreviewDigest,
+	}
+	created, err := s.ApplyOperatorArtifactFetch(req, func() (ArtifactFetchPrepared, error) {
+		return prepared, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Replayed || !created.Audited || created.Operation.State != ArtifactFetchQueued ||
+		created.Operation.SourceKind != artifact.ArtifactSourceBATServer ||
+		created.Operation.MaxBytes != artifact.DefaultBATServerBundleMaxBytes ||
+		created.Operation.Name != "bat-server" {
+		t.Fatalf("created=%+v", created)
+	}
+}
+
 func TestOperatorArtifactFetchFreshReplayConflictAndAtomicity(t *testing.T) {
 	t.Run("fresh and replay", func(t *testing.T) {
 		s := newTestStore(t)

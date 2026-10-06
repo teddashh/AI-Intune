@@ -58,6 +58,31 @@ func artifactWorkerPlan(version string) artifact.PreviewPlan {
 	return plan
 }
 
+// enqueueStoredArtifactWorkerOperation stores a prepared fetch without the operator plan check.
+func enqueueStoredArtifactWorkerOperation(t *testing.T, st *store.Store, plan artifact.PreviewPlan,
+	key string,
+) store.ArtifactFetchOperation {
+	t.Helper()
+	digest := sha256.Sum256([]byte("worker-request:" + key))
+	created, err := st.ApplyOperatorArtifactFetch(store.OperatorArtifactFetchRequest{
+		Name: plan.Name, Version: plan.Version, PreviewDigest: plan.PreviewDigest,
+		IdempotencyKey: key, RequestDigest: "sha256:" + hex.EncodeToString(digest[:]),
+		Reason: "artifact worker test",
+		Audit:  store.AuditEntry{SourceAddr: "100.64.0.1:1234", AuthSubject: "operator-test"},
+	}, func() (store.ArtifactFetchPrepared, error) {
+		return store.ArtifactFetchPrepared{
+			Name: plan.Name, Version: plan.Version, SourceKind: plan.SourceKind, SourcePlan: plan.SourcePlan,
+			RegistryOrigin: plan.RegistryOrigin, TarballURL: plan.TarballURL,
+			SHA512Integrity: plan.SHA512Integrity, EnginesNode: plan.EnginesNode,
+			MaxBytes: plan.MaxBytes, CurrentPreviewDigest: plan.PreviewDigest,
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("enqueue artifact fetch: %v", err)
+	}
+	return created.Operation
+}
+
 func enqueueArtifactWorkerOperation(t *testing.T, service *Service, plan artifact.PreviewPlan,
 	key string,
 ) store.ArtifactFetchOperation {
@@ -231,6 +256,164 @@ func TestRunArtifactFetchOperationPreservesNodeRuntimeSourcePlan(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "checksum_url") || strings.Contains(string(raw), "source_plan") {
 		t.Fatalf("public node operation exposed source plan: %s", raw)
+	}
+}
+
+func TestRunArtifactFetchOperationPreservesClaudeCodeSourcePlan(t *testing.T) {
+	previewDigest := sha256.Sum256([]byte("claude-code-preview"))
+	previewDigestText := "sha256:" + hex.EncodeToString(previewDigest[:])
+	const version = "2.1.50"
+	checksumURL := artifact.ProductionClaudeCodeOrigin + "/claude-code-releases/" + version + "/manifest.json"
+	sourcePlan, err := json.Marshal(artifact.ClaudeCodeFetchPlan{
+		PolicyVersion: artifact.ClaudeCodeFetchPolicyVersion,
+		Name:          "claude-code",
+		Version:       version,
+		SourceOrigin:  artifact.ProductionClaudeCodeOrigin,
+		ChecksumURL:   checksumURL,
+		Sources: []artifact.ClaudeCodeSource{
+			{TargetOS: "linux", TargetArch: "amd64", Platform: "linux-x64", Filename: "claude", SHA256: strings.Repeat("a", 64), Size: 1024},
+			{TargetOS: "linux", TargetArch: "arm64", Platform: "linux-arm64", Filename: "claude", SHA256: strings.Repeat("b", 64), Size: 1024},
+		},
+		SourceIdentity: artifactFetchTestPlan().SHA512Integrity,
+		SourceMaxBytes: 1 << 20,
+		BundleMaxBytes: artifact.DefaultClaudeCodeBundleMaxBytes,
+		PreviewedAt:    time.Date(2026, 9, 8, 20, 0, 0, 0, time.UTC),
+		PreviewDigest:  previewDigestText,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := artifact.PreviewPlan{
+		PolicyVersion:   artifact.ClaudeCodeFetchPolicyVersion,
+		SourceKind:      artifact.ArtifactSourceClaudeCode,
+		Name:            "claude-code",
+		Version:         version,
+		RegistryOrigin:  artifact.ProductionClaudeCodeOrigin,
+		TarballURL:      checksumURL,
+		SHA512Integrity: artifactFetchTestPlan().SHA512Integrity,
+		MaxBytes:        1 << 30,
+		PreviewedAt:     time.Date(2026, 9, 8, 20, 0, 0, 0, time.UTC),
+		PreviewDigest:   previewDigestText,
+		SourcePlan:      string(sourcePlan),
+	}
+	backend := &artifactWorkerBackend{plans: map[string]artifact.PreviewPlan{plan.Version: plan}}
+	service, st, _ := artifactFetchTestService(t, backend)
+	queued := enqueueStoredArtifactWorkerOperation(t, st, plan, "worker-claude-code")
+	if queued.SourceKind != artifact.ArtifactSourceClaudeCode || queued.EnginesNode != "" {
+		t.Fatalf("queued claude code operation=%+v", queued)
+	}
+	var gotPolicy string
+	backend.fetch = func(_ context.Context, workerPlan artifact.PreviewPlan, _ string,
+		progress artifact.ProgressFunc,
+	) (artifact.Sidecar, bool, error) {
+		gotPolicy = workerPlan.PolicyVersion
+		if workerPlan.SourceKind != artifact.ArtifactSourceClaudeCode ||
+			workerPlan.PolicyVersion != artifact.ClaudeCodeFetchPolicyVersion ||
+			workerPlan.SourcePlan != plan.SourcePlan || workerPlan.TarballURL != plan.TarballURL {
+			return artifact.Sidecar{}, false, fmt.Errorf("reconstructed claude code plan=%+v", workerPlan)
+		}
+		if err := reportArtifactWorkerPhases(progress, 84); err != nil {
+			return artifact.Sidecar{}, false, err
+		}
+		return artifactWorkerRecord(workerPlan, 84), false, nil
+	}
+	completed, err := service.RunArtifactFetchOperation(t.Context(), queued.OperationID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPolicy != artifact.ClaudeCodeFetchPolicyVersion {
+		t.Fatalf("worker policy = %q", gotPolicy)
+	}
+	if completed.State != store.ArtifactFetchSucceeded || completed.SourceKind != artifact.ArtifactSourceClaudeCode ||
+		completed.ProgressBytes != 84 || completed.ResultSizeBytes == nil || *completed.ResultSizeBytes != 84 {
+		t.Fatalf("completed claude code operation=%+v", completed)
+	}
+	raw, err := json.Marshal(completed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "checksum_url") || strings.Contains(string(raw), "source_plan") {
+		t.Fatalf("public claude code operation exposed source plan: %s", raw)
+	}
+}
+
+func TestRunArtifactFetchOperationPreservesCodexSourcePlan(t *testing.T) {
+	previewDigest := sha256.Sum256([]byte("codex-preview"))
+	previewDigestText := "sha256:" + hex.EncodeToString(previewDigest[:])
+	const version = "0.98.0"
+	checksumURL := artifact.ProductionCodexOrigin + "/codex/releases/" + version + "/release.json"
+	sourcePlan, err := json.Marshal(artifact.CodexFetchPlan{
+		PolicyVersion:  artifact.CodexFetchPolicyVersion,
+		Name:           "codex",
+		Version:        version,
+		SourceOrigin:   artifact.ProductionCodexOrigin,
+		ChecksumURL:    checksumURL,
+		ChecksumSHA256: strings.Repeat("c", 64),
+		Sources: []artifact.CodexSource{
+			{TargetOS: "linux", TargetArch: "amd64", Filename: "codex-package-x86_64-unknown-linux-musl.tar.gz", SHA256: strings.Repeat("a", 64)},
+			{TargetOS: "linux", TargetArch: "arm64", Filename: "codex-package-aarch64-unknown-linux-musl.tar.gz", SHA256: strings.Repeat("b", 64)},
+		},
+		SourceIdentity:   artifactFetchTestPlan().SHA512Integrity,
+		SourceMaxBytes:   1 << 20,
+		ChecksumMaxBytes: 1 << 20,
+		BundleMaxBytes:   artifact.DefaultCodexBundleMaxBytes,
+		PreviewedAt:      time.Date(2026, 9, 8, 20, 0, 0, 0, time.UTC),
+		PreviewDigest:    previewDigestText,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := artifact.PreviewPlan{
+		PolicyVersion:   artifact.CodexFetchPolicyVersion,
+		SourceKind:      artifact.ArtifactSourceCodex,
+		Name:            "codex",
+		Version:         version,
+		RegistryOrigin:  artifact.ProductionCodexOrigin,
+		TarballURL:      checksumURL,
+		SHA512Integrity: artifactFetchTestPlan().SHA512Integrity,
+		MaxBytes:        1 << 30,
+		PreviewedAt:     time.Date(2026, 9, 8, 20, 0, 0, 0, time.UTC),
+		PreviewDigest:   previewDigestText,
+		SourcePlan:      string(sourcePlan),
+	}
+	backend := &artifactWorkerBackend{plans: map[string]artifact.PreviewPlan{plan.Version: plan}}
+	service, st, _ := artifactFetchTestService(t, backend)
+	queued := enqueueStoredArtifactWorkerOperation(t, st, plan, "worker-codex")
+	if queued.SourceKind != artifact.ArtifactSourceCodex || queued.EnginesNode != "" {
+		t.Fatalf("queued codex operation=%+v", queued)
+	}
+	var gotPolicy string
+	backend.fetch = func(_ context.Context, workerPlan artifact.PreviewPlan, _ string,
+		progress artifact.ProgressFunc,
+	) (artifact.Sidecar, bool, error) {
+		gotPolicy = workerPlan.PolicyVersion
+		if workerPlan.SourceKind != artifact.ArtifactSourceCodex ||
+			workerPlan.PolicyVersion != artifact.CodexFetchPolicyVersion ||
+			workerPlan.SourcePlan != plan.SourcePlan || workerPlan.TarballURL != plan.TarballURL {
+			return artifact.Sidecar{}, false, fmt.Errorf("reconstructed codex plan=%+v", workerPlan)
+		}
+		if err := reportArtifactWorkerPhases(progress, 84); err != nil {
+			return artifact.Sidecar{}, false, err
+		}
+		return artifactWorkerRecord(workerPlan, 84), false, nil
+	}
+	completed, err := service.RunArtifactFetchOperation(t.Context(), queued.OperationID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPolicy != artifact.CodexFetchPolicyVersion {
+		t.Fatalf("worker policy = %q", gotPolicy)
+	}
+	if completed.State != store.ArtifactFetchSucceeded || completed.SourceKind != artifact.ArtifactSourceCodex ||
+		completed.ProgressBytes != 84 || completed.ResultSizeBytes == nil || *completed.ResultSizeBytes != 84 {
+		t.Fatalf("completed codex operation=%+v", completed)
+	}
+	raw, err := json.Marshal(completed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "checksum_url") || strings.Contains(string(raw), "source_plan") {
+		t.Fatalf("public codex operation exposed source plan: %s", raw)
 	}
 }
 
