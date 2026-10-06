@@ -508,7 +508,7 @@ func TestReportLinksToHubOnlyWhenItCanAndShould(t *testing.T) {
 	})
 }
 
-// ⚠⚠ 這一條回答的是 operator 那句「一堆死掉的 error log 也報不出來，
+// ⚠⚠ 這一條回答的是 Ted 那句「一堆死掉的 error log 也報不出來，
 // 都要透過我們其他的機制溝通？」——答案是不用另建機制：
 // 事件流的判決走的就是既有的「沉默失敗」那條管線。
 // 這個測試把那件事釘住，不然哪天有人改了 Kind，這條路會安靜地斷掉。
@@ -550,7 +550,7 @@ func TestEventStreamFindingReachesTheDailyReport(t *testing.T) {
 //   - 早報回答「今天有什麼需要我動手」，所以會降權
 //   - 詳細頁那個狀態機回答「現在這台身上還掛著什麼」，所以永遠紅著
 //
-// operator 要的「永遠就能看到一些 error 在那裏」，是後者在扛。
+// Ted 要的「永遠就能看到一些 error 在那裏」，是後者在扛。
 func TestAStaleEventFindingIsDemotedNotRepeated(t *testing.T) {
 	in := base()
 	in.Machines = []Machine{{

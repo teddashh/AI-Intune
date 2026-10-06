@@ -4158,7 +4158,7 @@ func evSpec(notOK ...string) *model.EventSpec {
 	return &model.EventSpec{TsField: "ts", TypeField: "event", NotOK: notOK, WindowSeconds: 3600}
 }
 
-// ⚠⚠ 這是 operator 要的那格：sampleagent2 的檔案是新的（哨兵活著），
+// ⚠⚠ 這是 Ted 要的那格：sampleagent2 的檔案是新的（哨兵活著），
 // 但它在喊 baseline_hash_mismatch —— 那件事必須留在畫面上，
 // 而且是「現在的狀態」，不是「今天的變化」。
 func TestEventStreamShowsTheActiveCondition(t *testing.T) {
