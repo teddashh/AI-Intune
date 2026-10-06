@@ -1169,3 +1169,16 @@ h2 {
     justify-content: flex-start;
   }
 }
+
+.fd {
+  --fd-surface: var(--paper-strong);
+  --fd-edge: var(--line);
+  --fd-text: var(--ink);
+  --fd-faint: var(--ink-soft);
+  --fd-accent: color-mix(in srgb, var(--acid) 55%, var(--ink));
+  --fd-accent-ink: color-mix(in srgb, var(--acid) 40%, var(--ink));
+  --fd-warn: var(--coral);
+  --fd-info: color-mix(in srgb, var(--blue) 45%, var(--ink));
+  --fd-font: inherit;
+  --fd-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
