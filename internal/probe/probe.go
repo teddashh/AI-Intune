@@ -31,7 +31,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/sys/unix"
 	_ "modernc.org/sqlite" // 純 Go，不需要 cgo；driver 名字是 "sqlite" 不是 "sqlite3"
 
 	"github.com/teddashh/AI-Intune/internal/model"
@@ -309,11 +308,7 @@ func identity(ctx context.Context) model.Identity {
 	if h, err := os.Hostname(); err == nil {
 		id.Hostname = h
 	}
-	var uts unix.Utsname
-	if err := unix.Uname(&uts); err == nil {
-		id.Kernel = utsString(uts.Release[:])
-		id.Arch = utsString(uts.Machine[:]) // x86_64 / aarch64，不是 GOARCH 的 amd64
-	}
+	id.Kernel, id.Arch = kernelAndArch()
 	// tailscale 不在也無所謂，拿不到就是空字串（欄位是 omitempty）。
 	if out, _, err := run(ctx, quickTimeout, "tailscale", "ip", "-4"); err == nil {
 		if lines := strings.Fields(out); len(lines) > 0 {
@@ -325,19 +320,6 @@ func identity(ctx context.Context) model.Identity {
 	id.LingerEnabled, id.LingerMeasured = lingerFacts(id.UnixUser)
 	return id
 }
-
-// machineIDHint：比 hostname 穩定，但重灌會變，所以只是候選之一，不是身分本身。
-func machineIDHint() string {
-	for _, p := range []string{"/etc/machine-id", "/var/lib/dbus/machine-id"} {
-		if s := readTrimmed(p); s != "" {
-			return s
-		}
-	}
-	return ""
-}
-
-// bootID 用來抓 crash-loop：一小時內換 10 次就是一直在崩，不是健康。
-func bootID() string { return readTrimmed("/proc/sys/kernel/random/boot_id") }
 
 // processStarted：這個 process 起來的時刻，agent 的身分證。
 var processStarted = time.Now().UTC()
@@ -389,45 +371,6 @@ func resources() model.Resources {
 	return r
 }
 
-// diskUsage 回 (可用, 總量)。用 Bavail（非 root 可用）而不是 Bfree，
-// 因為 agent 不是 root，保留區塊對它來說就是不存在。
-func diskUsage(path string) (free, total int64) {
-	var st unix.Statfs_t
-	if err := unix.Statfs(path, &st); err != nil {
-		return 0, 0
-	}
-	unit := statfsBlockUnit(&st)
-	return int64(st.Bavail) * unit, int64(st.Blocks) * unit
-}
-
-func memInfo() (total, available int64) {
-	b, err := os.ReadFile("/proc/meminfo")
-	if err != nil {
-		return 0, 0
-	}
-	for _, line := range strings.Split(string(b), "\n") {
-		key, rest, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		fields := strings.Fields(rest)
-		if len(fields) == 0 {
-			continue
-		}
-		kb, err := strconv.ParseInt(fields[0], 10, 64)
-		if err != nil {
-			continue
-		}
-		switch key {
-		case "MemTotal":
-			total = kb * 1024
-		case "MemAvailable":
-			available = kb * 1024
-		}
-	}
-	return total, available
-}
-
 // ---------------------------------------------------------------- systemd
 
 // systemdUnits 收 unit 觀測。
@@ -441,17 +384,7 @@ func memInfo() (total, available int64) {
 // 問不到，或 payload 來自還不會送 Measured 的舊 agent。舊 agent 一律落在
 // 第三格，fail-closed 成「不知道」，不可以講成「沒有這個 unit」。
 func systemdUnits(ctx context.Context, names []string) []model.Unit {
-	units := make([]model.Unit, 0, len(names))
-	unixTS := true // 先試 --timestamp=unix，舊版 systemd 不認得就整輪退回人類格式
-	for _, name := range names {
-		u, ok := showUnit(ctx, name, unixTS)
-		if !ok && unixTS {
-			unixTS = false
-			u, _ = showUnit(ctx, name, false)
-		}
-		units = append(units, u)
-	}
-	return units
+	return collectUnits(ctx, names)
 }
 
 func showUnit(ctx context.Context, name string, unixTS bool) (model.Unit, bool) {

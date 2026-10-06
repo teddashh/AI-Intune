@@ -14,7 +14,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 # sqlite 用 modernc.org/sqlite（純 Go），就是為了這個。
 BUILD := CGO_ENABLED=0 $(GO) build -buildvcs=false -trimpath -ldflags "$(LDFLAGS)"
 
-.PHONY: all build hub agent operator agent-bundles agent-bundles-darwin test test-go test-ops vet fmt clean probe cross cross-darwin
+.PHONY: all build hub agent operator agent-bundles agent-bundles-darwin agent-bundles-windows test test-go test-ops vet fmt clean probe cross cross-darwin cross-windows
 
 all: build
 
@@ -51,6 +51,17 @@ agent-bundles: cross
 
 agent-bundles-darwin: cross-darwin
 	./ops/build-agent-bundles.sh "$(VERSION)" darwin
+
+# Windows bundle uses independent architecture binaries, installer, and a
+# user scheduled-task template. This is the LaunchAgent analog, not LocalSystem.
+cross-windows:
+	@mkdir -p build
+	GOOS=windows GOARCH=amd64 $(BUILD) -o build/clawctl-agent-windows-amd64 ./cmd/clawctl-agent
+	GOOS=windows GOARCH=arm64 $(BUILD) -o build/clawctl-agent-windows-arm64 ./cmd/clawctl-agent
+	@ls -la build/clawctl-agent-windows-*
+
+agent-bundles-windows: cross-windows
+	./ops/build-agent-bundles.sh "$(VERSION)" windows
 
 # ⚠ test 一定要同時跑 Go 跟 ops/。
 #

@@ -12,18 +12,17 @@
   {{if $.AgentBundles}}
   <p style="margin-top:0"><b>下載 <span class="mono">{{.Name}}</span> 的 Agent 安裝包：</b></p>
   <div class="command-bar">{{range $.AgentBundles}}
-    <a class="button secondary" href="{{.URL}}">linux/{{.Arch}} · {{bytes .SizeBytes}}</a>
+    <a class="button secondary" href="{{.URL}}">{{.OS}}/{{.Arch}} · {{bytes .SizeBytes}}</a>
   {{end}}</div>
   {{end}}
-  <p>把安裝包傳到 <b>{{.Name}}</b>，解壓後執行：</p>
-  {{if .HubBase}}
-  <pre class="copy">./install-agent.sh --hub {{.HubBase}}</pre>
-  {{else}}
-  <pre class="copy">./install-agent.sh --hub http://&lt;Hub 在 tailnet 上的位址&gt;:8787</pre>
+  <p>把安裝包傳到 <b>{{.Name}}</b>，解壓後執行對應安裝程式，並貼上本頁 token：</p>
+  {{range $.AgentInstallers}}
+  <p class="small dim">{{.OS}}</p>
+  <pre class="copy">{{.Command}}</pre>
   {{end}}
-  <p class="small dim">貼上本頁 token；安裝程式會完成 Tailscale、linger、enroll、service 與 Hub 驗收。</p>
+  <p class="small dim">Linux 安裝程式會完成 Tailscale、linger、enroll、service 與 Hub 驗收。</p>
+  <p class="small dim">無互動安裝：<span class="mono">--token-file FILE</span>（檔案權限 0600）；Linux 另可加 <span class="mono">--tailscale-auth-key-file FILE</span>（同為 0600）。</p>
   <p class="small dim">--hub 用 Tailscale 的 http://100.x:8787，操作員介面只開這個位址。實驗性的 Cloudflare Tunnel 只給 agent 報到：把 --hub 換成 https://&lt;hostname&gt;。不要用那個網址登入操作員介面。安裝程式會等到 Hub 收到 check-in。機器頁上的時間才算數；安裝程式自己印的成功那一行不算。</p>
-  <p class="small dim">無互動安裝：<span class="mono">--token-file FILE --tailscale-auth-key-file FILE</span>（兩個檔案均為 0600）。</p>
 </div>
 {{else}}
 <h1>{{.Name}} 的 enroll 票</h1>

@@ -155,6 +155,11 @@ fi
 UNAME_S="$(uname -s)"
 if [[ "$UNAME_S" != Linux ]]; then
   [[ "$UNAME_S" != Darwin ]] || fail "This installer is for Linux. On macOS run ops/install-agent-macos.sh --hub $HUB"
+  case "$UNAME_S" in
+    MINGW*|MSYS*|CYGWIN*|Windows_NT)
+      fail "This installer is for Linux. On Windows run ops/install-agent-windows.ps1 --hub $HUB"
+      ;;
+  esac
   fail "This installer requires Linux"
 fi
 command -v systemctl >/dev/null || fail "systemd is required"

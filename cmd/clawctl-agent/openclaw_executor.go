@@ -19,8 +19,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/teddashh/AI-Intune/internal/agentadapter"
 	"github.com/teddashh/AI-Intune/internal/deploy"
 	"github.com/teddashh/AI-Intune/internal/model"
@@ -533,7 +531,7 @@ func (d execDeps) requireWritableAncestor(logical string) error {
 			if !fi.IsDir() {
 				return fmt.Errorf("%s 不是目錄", logical)
 			}
-			return unix.Access(path, unix.W_OK)
+			return pathWritable(path)
 		}
 		if !errors.Is(err, os.ErrNotExist) {
 			return err

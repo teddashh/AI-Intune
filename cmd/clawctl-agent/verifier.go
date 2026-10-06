@@ -227,7 +227,7 @@ func parseKeyValues(stdout string) (map[string]string, bool) {
 func runVerifier(args []string) {
 	fs := flag.NewFlagSet("verifier", flag.ExitOnError)
 	hub := fs.String("hub", "", "Hub base URL, e.g. http://100.x.y.z:8787 over Tailscale")
-	tokenFile := fs.String("token-file", "", "0600 file containing this verifier's bearer token")
+	tokenFile := fs.String("token-file", "", "private file containing this verifier's bearer token")
 	targetsPath := fs.String("targets", "", "JSON file mapping machine_id to an ssh destination")
 	dryRun := fs.Bool("dry-run", false, "measure and print, send nothing to the Hub")
 	_ = fs.Parse(args)

@@ -44,7 +44,10 @@ func TestEnrollTokenCLIHTTPFreshThenRedactedReplay(t *testing.T) {
 	if !strings.Contains(firstErr.String(), "已加入名冊") {
 		t.Fatalf("fresh stderr lacks effect/recovery coordinate: %q", firstErr.String())
 	}
-	if !strings.Contains(firstErr.String(), "./install-agent.sh --hub ") || strings.Contains(firstErr.String(), "--token '") {
+	if !strings.Contains(firstErr.String(), "./install-agent.sh --hub ") ||
+		!strings.Contains(firstErr.String(), "./install-agent-macos.sh --hub ") ||
+		!strings.Contains(firstErr.String(), `.\install-agent-windows.ps1 --hub `) ||
+		strings.Contains(firstErr.String(), "--token '") {
 		t.Fatalf("fresh stderr lacks secret-free bootstrap command: %q", firstErr.String())
 	}
 	keyMatch := regexp.MustCompile(`request key: (cli-enroll-token-[a-f0-9]{32})`).FindStringSubmatch(firstErr.String())

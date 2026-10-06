@@ -7,14 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
-
-	"golang.org/x/sys/unix"
 
 	"github.com/teddashh/AI-Intune/internal/model"
 )
@@ -190,28 +186,16 @@ func discoverRunningDir(i *model.OpenClawInstall, deps installDeps) {
 		return
 	}
 	i.RunningDirExists = true
-	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-		// ⚠ LookupId 失敗仍保留 uid 數字；把 owner 留白會讓 root 擁有的
-		// sampleagent2 目錄看起來只是「不知道」，漏掉升級需要不同權限這個事實。
-		uid := strconv.FormatUint(uint64(st.Uid), 10)
-		i.RunningDirOwner = uid
-		if u, err := user.LookupId(uid); err == nil {
-			i.RunningDirOwner = u.Username
-		}
+	if owner, ok := unixFileOwner(fi); ok {
+		i.RunningDirOwner = owner
 	} else {
 		i.RunningDirReason = appendReason(i.RunningDirReason, "stat 沒有 Unix uid")
 	}
 
-	// ⚠ 用 Access(W_OK) 而不是建立測試檔；建立檔案會讓這一刀從探測變成
-	// 寫入，還可能在 root 擁有的 sampleagent2 套件目錄留下垃圾。
-	if err := unix.Access(path, unix.W_OK); err == nil {
-		v := true
-		i.RunningDirWritable = &v
-	} else if errors.Is(err, unix.EACCES) || errors.Is(err, unix.EPERM) || errors.Is(err, unix.EROFS) {
-		v := false
-		i.RunningDirWritable = &v
-	} else {
-		i.RunningDirReason = appendReason(i.RunningDirReason, "量不到目錄可寫性："+err.Error())
+	if writable, reason := dirWritable(path); writable != nil {
+		i.RunningDirWritable = writable
+	} else if reason != "" {
+		i.RunningDirReason = appendReason(i.RunningDirReason, reason)
 	}
 
 	version, err := readPackageVersion(filepath.Join(path, "package.json"))
@@ -353,19 +337,18 @@ func discoverReleaseLayout(i *model.OpenClawInstall, deps installDeps) {
 
 func discoverDiskFree(i *model.OpenClawInstall, deps installDeps) {
 	target := filepath.Join(deps.home, ".local", "share")
-	var st unix.Statfs_t
-	err := unix.Statfs(deps.fsPath(target), &st)
+	bytes, err := diskFreeAvailable(deps.fsPath(target))
 	if err != nil {
 		// ⚠ ~/.local/share 尚未存在不代表磁碟沒有空間；退到已存在的 home，
 		// 但不為了讓 statfs 成功去建立目錄。
 		target = deps.home
-		err = unix.Statfs(deps.fsPath(target), &st)
+		bytes, err = diskFreeAvailable(deps.fsPath(target))
 	}
 	if err != nil {
-		i.DiskFreeReason = "statfs " + target + "：" + err.Error()
+		i.DiskFreeReason = diskFreeError(target, err)
 		return
 	}
-	i.DiskFreeBytes = int64(st.Bavail) * int64(st.Bsize)
+	i.DiskFreeBytes = bytes
 	i.DiskFreeMeasured = true
 }
 

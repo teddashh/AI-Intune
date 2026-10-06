@@ -87,7 +87,7 @@ func writeNodeRuntimeMaterialFixture(t *testing.T, dir, version string, targets 
 			mode int64
 			body string
 		}{
-			{name: "node-runtime/" + key + "/bin/node", mode: 0o755, body: "node-" + key},
+			{name: nodeRuntimeMaterialNodeName(key), mode: 0o755, body: "node-" + key},
 			{name: "node-runtime/" + key + "/lib/node_modules/npm/bin/npm-cli.js", mode: 0o644, body: "npm-" + key},
 		} {
 			if err := tw.WriteHeader(&tar.Header{Name: entry.name, Typeflag: tar.TypeReg,
@@ -126,6 +126,14 @@ func writeNodeRuntimeMaterialFixture(t *testing.T, dir, version string, targets 
 		t.Fatal(err)
 	}
 	return record
+}
+
+func nodeRuntimeMaterialNodeName(key string) string {
+	name := "node-runtime/" + key + "/bin/node"
+	if strings.HasPrefix(key, "windows-") {
+		return name + ".exe"
+	}
+	return name
 }
 
 func writeHermesMaterialFixture(t *testing.T, dir, version string) Sidecar {
@@ -233,7 +241,8 @@ func TestResolveNodeRuntimeMaterialBindsExactPlatformAndCanonicalBundleSpec(t *t
 	dir := t.TempDir()
 	record := writeNodeRuntimeMaterialFixture(t, dir, "24.15.0",
 		NodeRuntimeTarget{OS: "linux", Arch: "amd64"},
-		NodeRuntimeTarget{OS: "darwin", Arch: "amd64"})
+		NodeRuntimeTarget{OS: "darwin", Arch: "amd64"},
+		NodeRuntimeTarget{OS: "windows", Arch: "amd64"})
 	material, err := ResolveNodeRuntimeMaterialContext(t.Context(), dir, record.Version,
 		record.SHA256, "linux", "amd64")
 	if err != nil {
@@ -274,6 +283,17 @@ func TestResolveNodeRuntimeMaterialBindsExactPlatformAndCanonicalBundleSpec(t *t
 		darwinSpec.TargetOS != "darwin" || darwinSpec.TargetArch != "amd64" {
 		t.Fatalf("Darwin material=%+v spec=%+v err=%v", darwin, darwinSpec, err)
 	}
+	windows, err := ResolveNodeRuntimeMaterialContext(t.Context(), dir, record.Version,
+		record.SHA256, "windows", "amd64")
+	if err != nil {
+		t.Fatalf("Windows Node runtime material was rejected: %v", err)
+	}
+	var windowsSpec model.NodeRuntimeSpec
+	if err := json.Unmarshal([]byte(windows.Spec), &windowsSpec); err != nil ||
+		windows.TargetOS != "windows" || windows.TargetArch != "amd64" ||
+		windowsSpec.TargetOS != "windows" || windowsSpec.TargetArch != "amd64" {
+		t.Fatalf("Windows material=%+v spec=%+v err=%v", windows, windowsSpec, err)
+	}
 }
 
 func TestResolveNodeRuntimeMaterialRejectsLegacyBundleWithoutDarwinTarget(t *testing.T) {
@@ -284,6 +304,18 @@ func TestResolveNodeRuntimeMaterialRejectsLegacyBundleWithoutDarwinTarget(t *tes
 	if _, err := ResolveNodeRuntimeMaterialContext(t.Context(), dir, record.Version,
 		record.SHA256, "darwin", "arm64"); err == nil {
 		t.Fatal("legacy Linux-only Node bundle was advertised as Darwin deployment material")
+	}
+}
+
+func TestResolveNodeRuntimeMaterialRejectsLegacyBundleWithoutWindowsTarget(t *testing.T) {
+	dir := t.TempDir()
+	record := writeNodeRuntimeMaterialFixture(t, dir, "24.15.0",
+		NodeRuntimeTarget{OS: "linux", Arch: "amd64"},
+		NodeRuntimeTarget{OS: "darwin", Arch: "amd64"})
+
+	if _, err := ResolveNodeRuntimeMaterialContext(t.Context(), dir, record.Version,
+		record.SHA256, "windows", "amd64"); err == nil {
+		t.Fatal("Linux+Darwin Node bundle was advertised as Windows deployment material")
 	}
 }
 

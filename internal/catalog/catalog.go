@@ -76,11 +76,18 @@ type Platform struct {
 // 跟 Linux 發行版分開的證據。
 const darwinDisplayPrefix = "macOS"
 
+const (
+	windowsGOOS            = "windows"
+	windowsDisplayExact    = "windows"
+	windowsDisplayPrefix   = "windows "
+	microsoftWindowsPrefix = "microsoft windows "
+)
+
 // PlatformFromProbeIdentity 把 probe 的顯示身分轉成 manifest 與 executable
 // job spec 使用的 GOOS/GOARCH 詞彙。Linux 側記錄 /etc/os-release 的
 // PRETTY_NAME，darwin 側記錄 SystemVersion.plist；enrollment 只帶顯示字串與
-// uname -m，沒有帶 GOOS。因此已辨識的 macOS 顯示身分必須在這裡保留為 darwin，
-// 不能落入預設的 linux target。
+// uname -m，沒有帶 GOOS。已辨識的 macOS 顯示身分必須保留為 darwin，已辨識的
+// Windows 顯示身分必須保留為 windows，兩者都不能落入預設的 linux target。
 func PlatformFromProbeIdentity(osDisplay, unameArch string) (Platform, error) {
 	if osDisplay == "" || osDisplay != strings.TrimSpace(osDisplay) ||
 		unameArch == "" || unameArch != strings.TrimSpace(unameArch) {
@@ -98,7 +105,20 @@ func PlatformFromProbeIdentity(osDisplay, unameArch string) (Platform, error) {
 	if strings.HasPrefix(osDisplay, darwinDisplayPrefix) {
 		return Platform{OS: "darwin", Arch: arch}, nil
 	}
+	if windowsProbeIdentity(osDisplay) {
+		return Platform{OS: windowsGOOS, Arch: arch}, nil
+	}
 	return Platform{OS: "linux", Arch: arch}, nil
+}
+
+// windowsProbeIdentity 認 canonical Windows 顯示字串：Tailscale 的 "windows"、
+// "Windows 11" / "Windows Server …" 這類 prefix，以及 "Microsoft Windows …"。
+// 大小寫不敏感；不含空格的 WindowsSomething 不算。
+func windowsProbeIdentity(osDisplay string) bool {
+	lower := strings.ToLower(osDisplay)
+	return lower == windowsDisplayExact ||
+		strings.HasPrefix(lower, windowsDisplayPrefix) ||
+		lower == "microsoft windows" || strings.HasPrefix(lower, microsoftWindowsPrefix)
 }
 
 // PackageRef always selects one exact package version. Version ranges are

@@ -231,6 +231,20 @@ for arch in amd64 arm64; do
   bundle="$BUNDLE_SRC/clawctl-agent-bootstrap-linux-$arch.tar.gz"
   [[ -f "$bundle" && ! -L "$bundle" ]] || { echo "找不到 Agent bootstrap：$bundle" >&2; exit 1; }
 done
+if [[ -e "$BUNDLE_SRC/clawctl-agent-bootstrap-darwin-amd64.tar.gz" || -L "$BUNDLE_SRC/clawctl-agent-bootstrap-darwin-amd64.tar.gz" ||
+      -e "$BUNDLE_SRC/clawctl-agent-bootstrap-darwin-arm64.tar.gz" || -L "$BUNDLE_SRC/clawctl-agent-bootstrap-darwin-arm64.tar.gz" ]]; then
+  for arch in amd64 arm64; do
+    bundle="$BUNDLE_SRC/clawctl-agent-bootstrap-darwin-$arch.tar.gz"
+    [[ -f "$bundle" && ! -L "$bundle" ]] || { echo "找不到 Agent bootstrap：$bundle" >&2; exit 1; }
+  done
+fi
+if [[ -e "$BUNDLE_SRC/clawctl-agent-bootstrap-windows-amd64.tar.gz" || -L "$BUNDLE_SRC/clawctl-agent-bootstrap-windows-amd64.tar.gz" ||
+      -e "$BUNDLE_SRC/clawctl-agent-bootstrap-windows-arm64.tar.gz" || -L "$BUNDLE_SRC/clawctl-agent-bootstrap-windows-arm64.tar.gz" ]]; then
+  for arch in amd64 arm64; do
+    bundle="$BUNDLE_SRC/clawctl-agent-bootstrap-windows-$arch.tar.gz"
+    [[ -f "$bundle" && ! -L "$bundle" ]] || { echo "找不到 Agent bootstrap：$bundle" >&2; exit 1; }
+  done
+fi
 
 # --- 2. 已經有一個 Hub 了嗎
 #

@@ -11,6 +11,8 @@ STAGE_HUB_UNIT="$ROOT/ops/stage-hub-unit.sh"
 SAFE_UPGRADE_LOCK="$ROOT/ops/safe-upgrade-lock.sh"
 INSTALL_AGENT="$ROOT/ops/install-agent.sh"
 INSTALL_AGENT_MACOS="$ROOT/ops/install-agent-macos.sh"
+INSTALL_AGENT_WINDOWS="$ROOT/ops/install-agent-windows.ps1"
+AGENT_TASK_XML="$ROOT/ops/clawctl-agent.task.xml"
 BUILD_AGENT_BUNDLES="$ROOT/ops/build-agent-bundles.sh"
 PUBLISH_AGENT_BUNDLES="$ROOT/ops/publish-agent-bundles.sh"
 UPGRADE_AGENT="$ROOT/ops/upgrade-agent.sh"
@@ -1048,6 +1050,164 @@ agent_bundle_publisher_fixture() {
 	return 0
 }
 
+make_darwin_publisher_bundle_fixture() {
+	local source_dir=$1 arch=$2 version=$3 defect=${4:-valid} stage="$1/darwin-$2" machine
+	mkdir -p "$stage"
+	printf '%s\n' "$version" >"$stage/VERSION"
+	case "$arch" in
+		amd64) machine='\007\000\000\001' ;;
+		arm64) machine='\014\000\000\001' ;;
+	esac
+	{
+		printf '\317\372\355\376%b\000\000\000\000\002\000\000\000' "$machine"
+		printf '\000%.0s' {1..16}
+	} >"$stage/clawctl-agent"
+	cp "$ROOT/ops/clawctl-agent.plist" "$stage/clawctl-agent.plist"
+	cp "$INSTALL_AGENT_MACOS" "$stage/install-agent-macos.sh"
+	case "$defect" in
+		wrong-arch) printf '\000\000\000\000' | dd of="$stage/clawctl-agent" bs=1 seek=4 conv=notrunc status=none ;;
+		non-executable) printf '\006\000\000\000' | dd of="$stage/clawctl-agent" bs=1 seek=12 conv=notrunc status=none ;;
+		elf) printf '\177ELF' | dd of="$stage/clawctl-agent" bs=1 conv=notrunc status=none ;;
+		plist) printf '[Unit]\n' >"$stage/clawctl-agent.plist" ;;
+		installer) printf '#!/bin/sh\nexit 0\n' >"$stage/install-agent-macos.sh" ;;
+		version) printf 'another-version\n' >"$stage/VERSION" ;;
+	esac
+	chmod 0644 "$stage/VERSION" "$stage/clawctl-agent.plist"
+	chmod 0755 "$stage/clawctl-agent" "$stage/install-agent-macos.sh"
+	tar --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -C "$stage" \
+		VERSION clawctl-agent clawctl-agent.plist install-agent-macos.sh |
+		gzip -n >"$source_dir/clawctl-agent-bootstrap-darwin-$arch.tar.gz"
+}
+
+darwin_publisher_fixture() {
+	local mode=$1 fixture="$TMP/darwin-publisher-$1" version=darwin-publisher
+	local source_dir="$fixture/source" state_dir="$fixture/state" temp_dir="$fixture/tmp" release
+	mkdir -p "$source_dir" "$state_dir" "$temp_dir"
+	chmod 0700 "$state_dir"
+	make_publisher_bundle_fixture "$source_dir" amd64 "$version" || return
+	make_publisher_bundle_fixture "$source_dir" arm64 "$version" || return
+	make_darwin_publisher_bundle_fixture "$source_dir" amd64 "$version" "$mode" || return
+	if [[ "$mode" != partial ]]; then
+		make_darwin_publisher_bundle_fixture "$source_dir" arm64 "$version" || return
+	fi
+	if [[ "$mode" == symlink ]]; then
+		mv "$source_dir/clawctl-agent-bootstrap-darwin-arm64.tar.gz" "$source_dir/linked.tar.gz"
+		ln -s linked.tar.gz "$source_dir/clawctl-agent-bootstrap-darwin-arm64.tar.gz"
+	fi
+	release="$state_dir/agent-bootstrap/$version"
+	if [[ "$mode" == valid || "$mode" == membership || "$mode" == changed || "$mode" == existing-partial ]]; then
+		TMPDIR="$temp_dir" "$PUBLISH_AGENT_BUNDLES" --version "$version" --source-dir "$source_dir" --state-dir "$state_dir" || return
+		[[ "$(wc -l <"$release/SHA256SUMS")" == 4 ]] || return 91
+		(cd "$release" && sha256sum -c SHA256SUMS) || return
+		TMPDIR="$temp_dir" "$PUBLISH_AGENT_BUNDLES" --version "$version" --source-dir "$source_dir" --state-dir "$state_dir" || return
+		local before
+		before=$(sha256sum "$release"/*)
+		case "$mode" in
+			membership) rm "$source_dir"/clawctl-agent-bootstrap-darwin-*.tar.gz ;;
+			changed)
+				printf '\001' | dd of="$source_dir/darwin-amd64/clawctl-agent" bs=1 seek=20 conv=notrunc status=none
+				tar --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -C "$source_dir/darwin-amd64" \
+					VERSION clawctl-agent clawctl-agent.plist install-agent-macos.sh |
+					gzip -n >"$source_dir/clawctl-agent-bootstrap-darwin-amd64.tar.gz"
+				;;
+			existing-partial)
+				rm "$release/clawctl-agent-bootstrap-darwin-arm64.tar.gz"
+				before=$(sha256sum "$release"/*)
+				;;
+		esac
+		if [[ "$mode" != valid ]]; then
+			if TMPDIR="$temp_dir" "$PUBLISH_AGENT_BUNDLES" --version "$version" --source-dir "$source_dir" --state-dir "$state_dir"; then return 92; fi
+			[[ "$(sha256sum "$release"/*)" == "$before" ]] || return 93
+		fi
+	else
+		if TMPDIR="$temp_dir" "$PUBLISH_AGENT_BUNDLES" --version "$version" --source-dir "$source_dir" --state-dir "$state_dir"; then return 94; fi
+		[[ ! -e "$release" ]] || return 95
+	fi
+	[[ -z "$(ls -A "$temp_dir")" ]] || return 96
+}
+
+make_windows_publisher_bundle_fixture() {
+	local source_dir=$1 arch=$2 version=$3 defect=${4:-valid} stage="$1/windows-$2" machine
+	mkdir -p "$stage"
+	printf '%s\n' "$version" >"$stage/VERSION"
+	case "$arch" in
+		amd64) machine='\144\206' ;;
+		arm64) machine='\144\252' ;;
+	esac
+	{
+		printf 'MZ'
+		printf '\000%.0s' {1..58}
+		printf '\200\000\000\000'
+		printf '\000%.0s' {1..64}
+		printf 'PE\000\000%b' "$machine"
+		printf '\000%.0s' {1..16}
+		printf '\002\000'
+	} >"$stage/clawctl-agent.exe"
+	cp "$AGENT_TASK_XML" "$stage/clawctl-agent.task.xml"
+	cp "$INSTALL_AGENT_WINDOWS" "$stage/install-agent-windows.ps1"
+	case "$defect" in
+		wrong-arch) printf '\000\000' | dd of="$stage/clawctl-agent.exe" bs=1 seek=132 conv=notrunc status=none ;;
+		non-executable) printf '\000\000' | dd of="$stage/clawctl-agent.exe" bs=1 seek=150 conv=notrunc status=none ;;
+		dll) printf '\002\040' | dd of="$stage/clawctl-agent.exe" bs=1 seek=150 conv=notrunc status=none ;;
+		elf) printf '\177ELF' | dd of="$stage/clawctl-agent.exe" bs=1 conv=notrunc status=none ;;
+		task) printf '[Unit]\n' >"$stage/clawctl-agent.task.xml" ;;
+		installer) printf '#!/bin/sh\nexit 0\n' >"$stage/install-agent-windows.ps1" ;;
+		version) printf 'another-version\n' >"$stage/VERSION" ;;
+	esac
+	chmod 0644 "$stage/VERSION" "$stage/clawctl-agent.task.xml"
+	chmod 0755 "$stage/clawctl-agent.exe" "$stage/install-agent-windows.ps1"
+	tar --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -C "$stage" \
+		VERSION clawctl-agent.exe clawctl-agent.task.xml install-agent-windows.ps1 |
+		gzip -n >"$source_dir/clawctl-agent-bootstrap-windows-$arch.tar.gz"
+}
+
+windows_publisher_fixture() {
+	local mode=$1 fixture="$TMP/windows-publisher-$1" version=windows-publisher
+	local source_dir="$fixture/source" state_dir="$fixture/state" temp_dir="$fixture/tmp" release
+	mkdir -p "$source_dir" "$state_dir" "$temp_dir"
+	chmod 0700 "$state_dir"
+	make_publisher_bundle_fixture "$source_dir" amd64 "$version" || return
+	make_publisher_bundle_fixture "$source_dir" arm64 "$version" || return
+	make_windows_publisher_bundle_fixture "$source_dir" amd64 "$version" "$mode" || return
+	if [[ "$mode" != partial ]]; then
+		make_windows_publisher_bundle_fixture "$source_dir" arm64 "$version" || return
+	fi
+	if [[ "$mode" == symlink ]]; then
+		mv "$source_dir/clawctl-agent-bootstrap-windows-arm64.tar.gz" "$source_dir/linked.tar.gz"
+		ln -s linked.tar.gz "$source_dir/clawctl-agent-bootstrap-windows-arm64.tar.gz"
+	fi
+	release="$state_dir/agent-bootstrap/$version"
+	if [[ "$mode" == valid || "$mode" == membership || "$mode" == changed || "$mode" == existing-partial ]]; then
+		TMPDIR="$temp_dir" "$PUBLISH_AGENT_BUNDLES" --version "$version" --source-dir "$source_dir" --state-dir "$state_dir" || return
+		[[ "$(wc -l <"$release/SHA256SUMS")" == 4 ]] || return 91
+		(cd "$release" && sha256sum -c SHA256SUMS) || return
+		TMPDIR="$temp_dir" "$PUBLISH_AGENT_BUNDLES" --version "$version" --source-dir "$source_dir" --state-dir "$state_dir" || return
+		local before
+		before=$(sha256sum "$release"/*)
+		case "$mode" in
+			membership) rm "$source_dir"/clawctl-agent-bootstrap-windows-*.tar.gz ;;
+			changed)
+				printf '\001' | dd of="$source_dir/windows-amd64/clawctl-agent.exe" bs=1 seek=20 conv=notrunc status=none
+				tar --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -C "$source_dir/windows-amd64" \
+					VERSION clawctl-agent.exe clawctl-agent.task.xml install-agent-windows.ps1 |
+					gzip -n >"$source_dir/clawctl-agent-bootstrap-windows-amd64.tar.gz"
+				;;
+			existing-partial)
+				rm "$release/clawctl-agent-bootstrap-windows-arm64.tar.gz"
+				before=$(sha256sum "$release"/*)
+				;;
+		esac
+		if [[ "$mode" != valid ]]; then
+			if TMPDIR="$temp_dir" "$PUBLISH_AGENT_BUNDLES" --version "$version" --source-dir "$source_dir" --state-dir "$state_dir"; then return 92; fi
+			[[ "$(sha256sum "$release"/*)" == "$before" ]] || return 93
+		fi
+	else
+		if TMPDIR="$temp_dir" "$PUBLISH_AGENT_BUNDLES" --version "$version" --source-dir "$source_dir" --state-dir "$state_dir"; then return 94; fi
+		[[ ! -e "$release" ]] || return 95
+	fi
+	[[ -z "$(ls -A "$temp_dir")" ]] || return 96
+}
+
 # --- Hub rollback：舊 binary 不得在看不懂新版 evidence ledger 時直接起來。
 run bash -n "$UPGRADE_HUB"
 expect 'upgrade-hub shell syntax valid' 0 is_silent
@@ -1070,6 +1230,16 @@ run non_elf_agent_bundle_publisher_fixture
 expect 'agent bundle publisher 不准把 macOS binary 當 Linux agent 出貨' 1 has 'Invalid Agent ELF'
 run wrong_arch_agent_bundle_publisher_fixture
 expect 'agent bundle publisher 不准把 arm64 binary 當 amd64 出貨' 1 has 'Agent architecture mismatch'
+
+for darwin_case in valid partial wrong-arch non-executable elf plist installer version symlink membership changed existing-partial; do
+	run darwin_publisher_fixture "$darwin_case"
+	expect "Darwin publisher validates immutable release: $darwin_case" 0 true
+done
+
+for windows_case in valid partial wrong-arch non-executable dll elf task installer version symlink membership changed existing-partial; do
+	run windows_publisher_fixture "$windows_case"
+	expect "Windows publisher validates immutable release: $windows_case" 0 true
+done
 
 run bash -n "$UPGRADE_AGENT"
 expect 'upgrade-agent shell syntax valid' 0 is_silent
@@ -1214,7 +1384,7 @@ expect 'installer atomically replaces the exact operator config path' 0 has 'mv 
 run appears_in_order3 'run_operator_auth_preflight "$BIN.new"' 'write_operator_discovery' 'stop_hub_for_database_move || exit 1' "$UPGRADE_HUB"
 expect 'upgrade pins discovered authority after grant proof and before stopping Hub' 0 is_silent
 
-run appears_in_order3 'make hub agent-bundles VERSION="$VERSION"' './ops/publish-agent-bundles.sh --version "$VERSION"' 'stop_hub_for_database_move || exit 1' "$UPGRADE_HUB"
+run appears_in_order3 'make hub agent-bundles agent-bundles-darwin agent-bundles-windows VERSION="$VERSION"' './ops/publish-agent-bundles.sh --version "$VERSION"' 'stop_hub_for_database_move || exit 1' "$UPGRADE_HUB"
 expect 'Hub upgrade publishes matching Agent bundles before stopping the live Hub' 0 is_silent
 
 run appears_before '"$HERE/publish-agent-bundles.sh" --version "$BUNDLE_VERSION"' 'systemctl --user enable --now clawctl-hub.service' "$INSTALL_HUB"

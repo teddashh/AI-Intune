@@ -124,7 +124,7 @@ func ResolveNodeRuntimeMaterialContext(ctx context.Context, dir, version, reques
 	}
 	version = strings.TrimSpace(version)
 	requestedSHA256 = strings.TrimSpace(requestedSHA256)
-	if version == "" || (targetOS != "linux" && targetOS != "darwin") ||
+	if version == "" || (targetOS != "linux" && targetOS != "darwin" && targetOS != "windows") ||
 		(targetArch != "amd64" && targetArch != "arm64") {
 		return NodeRuntimeMaterial{}, errors.New("artifact: Node runtime version and target are required")
 	}

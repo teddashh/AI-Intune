@@ -49,13 +49,11 @@ jobs:
       - name: ops tests
         run: bash ops/test-ops.sh
 
-      # The public tree does not build the agent for windows yet
-      # (internal/probe uses unix-only syscalls), so only darwin is checked.
-      - name: Cross-build agent (darwin)
+      - name: Cross-build agent (darwin, windows)
         env:
           CGO_ENABLED: "0"
         run: |
-          for target in darwin/amd64 darwin/arm64; do
+          for target in darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
             GOOS="${target%/*}" GOARCH="${target#*/}" go build -o /dev/null ./cmd/clawctl-agent
           done
 
