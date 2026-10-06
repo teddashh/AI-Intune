@@ -630,6 +630,7 @@ func runAgent() {
 
 func advertiseJobCapabilities(checkin *model.Checkin) {
 	checkin.DeviceSyncV1 = true
+	checkin.MaintenanceDiskCleanV1 = true
 }
 
 // applyWorkloadPolicy 的 caller 只 Load atomic pointer 一次；這個函式用那個

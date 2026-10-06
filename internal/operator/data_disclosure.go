@@ -122,6 +122,7 @@ const (
 	DataCategoryWorkload      DataCategoryKey = "workload"
 	DataCategoryCanary        DataCategoryKey = "canary"
 	DataCategoryJobs          DataCategoryKey = "jobs"
+	DataCategoryDiskClean     DataCategoryKey = "disk_clean"
 	DataCategoryAssignments   DataCategoryKey = "assignments"
 	DataCategoryAudit         DataCategoryKey = "audit"
 )
@@ -172,7 +173,7 @@ var dataCategoryOrder = []DataCategoryKey{
 	DataCategoryCheckins, DataCategoryObservations, DataCategoryTickets,
 	DataCategoryCredentials, DataCategoryVerifications,
 	DataCategoryState, DataCategoryWorkload, DataCategoryCanary,
-	DataCategoryJobs, DataCategoryAssignments, DataCategoryAudit,
+	DataCategoryJobs, DataCategoryDiskClean, DataCategoryAssignments, DataCategoryAudit,
 }
 
 var dataCategoryShapes = map[DataCategoryKey]dataCategoryShape{
@@ -260,6 +261,14 @@ var dataCategoryShapes = map[DataCategoryKey]dataCategoryShape{
 		source: DataSourceOperator,
 		tables: []string{"jobs", "deployment_targets"},
 		path:   "/jobs",
+	},
+	DataCategoryDiskClean: {
+		title:    "磁碟清理",
+		holds:    "disk-clean 的最新摘要、指派的設定摘要、rollout 目標，以及 Hub 的告警狀態。摘要是機器送回的那一行；指派與 rollout 是操作員按下的；告警狀態是 Hub 判定後留下的。這些列不按時間清。",
+		source:   DataSourceHub,
+		tables:   []string{"maintenance_summaries", "maintenance_rollout_targets", "maintenance_assignments", "maintenance_alert_state"},
+		freeText: "摘要裡的主機名稱、使用者、attention、分類備註與報告路徑。",
+		path:     "/tenant/maintenance",
 	},
 	DataCategoryAssignments: {
 		title:  "指派",

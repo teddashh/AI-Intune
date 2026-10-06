@@ -1424,3 +1424,63 @@ CREATE TABLE IF NOT EXISTS object_blobs (
   media_type  TEXT NOT NULL CHECK (length(media_type) BETWEEN 1 AND 128),
   created_at  TEXT NOT NULL CHECK (length(created_at) = 20 AND created_at GLOB '????-??-??T??:??:??Z')
 );
+
+-- Disk-clean maintenance. These tables are the Hub's own ledger for one
+-- resource (maintenance/disk-clean). They are not artifact deployments.
+-- Summaries, assignments, and alert state name a machine. Rollout targets do
+-- too. The rollout row itself uses canary_machine_id so it is not a
+-- machine-scoped table.
+CREATE TABLE IF NOT EXISTS maintenance_summaries (
+  summary_id    TEXT PRIMARY KEY,
+  machine_id    TEXT NOT NULL REFERENCES machine_registry(machine_id),
+  job_id        TEXT NOT NULL UNIQUE REFERENCES jobs(job_id),
+  received_at   TEXT NOT NULL,
+  revision      INTEGER NOT NULL,
+  config_digest TEXT NOT NULL,
+  mode          TEXT NOT NULL,
+  summary_json  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_maintenance_summaries_machine
+  ON maintenance_summaries (machine_id, received_at DESC);
+
+CREATE TABLE IF NOT EXISTS maintenance_rollouts (
+  rollout_id        TEXT PRIMARY KEY,
+  desired_id        TEXT NOT NULL,
+  revision          INTEGER NOT NULL,
+  state             TEXT NOT NULL,
+  control_revision  INTEGER NOT NULL,
+  opened_batch      INTEGER NOT NULL,
+  canary_machine_id TEXT NOT NULL,
+  scope_type        TEXT NOT NULL,
+  scope_id          TEXT NOT NULL,
+  config_digest     TEXT NOT NULL,
+  created_at        TEXT NOT NULL,
+  updated_at        TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_rollout_targets (
+  rollout_id TEXT NOT NULL REFERENCES maintenance_rollouts(rollout_id),
+  machine_id TEXT NOT NULL REFERENCES machine_registry(machine_id),
+  batch_no   INTEGER NOT NULL CHECK (batch_no IN (1, 2)),
+  job_id     TEXT,
+  PRIMARY KEY (rollout_id, machine_id)
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_assignments (
+  machine_id    TEXT PRIMARY KEY REFERENCES machine_registry(machine_id),
+  desired_id    TEXT NOT NULL,
+  revision      INTEGER NOT NULL,
+  config_digest TEXT NOT NULL,
+  assigned_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS maintenance_alert_state (
+  machine_id  TEXT NOT NULL REFERENCES machine_registry(machine_id),
+  condition   TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  active      INTEGER NOT NULL CHECK (active IN (0, 1)),
+  delivered   INTEGER NOT NULL CHECK (delivered IN (0, 1)),
+  updated_at  TEXT NOT NULL,
+  PRIMARY KEY (machine_id, condition)
+);

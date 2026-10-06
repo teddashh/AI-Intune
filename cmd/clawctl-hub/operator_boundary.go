@@ -277,6 +277,18 @@ var operatorRoutePolicies = map[string]operatorRoutePolicy{
 	"POST /deployments/{id}/skip-failed-batch":                            {operatorauth.Operate, operatorHTML, operator.SourceKindWeb},
 	"POST /v1/operator/deployments/{id}/skip-failed-batch-preview":        {operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI},
 	"POST /v1/operator/deployments/{id}/skip-failed-batches":              {operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI},
+	"GET /v1/operator/disk-clean/summaries":                               {operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI},
+	"GET /v1/operator/disk-clean/summaries/{id}":                          {operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI},
+	"POST /v1/operator/disk-clean/profile-preview":                        {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI},
+	"POST /v1/operator/disk-clean/profiles":                               {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI},
+	"POST /v1/operator/disk-clean/dry-run-preview":                        {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI},
+	"POST /v1/operator/disk-clean/dry-runs":                               {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI},
+	"POST /v1/operator/disk-clean/canary-preview":                         {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI},
+	"POST /v1/operator/disk-clean/canaries":                               {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI},
+	"POST /v1/operator/disk-clean/continuation-preview":                   {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI},
+	"POST /v1/operator/disk-clean/continuations":                          {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI},
+	"POST /v1/operator/disk-clean/abandonment-preview":                    {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI},
+	"POST /v1/operator/disk-clean/abandonments":                           {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI},
 }
 
 const (

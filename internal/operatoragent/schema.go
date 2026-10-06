@@ -141,7 +141,7 @@ func Tools() []Tool {
 	confirmName := strField(1, 256, "", "Must match the machine display name. At most 256 bytes, no surrounding space.")
 	ttl := intBound(int(store.OperatorEnrollTokenMinTTLSeconds), int(store.OperatorEnrollTokenMaxTTLSeconds), "Seconds. Hub accepts 60 to 86400.")
 
-	return []Tool{
+	return append([]Tool{
 		{Name: "fleet_overview", Description: "Read GET /v1/operator/machines. Totals are the fleet index. Items are one page. A non-null next_cursor means this page is not the whole fleet.", InputSchema: obj(map[string]any{}), Annotations: readAnn("fleet_overview")},
 		{Name: "machines_list", Description: "Read GET /v1/operator/machines with the same filters as the operator client.", InputSchema: obj(map[string]any{
 			"machine_id": text256, "display_name": text256, "states": stateArray(machineStates),
@@ -214,5 +214,5 @@ func Tools() []Tool {
 			"machine_id": id256, "profile_id": profileID, "profile_revision": profileRevision, "confirm_display_name": confirmName,
 			"preview_digest": digestField, "reason": reason, "idempotency_key": idemField,
 		}, "machine_id", "profile_id", "profile_revision", "confirm_display_name", "preview_digest", "reason", "idempotency_key"), Annotations: writeAnn("profile_assignment_apply", true)},
-	}
+	}, diskCleanTools(id256, idemField)...)
 }

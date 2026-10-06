@@ -19,16 +19,17 @@ import (
 // sent_at likewise. TEXT DESC is then exact. Violation fails closed as data
 // integrity.
 type AgentReadiness struct {
-	MachineID             string
-	LastCheckinReceivedAt *time.Time
-	AgentStartedAt        *time.Time
-	AgentVersion          string
-	JobsEnabled           *bool
-	DeviceSyncV1          *bool
-	IdentityReceivedAt    *time.Time
-	IdentityMeasuredAt    *time.Time
-	IdentityOS            string
-	IdentityArch          string
+	MachineID              string
+	LastCheckinReceivedAt  *time.Time
+	AgentStartedAt         *time.Time
+	AgentVersion           string
+	JobsEnabled            *bool
+	DeviceSyncV1           *bool
+	MaintenanceDiskCleanV1 *bool
+	IdentityReceivedAt     *time.Time
+	IdentityMeasuredAt     *time.Time
+	IdentityOS             string
+	IdentityArch           string
 }
 
 func (s *Store) AgentReadiness(machineID string) (AgentReadiness, error) {
@@ -37,9 +38,9 @@ func (s *Store) AgentReadiness(machineID string) (AgentReadiness, error) {
 	}
 	var result AgentReadiness
 	var receivedAt, sentAt, agentStartedAt, agentVersion sql.NullString
-	var jobsEnabled, deviceSyncV1 sql.NullInt64
+	var jobsEnabled, deviceSyncV1, diskCleanV1 sql.NullInt64
 	err := s.rdb.QueryRow(`
-SELECT m.machine_id,c.received_at,c.sent_at,c.agent_started_at,c.agent_version,c.jobs_enabled,cap.supported
+SELECT m.machine_id,c.received_at,c.sent_at,c.agent_started_at,c.agent_version,c.jobs_enabled,cap.supported,diskcap.supported
   FROM machine_registry m
   LEFT JOIN machine_checkins c ON c.rowid=(
     SELECT rowid FROM machine_checkins
@@ -48,8 +49,10 @@ SELECT m.machine_id,c.received_at,c.sent_at,c.agent_started_at,c.agent_version,c
   )
 	LEFT JOIN machine_job_capabilities cap
 	  ON cap.machine_id=c.machine_id AND cap.sent_at=c.sent_at AND cap.capability=?
-	 WHERE m.machine_id=?`, model.DeviceSyncJobKind, machineID).Scan(
-		&result.MachineID, &receivedAt, &sentAt, &agentStartedAt, &agentVersion, &jobsEnabled, &deviceSyncV1)
+	LEFT JOIN machine_job_capabilities diskcap
+	  ON diskcap.machine_id=c.machine_id AND diskcap.sent_at=c.sent_at AND diskcap.capability=?
+	 WHERE m.machine_id=?`, model.DeviceSyncJobKind, model.MaintenanceDiskCleanCapability, machineID).Scan(
+		&result.MachineID, &receivedAt, &sentAt, &agentStartedAt, &agentVersion, &jobsEnabled, &deviceSyncV1, &diskCleanV1)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AgentReadiness{}, ErrNotFound
 	}
@@ -85,6 +88,10 @@ SELECT m.machine_id,c.received_at,c.sent_at,c.agent_started_at,c.agent_version,c
 	if deviceSyncV1.Valid {
 		supported := deviceSyncV1.Int64 == 1
 		result.DeviceSyncV1 = &supported
+	}
+	if diskCleanV1.Valid {
+		supported := diskCleanV1.Int64 == 1
+		result.MaintenanceDiskCleanV1 = &supported
 	}
 	var identityPayload, identityReceivedAt, identityMeasuredAt string
 	err = s.rdb.QueryRow(`

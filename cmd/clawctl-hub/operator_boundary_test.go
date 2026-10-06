@@ -116,12 +116,12 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		t.Fatalf("non-operator registered=%d policies=%d, want 17/17",
 			len(nonOperatorRegistered), len(nonOperatorRoutePolicies))
 	}
-	if len(operatorRegistered) != 184 || len(operatorRoutePolicies) != 184 {
-		t.Fatalf("operator registered=%d policies=%d, want 184/184",
+	if len(operatorRegistered) != 196 || len(operatorRoutePolicies) != 196 {
+		t.Fatalf("operator registered=%d policies=%d, want 196/196",
 			len(operatorRegistered), len(operatorRoutePolicies))
 	}
-	if len(nonOperatorRegistered)+len(operatorRegistered) != 201 {
-		t.Fatalf("all registered routes=%d, want 201", len(nonOperatorRegistered)+len(operatorRegistered))
+	if len(nonOperatorRegistered)+len(operatorRegistered) != 213 {
+		t.Fatalf("all registered routes=%d, want 213", len(nonOperatorRegistered)+len(operatorRegistered))
 	}
 	counts := map[operatorauth.Permission]int{}
 	representations := map[operatorRepresentation]int{}
@@ -129,11 +129,11 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		counts[policy.Permission]++
 		representations[policy.Representation]++
 	}
-	if counts[operatorauth.View] != 80 || counts[operatorauth.Operate] != 21 || counts[operatorauth.Admin] != 83 {
-		t.Fatalf("permission counts=%v, want view=80 operate=21 admin=83", counts)
+	if counts[operatorauth.View] != 82 || counts[operatorauth.Operate] != 21 || counts[operatorauth.Admin] != 93 {
+		t.Fatalf("permission counts=%v, want view=82 operate=21 admin=93", counts)
 	}
-	if representations[operatorJSON] != 93 || representations[operatorHTML] != 90 || representations[operatorPlain] != 1 {
-		t.Fatalf("representation counts=%v, want JSON=93 HTML=90 plain=1", representations)
+	if representations[operatorJSON] != 105 || representations[operatorHTML] != 90 || representations[operatorPlain] != 1 {
+		t.Fatalf("representation counts=%v, want JSON=105 HTML=90 plain=1", representations)
 	}
 }
 
@@ -323,6 +323,18 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		{"POST /v1/operator/deployments/{id}/abandonments", "/v1/operator/deployments/deployment-1/abandonments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI}},
 		{"POST /v1/operator/deployments/{id}/skip-failed-batch-preview", "/v1/operator/deployments/deployment-1/skip-failed-batch-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI}},
 		{"POST /v1/operator/deployments/{id}/skip-failed-batches", "/v1/operator/deployments/deployment-1/skip-failed-batches", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI}},
+		{"GET /v1/operator/disk-clean/summaries", "/v1/operator/disk-clean/summaries", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI}},
+		{"GET /v1/operator/disk-clean/summaries/{id}", "/v1/operator/disk-clean/summaries/machine-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI}},
+		{"POST /v1/operator/disk-clean/profile-preview", "/v1/operator/disk-clean/profile-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI}},
+		{"POST /v1/operator/disk-clean/profiles", "/v1/operator/disk-clean/profiles", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI}},
+		{"POST /v1/operator/disk-clean/dry-run-preview", "/v1/operator/disk-clean/dry-run-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI}},
+		{"POST /v1/operator/disk-clean/dry-runs", "/v1/operator/disk-clean/dry-runs", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI}},
+		{"POST /v1/operator/disk-clean/canary-preview", "/v1/operator/disk-clean/canary-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI}},
+		{"POST /v1/operator/disk-clean/canaries", "/v1/operator/disk-clean/canaries", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI}},
+		{"POST /v1/operator/disk-clean/continuation-preview", "/v1/operator/disk-clean/continuation-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI}},
+		{"POST /v1/operator/disk-clean/continuations", "/v1/operator/disk-clean/continuations", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI}},
+		{"POST /v1/operator/disk-clean/abandonment-preview", "/v1/operator/disk-clean/abandonment-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI}},
+		{"POST /v1/operator/disk-clean/abandonments", "/v1/operator/disk-clean/abandonments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI}},
 		{"GET /v1/operator/machines/{id}/channel", "/v1/operator/machines/machine-1/channel", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI}},
 		{"GET /v1/operator/machines/{id}/enrollment-token", "/v1/operator/machines/machine-1/enrollment-token", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI}},
 		{"POST /v1/operator/machines/{id}/diagnostic-noop-preview", "/v1/operator/machines/machine-1/diagnostic-noop-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI}},

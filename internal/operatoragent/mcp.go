@@ -19,7 +19,7 @@ const (
 
 // ServerInstructions is the MCP initialize text. It is provenance for the
 // model, not an authorization grant.
-const ServerInstructions = "This process calls Hub /v1/operator from the tailnet node it runs on. Hub WhoIs that TCP source. Do not send an Authorization header. Write tools require preview_digest from an earlier preview tool, and the matching idempotency key. A new deployment pauses after its canary batch is succeeded; rollout_expand is the explicit Continue and does not send it unless the shared canary assessment allows it. Plain Continue refuses a failed batch. MCP tools do not send skip failed batch."
+const ServerInstructions = "This process calls Hub /v1/operator from the tailnet node it runs on. Hub WhoIs that TCP source. Do not send an Authorization header. Write tools require preview_digest from an earlier preview tool, and the matching idempotency key. A new deployment pauses after its canary batch is succeeded; rollout_expand is the explicit Continue and does not send it unless the shared canary assessment allows it. Plain Continue refuses a failed batch. MCP tools do not send skip failed batch. Disk-clean uses disk_clean_profile_preview then disk_clean_profile_publish, a dry-run on the targets, then disk_clean_canary_apply for exactly one machine. disk_clean_continue_apply opens the rest only after that canary pauses succeeded. disk_clean_abandon_apply opens nothing more."
 
 // Serve reads newline-delimited JSON-RPC on r and writes one JSON line per
 // response on w. A Content-Length header block is accepted as input. Responses

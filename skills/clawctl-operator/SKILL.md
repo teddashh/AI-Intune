@@ -52,6 +52,18 @@ Read `machine_get` and `machine_evidence`. Leave the deployment paused. Open the
 
 Do not report success from SSH, BAT, the installer, or a missing check-in. Do not skip the machine with `deployment_continue`. That tool refuses a failed batch and does not write.
 
+## Disk-clean
+
+This is not an artifact deployment. Do not use `deployment_create` or `rollout_apply` for it.
+
+1. `disk_clean_profile_preview`, then `disk_clean_profile_publish` with that digest and `current_revision` as `expected_revision`.
+2. `disk_clean_dry_run_preview`, then `disk_clean_dry_run_apply`. Read `disk_clean_summary` before any apply that deletes.
+3. `disk_clean_canary_preview` names exactly one machine from the target list. `disk_clean_canary_apply` opens only that machine.
+4. After the canary pauses on success, `disk_clean_continue_preview`, then `disk_clean_continue_apply` with that digest and the preview's control revision and opened batch. That is the only step that opens the rest.
+5. `disk_clean_abandon_preview` then `disk_clean_abandon_apply` opens nothing more. Do not abandon while a job is still running.
+
+The profile is a closed document. Do not add a shell, a command, or a path outside its keys. Design: [docs/MAINTENANCE-DISK-CLEAN.md](../../docs/MAINTENANCE-DISK-CLEAN.md).
+
 ## Writes
 
-Every write tool needs `preview_digest` from the matching preview tool in an earlier call. Continue, abandon, and `rollout_expand` also need `expected_control_revision` and `expected_opened_batch`. If the tool returns `preview_digest_required`, `expected_revision_required`, `expected_revision_mismatch`, or `canary_blocked`, the write was not sent. Fix the arguments or stop. Do not invent a digest.
+Every write tool needs `preview_digest` from the matching preview tool in an earlier call. Continue, abandon, `rollout_expand`, and the disk-clean continue and abandon tools also need `expected_control_revision` and `expected_opened_batch`. If the tool returns `preview_digest_required`, `expected_revision_required`, `expected_revision_mismatch`, or `canary_blocked`, the write was not sent. Fix the arguments or stop. Do not invent a digest.

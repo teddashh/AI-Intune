@@ -91,6 +91,11 @@ type Checkin struct {
 	// and must not infer support from agent_version text.
 	DeviceSyncV1 bool `json:"device_sync_v1,omitempty"`
 
+	// MaintenanceDiskCleanV1 says this process has the embedded disk-clean
+	// executor. Omission means unsupported. The Hub must not infer it from
+	// agent_version text.
+	MaintenanceDiskCleanV1 bool `json:"maintenance_disk_clean_v1,omitempty"`
+
 	// 本機狀態檔的年齡。心跳成功但這個一直變大 = Agent 在線但沒在觀測。
 	ObservationAgeSeconds *int64 `json:"observation_age_seconds,omitempty"`
 
@@ -137,22 +142,24 @@ type CheckinResponse struct {
 // IdentityMeasuredAt uses the agent's clock; IdentityReceivedAt uses the Hub's.
 // Both timestamps describe the same stored identity evidence.
 type AgentReadinessResponse struct {
-	MachineID             string     `json:"machine_id"`
-	LastCheckinReceivedAt *time.Time `json:"last_checkin_received_at"`
-	AgentStartedAt        *time.Time `json:"agent_started_at"`
-	AgentVersion          string     `json:"agent_version,omitempty"`
-	JobsEnabled           *bool      `json:"jobs_enabled,omitempty"`
-	DeviceSyncV1          *bool      `json:"device_sync_v1,omitempty"`
-	IdentityReceivedAt    *time.Time `json:"identity_received_at"`
-	IdentityMeasuredAt    *time.Time `json:"identity_measured_at"`
-	IdentityOS            string     `json:"identity_os,omitempty"`
-	IdentityArch          string     `json:"identity_arch,omitempty"`
+	MachineID              string     `json:"machine_id"`
+	LastCheckinReceivedAt  *time.Time `json:"last_checkin_received_at"`
+	AgentStartedAt         *time.Time `json:"agent_started_at"`
+	AgentVersion           string     `json:"agent_version,omitempty"`
+	JobsEnabled            *bool      `json:"jobs_enabled,omitempty"`
+	DeviceSyncV1           *bool      `json:"device_sync_v1,omitempty"`
+	MaintenanceDiskCleanV1 *bool      `json:"maintenance_disk_clean_v1,omitempty"`
+	IdentityReceivedAt     *time.Time `json:"identity_received_at"`
+	IdentityMeasuredAt     *time.Time `json:"identity_measured_at"`
+	IdentityOS             string     `json:"identity_os,omitempty"`
+	IdentityArch           string     `json:"identity_arch,omitempty"`
 }
 
 // ---------------------------------------------------------------- 工作單
 
 const (
 	DeviceSyncJobKind               = "device-sync"
+	MaintenanceDiskCleanCapability  = "maintenance_disk_clean_v1"
 	DeviceSyncSpecSchemaVersion     = 1
 	DeviceSyncSpecJSON              = `{"kind":"device-sync","schema_version":1}`
 	DeviceSyncMinTimeoutSeconds     = 1

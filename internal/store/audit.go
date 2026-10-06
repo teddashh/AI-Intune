@@ -59,6 +59,11 @@ const (
 	AuditSettingAssign             AuditAction = "setting-assign"
 	AuditCompliancePolicy          AuditAction = "compliance-policy"
 	AuditComplianceAssign          AuditAction = "compliance-assign"
+	AuditMaintenanceProfile        AuditAction = "maintenance-profile"
+	AuditMaintenanceDryRun         AuditAction = "maintenance-dry-run"
+	AuditMaintenanceCanary         AuditAction = "maintenance-canary"
+	AuditMaintenanceContinue       AuditAction = "maintenance-continue"
+	AuditMaintenanceAbandon        AuditAction = "maintenance-abandon"
 	AuditOperatorDenied            AuditAction = "operator-denied"
 )
 
@@ -139,7 +144,10 @@ func IsCanonicalOperatorAction(action AuditAction) bool {
 		action == AuditVerifierRegister || action == AuditVerifierRevoke ||
 		action == AuditVerificationAssign ||
 		action == AuditSettingPolicy || action == AuditSettingAssign ||
-		action == AuditCompliancePolicy || action == AuditComplianceAssign
+		action == AuditCompliancePolicy || action == AuditComplianceAssign ||
+		action == AuditMaintenanceProfile || action == AuditMaintenanceDryRun ||
+		action == AuditMaintenanceCanary || action == AuditMaintenanceContinue ||
+		action == AuditMaintenanceAbandon
 }
 
 // auditMaxReason 是理由的長度上限。

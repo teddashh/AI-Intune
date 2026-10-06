@@ -260,6 +260,37 @@ func (h *hub) operatorRoutes(mux *http.ServeMux) []string {
 	mux.HandleFunc(patterns[92], h.handleSkipFailedBatchOperatorDeployment)
 	patterns = append(patterns, "GET /metrics")
 	mux.HandleFunc("GET /metrics", h.handleMetrics)
+	diskClean := len(patterns)
+	patterns = append(patterns,
+		"GET /v1/operator/disk-clean/summaries",
+		"GET /v1/operator/disk-clean/summaries/{id}",
+		"POST /v1/operator/disk-clean/profile-preview",
+		"POST /v1/operator/disk-clean/profiles",
+		"POST /v1/operator/disk-clean/dry-run-preview",
+		"POST /v1/operator/disk-clean/dry-runs",
+		"POST /v1/operator/disk-clean/canary-preview",
+		"POST /v1/operator/disk-clean/canaries",
+		"POST /v1/operator/disk-clean/continuation-preview",
+		"POST /v1/operator/disk-clean/continuations",
+		"POST /v1/operator/disk-clean/abandonment-preview",
+		"POST /v1/operator/disk-clean/abandonments",
+	)
+	for i, handler := range []http.HandlerFunc{
+		h.handleListOperatorDiskCleanSummaries,
+		h.handleGetOperatorDiskCleanSummary,
+		h.handlePreviewOperatorDiskCleanProfile,
+		h.handlePublishOperatorDiskCleanProfile,
+		h.handlePreviewOperatorDiskCleanDryRun,
+		h.handleApplyOperatorDiskCleanDryRun,
+		h.handlePreviewOperatorDiskCleanCanary,
+		h.handleApplyOperatorDiskCleanCanary,
+		h.handlePreviewOperatorDiskCleanContinue,
+		h.handleContinueOperatorDiskClean,
+		h.handlePreviewOperatorDiskCleanAbandon,
+		h.handleAbandonOperatorDiskClean,
+	} {
+		mux.HandleFunc(patterns[diskClean+i], handler)
+	}
 	return patterns
 }
 

@@ -154,6 +154,9 @@ func TestAgentAdvertisesTheFixedDeviceSyncExecutor(t *testing.T) {
 	if !checkin.DeviceSyncV1 {
 		t.Fatal("agent did not advertise device-sync v1")
 	}
+	if !checkin.MaintenanceDiskCleanV1 {
+		t.Fatal("agent did not advertise maintenance disk-clean v1")
+	}
 }
 
 func cliTimePtr(t time.Time) *time.Time { return &t }
