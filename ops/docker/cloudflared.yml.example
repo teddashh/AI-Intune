@@ -1,8 +1,12 @@
 # Example Cloudflare Tunnel config for clawctl-hub agent-plane experiments.
 #
-# Prefer the dashboard "token" install (CLOUDFLARE_TUNNEL_TOKEN) instead of
-# committing credentials. If you use a config file, keep credentials JSON
-# outside git (chmod 600) and point credentials-file at it.
+# Prefer the dashboard token install. Put CLOUDFLARE_TUNNEL_TOKEN in hub.env
+# and add -f ops/docker/docker-compose.tunnel.yml. Do not put the token in
+# docker-compose.yml: Compose v5 interpolates that file even when a profile
+# is off, and a required token there aborts every command.
+# If you use this config file instead, keep credentials JSON outside git
+# (chmod 600) and point credentials-file at it. The tunnel compose file
+# comments show the volume mount that replaces the token command.
 #
 # Replace 100.64.0.12:8787 with THIS host's CLAWCTL_LISTEN value.
 # Hub only binds that Tailscale IP — do not use 127.0.0.1 or localhost here

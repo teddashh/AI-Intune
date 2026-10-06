@@ -12,24 +12,49 @@
 # Quick start (on a small VPS that already joined your free Tailscale tailnet):
 #   1. cp ops/docker/hub.env.example ops/docker/hub.env
 #   2. Set CLAWCTL_LISTEN=$(tailscale ip -4):8787 and capability prefix
-#   3. docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env up -d
-#   4. Open http://$CLAWCTL_LISTEN/ from an authorized tailnet device
+#   3. docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env up -d --build
+#   4. Open http://<CLAWCTL_LISTEN>/ from an authorized tailnet device
 #
-# Optional Cloudflare Tunnel profile is for agent-plane experiments only.
-# It does NOT make the operator UI work on a public hostname today.
+# Do not put the Cloudflare Tunnel in this file. Compose v5 interpolates
+# profile-disabled services, so a required token here aborts every command.
+# Optional tunnel: add -f ops/docker/docker-compose.tunnel.yml (see that file).
+#
+# hub-data-init runs as root, exits 0, and only then hub starts. It chowns
+# the named volume to distroless nonroot (uid 65532) mode 0700 and seeds
+# agent-bootstrap/<CLAWCTL_VERSION> on first use. Hub refuses any other
+# owner or mode on the SQLite directory.
 
 name: clawctl
 
 services:
+  hub-data-init:
+    build:
+      context: ../..
+      dockerfile: ops/docker/Dockerfile
+      target: hub-init
+      args:
+        CLAWCTL_VERSION: ${CLAWCTL_VERSION:-dev}
+    image: clawctl-hub-init:${CLAWCTL_VERSION:-local}
+    container_name: clawctl-hub-data-init
+    # Root only so this one-shot can chown the volume. It does not listen.
+    user: "0:0"
+    restart: "no"
+    volumes:
+      - clawctl-data:/var/lib/clawctl
+
   hub:
     build:
       context: ../..
       dockerfile: ops/docker/Dockerfile
+      target: hub
       args:
-        VERSION: ${CLAWCTL_VERSION:-dev}
+        CLAWCTL_VERSION: ${CLAWCTL_VERSION:-dev}
     image: clawctl-hub:${CLAWCTL_VERSION:-local}
     container_name: clawctl-hub
     restart: unless-stopped
+    depends_on:
+      hub-data-init:
+        condition: service_completed_successfully
     # Required: bind host Tailscale IP + share host routes to LocalAPI peers.
     network_mode: host
     # Pass secrets/config via: docker compose --env-file ops/docker/hub.env ...
@@ -59,9 +84,8 @@ services:
       S3_ENDPOINT: ${S3_ENDPOINT:-}
       S3_REGION: ${S3_REGION:-}
     volumes:
-      # Named volume must be writable by distroless nonroot (uid 65532).
-      # If SQLite open fails with permission denied:
-      #   docker run --rm -v clawctl-data:/data busybox chown -R 65532:65532 /data
+      # hub-data-init chowns this volume to uid 65532 and mode 0700 before
+      # hub starts. Ledger parent and agent-bootstrap files must be that user.
       - clawctl-data:/var/lib/clawctl
       # Operator auth: LocalAPI WhoIs. If Hub returns AUTH_SOURCE_UNAVAILABLE,
       # fix socket permissions for the container UID (distroless nonroot=65532)
@@ -71,35 +95,8 @@ services:
     healthcheck:
       # Distroless has no shell/curl; use the binary's own HTTP via a tiny
       # busybox sidecar is overkill — probe from the host instead:
-      #   curl -fsS "http://${CLAWCTL_LISTEN}/healthz"
+      #   curl -fsS "http://<CLAWCTL_LISTEN>/healthz"
       disable: true
-
-  # Optional: Cloudflare Tunnel sidecar (profile "tunnel").
-  #
-  # LIMITS (read before enabling):
-  # - Operator UI still requires browsing http://<Tailscale-IP>:8787 with
-  #   app-cap grants. A public hostname will fail Host pinning and WhoIs.
-  # - Agent bearer routes do not pin Host today, so a tunnel that forwards to
-  #   http://<CLAWCTL_LISTEN> can be used for experimental public agent ingress.
-  # - Do NOT claim Cloudflare Access replaces Tailscale operator auth yet.
-  cloudflared:
-    profiles: ["tunnel"]
-    image: cloudflare/cloudflared:latest
-    container_name: clawctl-cloudflared
-    restart: unless-stopped
-    network_mode: host
-    # Prefer a token from the Cloudflare Zero Trust dashboard (no config file
-    # with secrets in git). Alternatively mount cloudflared.yml.
-    command:
-      - tunnel
-      - --no-autoupdate
-      - run
-      - --token
-      - ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN when using profile tunnel}
-    # If you use a config file instead of a token:
-    # volumes:
-    #   - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
-    # command: ["tunnel", "--config", "/etc/cloudflared/config.yml", "run"]
 
 volumes:
   clawctl-data:

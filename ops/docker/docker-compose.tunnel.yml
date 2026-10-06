@@ -1,0 +1,38 @@
+# Optional Cloudflare Tunnel for experimental agent ingress.
+#
+# Compose v5 interpolates every service in the files it loads, including
+# services whose profile is disabled. A required CLOUDFLARE_TUNNEL_TOKEN
+# reference in docker-compose.yml therefore aborts every command even when
+# the tunnel is not requested. This override is loaded only when the tunnel
+# is actually used. The token line below fails interpolation if hub.env
+# does not set CLOUDFLARE_TUNNEL_TOKEN.
+#
+#   docker compose \
+#     -f ops/docker/docker-compose.yml \
+#     -f ops/docker/docker-compose.tunnel.yml \
+#     --env-file ops/docker/hub.env up -d
+#
+# The public hostname is not an operator UI. Point the tunnel origin at
+# http://<CLAWCTL_LISTEN>. See cloudflared.yml.example for a config-file
+# install instead of a token. Do not commit the token.
+
+name: clawctl
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: clawctl-cloudflared
+    restart: unless-stopped
+    network_mode: host
+    # ENTRYPOINT of the image is already "cloudflared --no-autoupdate".
+    # command replaces CMD only, matching the previous profile service.
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - "${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in hub.env when using docker-compose.tunnel.yml}"
+    # Config-file alternative (no token in the compose command):
+    # volumes:
+    #   - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+    # command: ["tunnel", "--config", "/etc/cloudflared/config.yml", "run"]

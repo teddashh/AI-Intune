@@ -7,7 +7,19 @@
 #
 # Therefore compose uses network_mode: host + a socket bind-mount.
 # Build from the repository root:
-#   docker build -f ops/docker/Dockerfile -t clawctl-hub:local .
+#   docker build -f ops/docker/Dockerfile \
+#     --build-arg CLAWCTL_VERSION=dev -t clawctl-hub:local .
+#
+# CLAWCTL_VERSION is baked into the Hub binary (main.version) and into the
+# Linux agent bootstrap release. Hub loads that release from
+# <dir of --db>/agent-bootstrap/<version> at startup (both amd64 and arm64
+# are required). The default target below stores the release in the image at
+# /usr/local/share/clawctl/agent-bootstrap/<version>/. The hub-init target
+# copies the same tree to /opt/clawctl-seed/... and the compose one-shot
+# seeds it into the data volume on first use. Hub has no flag for another path.
+#
+# A named volume's root is not the image directory. Compose runs hub-init
+# before hub to chown /var/lib/clawctl to uid 65532 and mode 0700.
 
 # ---- build ----
 FROM golang:1.27.1-bookworm AS build
@@ -19,22 +31,87 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 COPY . .
 
-ARG VERSION=dev
+ARG CLAWCTL_VERSION=dev
 ENV CGO_ENABLED=0
+# Bundles are packed by ops/build-agent-bundles.sh (same archive layout the
+# Hub checks). SHA256SUMS matches ops/publish-agent-bundles.sh for the
+# required Linux pair: "<sha256><two spaces><filename>" amd64 then arm64.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    mkdir -p /out && \
-    go build -buildvcs=false -trimpath \
-      -ldflags "-s -w -X main.version=${VERSION}" \
-      -o /out/clawctl-hub ./cmd/clawctl-hub && \
-    go build -buildvcs=false -trimpath \
-      -ldflags "-s -w -X main.version=${VERSION}" \
-      -o /out/clawctl-agent ./cmd/clawctl-agent
+    <<'EOF'
+set -eu
+version="${CLAWCTL_VERSION}"
+case "$version" in
+  "" )
+    echo "CLAWCTL_VERSION is empty" >&2
+    exit 1
+    ;;
+esac
+case "$version" in
+  *[!A-Za-z0-9._+-]* )
+    echo "CLAWCTL_VERSION contains unsupported characters: $version" >&2
+    exit 1
+    ;;
+esac
+case "$version" in
+  [A-Za-z0-9]* ) ;;
+  * )
+    echo "CLAWCTL_VERSION must start with a letter or digit: $version" >&2
+    exit 1
+    ;;
+esac
+if [ "${#version}" -gt 128 ]; then
+  echo "CLAWCTL_VERSION is too long" >&2
+  exit 1
+fi
 
-# ---- runtime ----
+mkdir -p /out /src/build
+ldflags="-s -w -X main.version=${version}"
+
+go build -buildvcs=false -trimpath -ldflags "$ldflags" \
+  -o /out/clawctl-hub ./cmd/clawctl-hub
+go build -buildvcs=false -trimpath -ldflags "$ldflags" \
+  -o /out/clawctl-agent ./cmd/clawctl-agent
+
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -trimpath \
+  -ldflags "$ldflags" \
+  -o /src/build/clawctl-agent-linux-amd64 ./cmd/clawctl-agent
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -buildvcs=false -trimpath \
+  -ldflags "$ldflags" \
+  -o /src/build/clawctl-agent-linux-arm64 ./cmd/clawctl-agent
+
+/src/ops/build-agent-bundles.sh "$version" linux
+
+amd64=clawctl-agent-bootstrap-linux-amd64.tar.gz
+arm64=clawctl-agent-bootstrap-linux-arm64.tar.gz
+dest="/out/agent-bootstrap/${version}"
+mkdir -p "$dest"
+install -m 0644 "/src/build/$amd64" "$dest/$amd64"
+install -m 0644 "/src/build/$arm64" "$dest/$arm64"
+: > "$dest/SHA256SUMS"
+for name in "$amd64" "$arm64"; do
+  digest=$(sha256sum "$dest/$name") || exit 1
+  printf '%s  %s\n' "${digest%% *}" "$name" >> "$dest/SHA256SUMS"
+done
+chmod 0644 "$dest/SHA256SUMS"
+chmod 0700 /out/agent-bootstrap "$dest"
+EOF
+
+# ---- volume init (one-shot; not the default build target) ----
+# busybox supplies sh, chown, and chmod. The Hub image is distroless and
+# cannot fix a root-owned volume itself.
+FROM busybox:1.36.1 AS hub-init
+ARG CLAWCTL_VERSION=dev
+ENV CLAWCTL_VERSION=${CLAWCTL_VERSION}
+COPY --from=build /out/agent-bootstrap /opt/clawctl-seed/agent-bootstrap
+COPY ops/docker/hub-data-init.sh /usr/local/bin/hub-data-init.sh
+USER 0:0
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/hub-data-init.sh"]
+
+# ---- runtime (default target) ----
 # Distroless: static binary, non-root, no shell. --listen defaults from
 # CLAWCTL_LISTEN inside the binary (serveListenDefault); no shell expansion needed.
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot AS hub
 
 LABEL org.opencontainers.image.title="clawctl-hub" \
       org.opencontainers.image.description="clawctl fleet Hub (Go + SQLite); Tailscale operator auth" \
@@ -51,6 +128,9 @@ WORKDIR /var/lib/clawctl
 
 COPY --from=build --chown=nonroot:nonroot /out/clawctl-hub /usr/local/bin/clawctl-hub
 COPY --from=build --chown=nonroot:nonroot /out/clawctl-agent /usr/local/bin/clawctl-agent
+# Same bytes the init image seeds onto the volume. Hub does not read this
+# path; smoke-build.sh checks that the files are present in the image.
+COPY --from=build --chown=nonroot:nonroot /out/agent-bootstrap /usr/local/share/clawctl/agent-bootstrap
 
 # Documented port only — with network_mode: host the process binds CLAWCTL_LISTEN.
 EXPOSE 8787
