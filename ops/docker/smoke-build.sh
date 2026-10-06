@@ -28,6 +28,11 @@ if command -v bash >/dev/null 2>&1; then
 fi
 
 echo "==> parsing ops/fly/fly.toml and ops/fly/litestream.yml"
+# tomllib is Python 3.11+. Older hosts (Ubuntu 22.04 ships 3.10) skip the
+# parse instead of failing the whole smoke build.
+if ! command -v python3 >/dev/null 2>&1 || ! python3 -c 'import tomllib' 2>/dev/null; then
+  echo "    skip: python3 with tomllib (3.11+) not available; fly.toml not parsed"
+else
 python3 - <<'PY'
 import tomllib
 from pathlib import Path
@@ -65,6 +70,7 @@ if "latest" in text:
     raise SystemExit("litestream.yml must pin replicas without the word latest")
 print("    ok fly.toml and litestream.yml")
 PY
+fi
 
 have_docker=0
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then

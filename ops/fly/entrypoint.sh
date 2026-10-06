@@ -108,7 +108,8 @@ chmod 0700 "$state_dir" /run/clawctl
 chown 0:0 "$state_dir"
 
 echo "clawctl-fly: starting tailscaled (state $state_dir)"
-tailscaled \
+# tailscaled does not read TS_AUTHKEY; keep it out of its environment.
+env -u TS_AUTHKEY tailscaled \
   --statedir="$state_dir" \
   --socket="$socket" \
   --port=41641 \
