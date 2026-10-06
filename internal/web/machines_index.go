@@ -32,6 +32,7 @@ type machineIndexPageView struct {
 	NextHref      string
 	FirstPageHref string
 	CurrentLabel  string
+	AssignedUsers map[string]string
 }
 
 type machineStateFilter struct {
@@ -195,6 +196,15 @@ func buildMachineIndexPage(request operator.MachineListRequest, result operator.
 		Lifecycle: string(request.Lifecycle),
 		Reporting: string(request.Reporting), Channel: string(request.Channel), Limit: request.Limit,
 		CurrentLabel: "所有機器",
+	}
+	view.AssignedUsers = map[string]string{}
+	if overview, ok := result.StoreOverview(); ok {
+		for _, row := range overview.Machines {
+			view.AssignedUsers[row.Machine.MachineID] = assignedUserWebLabel(row.Machine.AssignedUserID, row.Machine.AssignedUserLogin)
+		}
+		for _, m := range overview.Retired {
+			view.AssignedUsers[m.MachineID] = assignedUserWebLabel(m.AssignedUserID, m.AssignedUserLogin)
+		}
 	}
 	if view.Lifecycle == "" {
 		view.Lifecycle = string(operator.MachineLifecycleAny)

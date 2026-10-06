@@ -7,7 +7,7 @@
   <p>{{$m.RetiredAt.Local.Format "2006-01-02 15:04"}} 退出管理分母；退役前觀測已保留。</p>
   {{else}}
   <h1><span class="dot {{color $md.Judgement.State}}" aria-hidden="true"></span>{{$m.DisplayName}} —— {{label $md.Judgement.State}}</h1>
-  <p>{{$md.Judgement.Reason.Text}} · channel：{{if $m.Channel}}{{$m.Channel}}{{else}}未指派{{end}}</p>
+  <p>指派使用者：{{.AssignedUser.UserLogin}} · {{$md.Judgement.Reason.Text}} · channel：{{if $m.Channel}}{{$m.Channel}}{{else}}未指派{{end}}</p>
   {{end}}
   {{if $md.Checkins.Truncated}}<p class="small dim">{{$.CheckinWindowText}}內超過 {{$md.Disclosure.CheckinLimit}} 筆心跳。已取回最近 {{$md.Disclosure.CheckinLimit}} 筆，狀態條畫出其中最近 {{len $.Strip}} 筆。</p>{{end}}
   {{if $md.Checkins.Invalid}}<p class="small dim">已取回的心跳裡有 {{$md.Checkins.Invalid}} 筆無效，沒有畫進狀態條。</p>{{end}}
@@ -718,6 +718,25 @@
     </label>
     <button type="submit" style="padding:6px 14px">預覽備註變更</button>
   </form>{{end}}
+</div>
+
+<h2 id="action-assigned-user" class="section-anchor" tabindex="-1">指派使用者</h2>
+<div class="panel">
+  <p>目前指派：{{.AssignedUser.UserLogin}}</p>
+  {{if not .AssignedUserDirectory.Available}}<p>使用者名冊：來源不可用</p>{{else if not .AssignedUserDirectory.Users}}<p>使用者名冊：沒有可指派的使用者</p>{{end}}
+  {{if and $.Access.CanAdmin (not $m.RetiredAt)}}
+  {{if or .AssignedUserDirectory.Users .AssignedUser.UserID}}
+  <form method="post" action="/machines/{{$m.MachineID}}/assigned-user-preview">
+    <input type="hidden" name="expected_revision" value="{{.AssignedUser.Revision}}">
+    <label><span class="field-label">指派給</span>
+      <select name="user_id" required>
+        <option value="none">取消指派</option>
+        {{range .AssignedUserDirectory.Users}}<option value="{{.UserID}}" {{if eq .UserID $.AssignedUser.UserID}}selected{{end}}>{{.Login}}（{{.UserID}}）</option>{{end}}
+      </select>
+    </label>
+    <button type="submit">預覽指派</button>
+  </form>
+  {{end}}{{end}}
 </div>
 
 <h2 id="action-channel" class="section-anchor" tabindex="-1">部署通道</h2>

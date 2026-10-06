@@ -1,0 +1,19 @@
+{{define "machine_assigned_user_review.html"}}{{template "head" .}}
+{{$p := .AssignedUserPreview}}
+<h1>確認指派使用者</h1>
+<div class="panel">
+  <p>機器：{{$p.DisplayName}}</p>
+  <p>指派使用者：{{$p.CurrentLabel}} → {{$p.TargetLabel}}</p>
+  <p>確認後更新這台機器的指派使用者。</p>
+  <form method="post" action="/machines/{{$p.MachineID}}/assigned-user">
+    <input type="hidden" name="user_id" value="{{$p.UserID}}">
+    <input type="hidden" name="expected_revision" value="{{$p.Revision}}">
+    <input type="hidden" name="idempotency_key" value="{{$p.Key}}">
+    <label><span class="field-label">輸入機器名稱「{{$p.DisplayName}}」以確認</span>
+      <input type="text" name="confirm_display_name" autocomplete="off" required>
+    </label>
+    <button type="submit">確認指派</button>
+    <a href="/machines/{{$p.MachineID}}">取消</a>
+  </form>
+</div>
+{{template "foot" .}}{{end}}

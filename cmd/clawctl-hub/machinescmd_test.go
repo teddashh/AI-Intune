@@ -142,6 +142,71 @@ func TestMachinesCLIDisclosesTruncatedCheckins(t *testing.T) {
 	}
 }
 
+func TestMachinesCLIShowsDetailWhenAssignedUserUnavailable(t *testing.T) {
+	f := observedOperatorFixture(t)
+	const base = "http://100.64.0.9:8787"
+	detailPath := "/v1/operator/machines/" + f.machine.id
+	assignedPath := detailPath + "/assigned-user"
+	// 固定明細回應，讓兩次輸出包含相同的評估時間。
+	detail := operatorRequest(t, f.mux, http.MethodGet, detailPath, "", "")
+	if detail.Code != http.StatusOK {
+		t.Fatalf("讀取測試明細失敗：%d %s", detail.Code, detail.Body.String())
+	}
+	for _, jsonOutput := range []bool{false, true} {
+		t.Run(fmt.Sprintf("JSON=%t", jsonOutput), func(t *testing.T) {
+			args := []string{"show", "--hub-url", base}
+			if jsonOutput {
+				args = append(args, "--json")
+			}
+			args = append(args, f.machine.id)
+			var baseline string
+			for _, unavailable := range []bool{false, true} {
+				client, calls := operatorClientForMuxWithoutListener(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == detailPath {
+						w.Header().Set("Content-Type", detail.Header().Get("Content-Type"))
+						w.Header().Set("Cache-Control", detail.Header().Get("Cache-Control"))
+						_, _ = w.Write(detail.Body.Bytes())
+						return
+					}
+					if unavailable && r.URL.Path == assignedPath {
+						w.Header().Set("Cache-Control", "no-store")
+						writeErr(w, http.StatusServiceUnavailable, "INTERNAL", "測試用原始錯誤")
+						return
+					}
+					f.mux.ServeHTTP(w, r)
+				}), base)
+				deps := productionMachineCommandDeps()
+				deps.newOperatorClient = func(string) (*operatorclient.Client, error) { return client, nil }
+				var out, errOut bytes.Buffer
+				if err := runMachinesCommandWithDeps(t.Context(), args, &out, &errOut, deps); err != nil {
+					t.Fatalf("機器明細輸出失敗：%v；錯誤輸出=%s", err, errOut.String())
+				}
+				wantCalls := int64(2)
+				if jsonOutput {
+					wantCalls = 1
+				}
+				if calls.Load() != wantCalls || errOut.Len() != 0 {
+					t.Fatalf("要求次數=%d，預期=%d；錯誤輸出=%s", calls.Load(), wantCalls, errOut.String())
+				}
+				if !unavailable {
+					baseline = out.String()
+					if !jsonOutput && !strings.Contains(baseline, "指派使用者: 未指派（版本 0）\n") {
+						t.Fatalf("成功讀取時缺少指派狀態：%s", baseline)
+					}
+					continue
+				}
+				want := baseline
+				if !jsonOutput {
+					want = strings.Replace(baseline, "指派使用者: 未指派（版本 0）\n", "指派使用者: 無法取得\n", 1)
+				}
+				if out.String() != want {
+					t.Fatalf("指派使用者無法取得時，明細或狀態詞不符：\n實際=%s\n預期=%s", out.String(), want)
+				}
+			}
+		})
+	}
+}
+
 func TestMachinesCLIForwardsCanonicalListFilters(t *testing.T) {
 	f := observedOperatorFixture(t)
 	var gotQuery url.Values
@@ -648,7 +713,7 @@ func TestMachinesCLIHumanOutputEscapesTerminalControls(t *testing.T) {
 		}}},
 	}
 	out.Reset()
-	if err := writeMachineDetail(&out, detail, false, "HTTP operator API"); err != nil {
+	if err := writeMachineDetail(&out, detail, false, "HTTP operator API", nil); err != nil {
 		t.Fatal(err)
 	}
 	if strings.ContainsAny(out.String(), "\x1b\r\x07") ||
@@ -700,7 +765,7 @@ func TestMachineDetailCLISaysUnknownWhenLingerWasNeverMeasured(t *testing.T) {
 			}
 
 			var out bytes.Buffer
-			if err := writeMachineDetail(&out, detail, false, "direct store"); err != nil {
+			if err := writeMachineDetail(&out, detail, false, "direct store", nil); err != nil {
 				t.Fatal(err)
 			}
 			got := out.String()
@@ -750,7 +815,7 @@ func TestMachineDetailCLISaysUnknownWhenMemoryWasNeverMeasured(t *testing.T) {
 			}
 
 			var out bytes.Buffer
-			if err := writeMachineDetail(&out, detail, false, "direct store"); err != nil {
+			if err := writeMachineDetail(&out, detail, false, "direct store", nil); err != nil {
 				t.Fatal(err)
 			}
 			got := out.String()
@@ -790,7 +855,7 @@ func TestMachineDetailCLISaysUnknownWhenLoadWasNeverMeasured(t *testing.T) {
 				StateHistory: operator.MachineStateHistoryPage{Items: []operator.MachineStateSpan{}},
 			}
 			var out bytes.Buffer
-			if err := writeMachineDetail(&out, detail, false, "direct store"); err != nil {
+			if err := writeMachineDetail(&out, detail, false, "direct store", nil); err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(out.String(), tt.want) {

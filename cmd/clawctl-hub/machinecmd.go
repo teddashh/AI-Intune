@@ -14,6 +14,7 @@ import (
 	"github.com/teddashh/AI-Intune/internal/operator"
 	"github.com/teddashh/AI-Intune/internal/operatorclient"
 	"github.com/teddashh/AI-Intune/internal/store"
+	"github.com/teddashh/AI-Intune/internal/tailnet"
 )
 
 func cmdMachine(argv []string) {
@@ -35,6 +36,7 @@ type machineCommandDeps struct {
 	checkMaintenance     func(string) error
 	verifyHubStopped     func(context.Context, string) error
 	openDirectDB         func(string) (*store.Store, error)
+	tailnetSource        operator.TailnetSource
 }
 
 func productionMachineCommandDeps() machineCommandDeps {
@@ -49,11 +51,13 @@ func productionMachineCommandDeps() machineCommandDeps {
 		checkMaintenance: rejectDBWhileUpgradeMaintenance,
 		verifyHubStopped: verifyManagedHubStopped,
 		openDirectDB:     openExisting,
+		tailnetSource:    tailnet.NewCache(),
 	}
 }
 
 func runMachineCommandWithDeps(ctx context.Context, argv []string, out, errOut io.Writer, deps machineCommandDeps) error {
 	printUsage := func() {
+		fmt.Fprintln(errOut, "用法：clawctl-hub machine assigned-user --machine 名稱或識別碼 --user 使用者識別碼或none --confirm-name 機器名稱 [--hub-url URL | --db PATH]")
 		fmt.Fprintln(errOut, "用法：clawctl-hub machine channel --machine <name|id> --set canary|stable|none --confirm-name <display_name> [--hub-url URL | --db PATH]")
 		fmt.Fprintln(errOut, "      clawctl-hub machine lifecycle --machine <name|id> [--set active|retired (--preview | --reason REASON --confirm-name NAME)] [--json] [--hub-url URL | --db PATH]")
 		fmt.Fprintln(errOut, "      clawctl-hub machine actions --machine <id> [--json] [--hub-url URL]")
@@ -64,11 +68,14 @@ func runMachineCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 	}
 	if len(argv) == 0 {
 		printUsage()
-		return errors.New("machine: 必須指定 channel、lifecycle、rename、notes、actions、timeline 或 data subcommand")
+		return errors.New("machine: 必須指定 assigned-user、channel、lifecycle、rename、notes、actions、timeline 或 data subcommand")
 	}
 	if argv[0] == "-h" || argv[0] == "--help" {
 		printUsage()
 		return flag.ErrHelp
+	}
+	if argv[0] == "assigned-user" {
+		return runMachineAssignedUserSubcommand(ctx, argv[1:], out, errOut, deps)
 	}
 	if argv[0] == "lifecycle" {
 		return runMachineLifecycleSubcommand(ctx, argv[1:], out, errOut, deps)

@@ -43,7 +43,7 @@
 <thead><tr>
   <th style="width:220px">機器</th><th style="width:120px">Lifecycle / state</th>
   <th style="width:105px">Expected</th><th style="width:115px">Reporting</th>
-  <th style="width:110px">Channel</th><th>Hub 收到的最新證據</th>
+  <th style="width:110px">Channel</th><th>指派使用者</th><th>Hub 收到的最新證據</th>
 </tr></thead>
 <tbody>
 {{range $view.Result.Items}}
@@ -55,13 +55,14 @@
   <td>{{if .Expected}}是{{else}}否{{end}}</td>
   <td>{{triBool .Reporting}}</td>
   <td>{{if .Channel}}{{.Channel}}{{else}}未指派{{end}} <span class="sub">rev {{.ChannelRevision}}</span></td>
+  <td>{{with index $view.AssignedUsers .MachineID}}{{.}}{{else}}無法取得{{end}}</td>
   <td class="small dim">
     check-in：{{if .LastCheckinReceivedAt}}{{ago .LastCheckinReceivedAt}}{{else}}unknown{{end}}<br>
     observation：{{if .LastObservationReceivedAt}}{{ago .LastObservationReceivedAt}}{{else}}unknown{{end}}
   </td>
 </tr>
 {{else}}
-<tr><td colspan="6" class="empty">目前 filter 沒有符合的機器。</td></tr>
+<tr><td colspan="7" class="empty">目前 filter 沒有符合的機器。</td></tr>
 {{end}}
 </tbody>
 </table>

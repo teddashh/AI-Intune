@@ -162,6 +162,8 @@ func (h *hub) operatorRoutes(mux *http.ServeMux) []string {
 		"POST /v1/operator/machines/{id}/notes-preview",
 		"PUT /v1/operator/machines/{id}/notes",
 		"GET /v1/operator/daily-report",
+		"GET /v1/operator/machines/{id}/assigned-user",
+		"PUT /v1/operator/machines/{id}/assigned-user",
 		"POST /v1/operator/deployments/{id}/skip-failed-batch-preview",
 		"POST /v1/operator/deployments/{id}/skip-failed-batches",
 	}
@@ -256,8 +258,10 @@ func (h *hub) operatorRoutes(mux *http.ServeMux) []string {
 	mux.HandleFunc(patterns[88], h.handlePreviewOperatorMachineNotes)
 	mux.HandleFunc(patterns[89], h.handlePutOperatorMachineNotes)
 	mux.HandleFunc(patterns[90], h.handleGetOperatorDailyReport)
-	mux.HandleFunc(patterns[91], h.handlePreviewOperatorDeploymentSkipFailedBatch)
-	mux.HandleFunc(patterns[92], h.handleSkipFailedBatchOperatorDeployment)
+	mux.HandleFunc(patterns[91], h.handleGetOperatorMachineAssignedUser)
+	mux.HandleFunc(patterns[92], h.handlePutOperatorMachineAssignedUser)
+	mux.HandleFunc(patterns[93], h.handlePreviewOperatorDeploymentSkipFailedBatch)
+	mux.HandleFunc(patterns[94], h.handleSkipFailedBatchOperatorDeployment)
 	patterns = append(patterns, "GET /metrics")
 	mux.HandleFunc("GET /metrics", h.handleMetrics)
 	diskClean := len(patterns)
