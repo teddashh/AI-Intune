@@ -887,6 +887,90 @@ func TestJobEvidenceRefusesIndependentEvidenceCreditedToAVerifierThatDidNotProdu
 	}
 }
 
+// JobReadEvidence is the production reader behind Web/CLI/API independent
+// verdicts. A pre-terminal independent failure plus a later Hub-received pass
+// must read as passed here, matching the promotion gate. Mutating LiveFailed
+// freshness is uniquely visible on this path: EvaluateIndependentVerdict is
+// not what JobReadEvidence calls.
+func TestJobReadEvidenceStaleFailureDoesNotLockFreshPass(t *testing.T) {
+	terminalAt := deployTestNow
+	tests := []struct {
+		name   string
+		failAt time.Time
+		passAt time.Time
+		want   IndependentVerdict
+	}{
+		{
+			name:   "before terminal then fresh pass",
+			failAt: terminalAt.Add(-10 * time.Minute),
+			passAt: terminalAt.Add(time.Minute),
+			want:   IndependentPassed,
+		},
+		{
+			name:   "same second as terminal then fresh pass",
+			failAt: terminalAt,
+			passAt: terminalAt.Add(time.Second),
+			want:   IndependentPassed,
+		},
+		{
+			name:   "fresh failure still locks",
+			failAt: terminalAt.Add(time.Second),
+			passAt: terminalAt.Add(2 * time.Second),
+			want:   IndependentFailed,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := newDeployTestStore(t)
+			clock := deployTestNow.Add(-time.Hour)
+			s.nowFn = func() time.Time { return clock }
+			registerDeployMachine(t, s, "machine-a")
+			registerDeployMachine(t, s, "peer-machine")
+			jobID := newJobForDeployTestOnMachine(t, s, "machine-a")
+			setJobDigest(t, s, jobID, verifierTestDigest)
+			if _, err := s.DB().Exec(`INSERT INTO verification_results
+ (verification_id,job_id,machine_id,rule_id,command,exit_code,passed,verified_at)
+ VALUES (?,?,?,?,?,?,?,?)`, "executor-pass", jobID, "machine-a", "health", "true", 0, true,
+				fmtTime(terminalAt)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.DB().Exec(`UPDATE jobs SET state=?,terminal_at=? WHERE job_id=?`,
+				deploy.Succeeded, fmtTime(terminalAt), jobID); err != nil {
+				t.Fatal(err)
+			}
+			verifier, _, err := s.RegisterVerifier(
+				VerifierKindFleetPeerAgent, "peer-verifier-"+test.name, "peer-machine", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			clock = test.failAt
+			fail := independentRequest(verifier.VerifierID, jobID)
+			fail.Passed = false
+			fail.VerifiedAt = test.failAt
+			if err := s.RecordIndependentVerification(fail); err != nil {
+				t.Fatal(err)
+			}
+			clock = test.passAt
+			pass := independentRequest(verifier.VerifierID, jobID)
+			pass.VerifiedAt = test.passAt
+			if err := s.RecordIndependentVerification(pass); err != nil {
+				t.Fatal(err)
+			}
+
+			evidence, err := s.JobReadEvidence(jobID, 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if evidence.IndependentVerdict != test.want || evidence.IndependentLiveProducers != 1 ||
+				len(evidence.Independent) != 2 {
+				t.Fatalf("verdict=%q live=%d rows=%d want %q", evidence.IndependentVerdict,
+					evidence.IndependentLiveProducers, len(evidence.Independent), test.want)
+			}
+		})
+	}
+}
+
 // 這一列是串聯拒絕的產品路徑親手寫的（deploy.go:795-801），除了 producer_id
 // 以外每一欄都沒動，所以拒絕只能歸因於 :675 的 ProducerID == "hub"。
 // hub 臂另外三條都還成立：provenance_recorded 仍是 1、evidence_role 仍是

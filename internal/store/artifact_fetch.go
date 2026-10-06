@@ -241,7 +241,7 @@ func (s *Store) ApplyOperatorArtifactFetch(req OperatorArtifactFetchRequest,
 	// same second writer phase and become durable idempotent decisions.
 	rejectCode := ""
 	if !validArtifactFetchIdentifier(req.Name, 128) || !validArtifactFetchIdentifier(req.Version, 128) ||
-		!validArtifactFetchText(req.Reason, auditMaxReason, false) {
+		!validSingleLineText(req.Reason, auditMaxReason, false) {
 		rejectCode = OperatorCodeArtifactFetchInvalid
 	} else if strings.TrimSpace(req.PreviewDigest) == "" {
 		rejectCode = OperatorCodePreviewRequired
@@ -362,7 +362,7 @@ func operatorArtifactFetchAudit(req OperatorArtifactFetchRequest) AuditEntry {
 	// A malformed reason is still bound by RequestDigest, but must not be copied
 	// into presentation/audit text. Canonical reasons are required for every
 	// accepted fetch and preserved verbatim.
-	if validArtifactFetchText(req.Reason, auditMaxReason, false) {
+	if validSingleLineText(req.Reason, auditMaxReason, false) {
 		audit.Reason = req.Reason
 	} else {
 		audit.Reason = ""
@@ -974,7 +974,7 @@ func (s *Store) SucceedArtifactFetchOperation(operationID, runToken, sha256Hex s
 }
 
 func (s *Store) FailArtifactFetchOperation(operationID, runToken, code, detail string) (ArtifactFetchOperation, error) {
-	if !validArtifactFetchErrorCode(code) || !validArtifactFetchText(detail, ArtifactFetchMaxErrorBytes, false) {
+	if !validArtifactFetchErrorCode(code) || !validSingleLineText(detail, ArtifactFetchMaxErrorBytes, false) {
 		return ArtifactFetchOperation{}, ErrArtifactFetchProgress
 	}
 	tx, err := s.beginWrite(context.Background(), "fail_artifact_fetch_operation")
@@ -1083,7 +1083,7 @@ func validateArtifactFetchRecord(record artifactFetchRecord, storedPhaseRank int
 		!validArtifactFetchRegistryOrigin(op.RegistryOrigin) ||
 		!validArtifactFetchTarballURL(record.TarballURL) ||
 		!validArtifactFetchSHA512(op.SHA512Integrity) ||
-		!validArtifactFetchText(op.EnginesNode, 512, true) ||
+		!validSingleLineText(op.EnginesNode, 512, true) ||
 		!validArtifactFetchDigest(op.IdentityDigest) || !validArtifactFetchDigest(op.PreviewDigest) ||
 		op.MaxBytes <= 0 || op.MaxBytes > MaxArtifactFetchBytes || op.ProgressBytes < 0 ||
 		op.ProgressBytes > op.MaxBytes || op.Attempt < 0 || !validArtifactFetchState(op.State) ||
@@ -1129,7 +1129,7 @@ func validateArtifactFetchRecord(record artifactFetchRecord, storedPhaseRank int
 		if rank < 1 || rank > 3 || op.Attempt < 1 || runTokenValid || op.StartedAt == nil ||
 			op.FinishedAt == nil || op.ResultSHA256 != nil || op.ResultSizeBytes != nil ||
 			op.ErrorCode == nil || !validArtifactFetchErrorCode(*op.ErrorCode) || op.ErrorDetail == nil ||
-			!validArtifactFetchText(*op.ErrorDetail, ArtifactFetchMaxErrorBytes, false) {
+			!validSingleLineText(*op.ErrorDetail, ArtifactFetchMaxErrorBytes, false) {
 			return bad()
 		}
 	}
@@ -1144,7 +1144,7 @@ func validateArtifactFetchPrepared(req OperatorArtifactFetchRequest, prepared Ar
 		!validArtifactFetchRegistryOrigin(prepared.RegistryOrigin) ||
 		!validArtifactFetchTarballURL(prepared.TarballURL) ||
 		!validArtifactFetchSHA512(prepared.SHA512Integrity) ||
-		!validArtifactFetchText(prepared.EnginesNode, 512, true) ||
+		!validSingleLineText(prepared.EnginesNode, 512, true) ||
 		prepared.MaxBytes <= 0 || prepared.MaxBytes > MaxArtifactFetchBytes ||
 		!validArtifactFetchDigest(prepared.CurrentPreviewDigest) {
 		return ErrArtifactFetchInvalid
@@ -1190,13 +1190,13 @@ func validArtifactFetchIdentifier(value string, maxBytes int) bool {
 	return true
 }
 
-func validArtifactFetchText(value string, maxBytes int, allowEmpty bool) bool {
+func validSingleLineText(value string, maxBytes int, allowEmpty bool) bool {
 	if len(value) > maxBytes || !utf8.ValidString(value) || strings.TrimSpace(value) != value ||
 		(!allowEmpty && value == "") {
 		return false
 	}
 	for _, r := range value {
-		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || r == '\u2028' || r == '\u2029' {
 			return false
 		}
 	}
@@ -1252,7 +1252,7 @@ func validArtifactFetchSHA512(value string) bool {
 }
 
 func validArtifactFetchRegistryOrigin(raw string) bool {
-	if !validArtifactFetchText(raw, 2048, false) {
+	if !validSingleLineText(raw, 2048, false) {
 		return false
 	}
 	u, err := url.Parse(raw)
@@ -1263,7 +1263,7 @@ func validArtifactFetchRegistryOrigin(raw string) bool {
 }
 
 func validArtifactFetchTarballURL(raw string) bool {
-	if !validArtifactFetchText(raw, artifact.MaxTarballURLBytes, false) {
+	if !validSingleLineText(raw, artifact.MaxTarballURLBytes, false) {
 		return false
 	}
 	u, err := url.Parse(raw)

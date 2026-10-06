@@ -425,6 +425,7 @@ func TestEvaluateIndependentVerdictAllDistinctWithExactPrecedence(t *testing.T) 
 		{"release mismatch before stale", "2026.9.2", &terminalAt, []IndependentVerdictInput{{RuleID: model.IndependentRuleOpenClawCurrentRelease, ObservedVersion: "2026.9.1", ReceivedAt: before, Passed: true}}, IndependentReleaseMismatch},
 		{"stale before unreported", "2026.9.2", &terminalAt, []IndependentVerdictInput{{RuleID: model.IndependentRuleOpenClawCurrentRelease, ReceivedAt: terminalAt, Passed: true}}, IndependentStale},
 		{"failed before unreported", "2026.9.2", &terminalAt, []IndependentVerdictInput{{RuleID: model.IndependentRuleOpenClawCurrentRelease, ReceivedAt: after, Passed: true}, {ReceivedAt: after, Passed: false}}, IndependentFailed},
+		{"stale failure only", "", &terminalAt, []IndependentVerdictInput{{ObservedDigest: match, ReceivedAt: before, Passed: false}}, IndependentStale},
 		{"release unreported", "2026.9.2", &terminalAt, []IndependentVerdictInput{{RuleID: model.IndependentRuleOpenClawCurrentRelease, ReceivedAt: after, Passed: true}}, IndependentReleaseUnreported},
 		{"passed", "2026.9.2", &terminalAt, []IndependentVerdictInput{{RuleID: model.IndependentRuleOpenClawCurrentRelease, ObservedVersion: "2026.9.2", ReceivedAt: after, Passed: true}}, IndependentPassed},
 		{"unfinished is not stale", "", nil, []IndependentVerdictInput{{ObservedDigest: match, ReceivedAt: before, Passed: false}}, IndependentFailed},
@@ -451,6 +452,54 @@ func TestEvaluateIndependentVerdictAllDistinctWithExactPrecedence(t *testing.T) 
 	if IndependentDigestMismatch == IndependentFailed || IndependentDigestMismatch == IndependentPassed ||
 		EvaluateIndependentVerdict(match, "", &terminalAt, nil) == IndependentPassed {
 		t.Fatal("digest mismatch or absent collapsed into a pass/fail verdict")
+	}
+}
+
+// Stale independent failures cannot describe the job's end state. After a
+// later Hub-received pass, counting them as LiveFailed would keep the job
+// evidence verdict at failed while the promotion gate already reads passed.
+func TestEvaluateIndependentVerdictStaleFailureDoesNotLockFreshPass(t *testing.T) {
+	terminalAt := deployTestNow
+	after := deployTestNow.Add(time.Second)
+	before := deployTestNow.Add(-time.Second)
+	match := verifierTestDigest
+	tests := []struct {
+		name string
+		rows []IndependentVerdictInput
+		want IndependentVerdict
+	}{
+		{
+			name: "before terminal then fresh pass",
+			rows: []IndependentVerdictInput{
+				{ObservedDigest: match, ReceivedAt: before, Passed: false},
+				{ObservedDigest: match, ReceivedAt: after, Passed: true},
+			},
+			want: IndependentPassed,
+		},
+		{
+			name: "same second as terminal then fresh pass",
+			rows: []IndependentVerdictInput{
+				{ObservedDigest: match, ReceivedAt: terminalAt, Passed: false},
+				{ObservedDigest: match, ReceivedAt: after, Passed: true},
+			},
+			want: IndependentPassed,
+		},
+		{
+			name: "fresh failure still outranks a later pass",
+			rows: []IndependentVerdictInput{
+				{ObservedDigest: match, ReceivedAt: after, Passed: false},
+				{ObservedDigest: match, ReceivedAt: after.Add(time.Second), Passed: true},
+			},
+			want: IndependentFailed,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := EvaluateIndependentVerdict(match, "", &terminalAt, test.rows)
+			if got != test.want {
+				t.Fatalf("verdict=%q want %q", got, test.want)
+			}
+		})
 	}
 }
 

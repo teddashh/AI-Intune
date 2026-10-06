@@ -161,7 +161,7 @@ func (s *Store) ApplyOperatorRestoreDrill(req OperatorRestoreDrillRequest) (Oper
 	} else {
 		audit.Subject = "restore drill request"
 	}
-	if validArtifactFetchText(req.Reason, auditMaxReason, false) {
+	if validSingleLineText(req.Reason, auditMaxReason, false) {
 		audit.Reason = req.Reason
 	}
 
@@ -184,7 +184,7 @@ func (s *Store) ApplyOperatorRestoreDrill(req OperatorRestoreDrillRequest) (Oper
 	}
 	code := ""
 	switch {
-	case !validArtifactFetchText(req.Reason, auditMaxReason, false),
+	case !validSingleLineText(req.Reason, auditMaxReason, false),
 		!validArtifactFetchDigest(req.PreviewDigest),
 		!validRestoreDrillPrepared(req.Prepared):
 		code = OperatorCodeRestoreDrillInvalid
@@ -257,7 +257,7 @@ func (s *Store) ReplayOperatorRestoreDrill(req OperatorRestoreDrillRequest) (Ope
 	audit := req.Audit
 	audit.Action, audit.IdempotencyKey, audit.RequestDigest = AuditRestoreDrill, req.IdempotencyKey, req.RequestDigest
 	audit.Subject = "restore drill request"
-	if validArtifactFetchText(req.Reason, auditMaxReason, false) {
+	if validSingleLineText(req.Reason, auditMaxReason, false) {
 		audit.Reason = req.Reason
 	}
 
@@ -437,7 +437,7 @@ func validateRestoreDrillOriginalAudit(tx dbTx, req OperatorRestoreDrillRequest,
 	ok bool, detail string,
 ) (bool, error) {
 	reason := ""
-	if validArtifactFetchText(req.Reason, auditMaxReason, false) {
+	if validSingleLineText(req.Reason, auditMaxReason, false) {
 		reason = req.Reason
 	}
 	var count int
@@ -673,7 +673,7 @@ func (s *Store) SucceedRestoreDrillOperation(id, token string, result RestoreDri
 }
 
 func (s *Store) FailRestoreDrillOperation(id, token, code, detail string) (RestoreDrillOperation, error) {
-	if !validArtifactFetchErrorCode(code) || !validArtifactFetchText(detail, RestoreDrillMaxErrorBytes, false) {
+	if !validArtifactFetchErrorCode(code) || !validSingleLineText(detail, RestoreDrillMaxErrorBytes, false) {
 		return RestoreDrillOperation{}, ErrRestoreDrillInvalidState
 	}
 	tx, err := s.beginWrite(context.Background(), "fail_restore_drill_operation")
@@ -875,7 +875,7 @@ func validRestoreDrillRecord(record restoreDrillRecord) bool {
 			op.StartedAt != nil && op.FinishedAt != nil && op.Machines == nil && op.Expected == nil &&
 			op.LiveExpected == nil && op.NewestCheckinAt == nil && op.DurationMilliseconds == nil &&
 			op.ErrorCode != nil && validArtifactFetchErrorCode(*op.ErrorCode) && op.ErrorDetail != nil &&
-			validArtifactFetchText(*op.ErrorDetail, RestoreDrillMaxErrorBytes, false)
+			validSingleLineText(*op.ErrorDetail, RestoreDrillMaxErrorBytes, false)
 	default:
 		return false
 	}

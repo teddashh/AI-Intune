@@ -809,6 +809,11 @@ func readJobEvidenceVerifiers(tx dbTx, rows []JobVerification) (map[string]Verif
 // readIndependentVerdictCounts aggregates over every independent row of one
 // job, not over the bounded page. A verdict that only saw the first page could
 // call a job passed while an unrendered row reported a digest clash.
+//
+// LiveFailed uses the same Hub received_at freshness window as LiveFresh: a
+// failure at or before terminal_at cannot describe the end state, and must not
+// keep a later fresh pass locked at failed. Digest and release clashes stay
+// counted on every live row, matching the promotion gate.
 func readIndependentVerdictCounts(tx dbTx, jobID, artifactDigest, expectedVersion string,
 	terminalAt *time.Time,
 ) (IndependentVerdictCounts, error) {
@@ -828,7 +833,8 @@ SELECT COUNT(*),
          AND r.observed_version<>? THEN 1 ELSE 0 END),0),
        COALESCE(SUM(CASE WHEN v.revoked_at IS NULL
          AND (?='' OR r.received_at>?) THEN 1 ELSE 0 END),0),
-	   COALESCE(SUM(CASE WHEN v.revoked_at IS NULL AND r.passed=0 THEN 1 ELSE 0 END),0),
+	   COALESCE(SUM(CASE WHEN v.revoked_at IS NULL AND r.passed=0
+         AND (?='' OR r.received_at>?) THEN 1 ELSE 0 END),0),
        COALESCE(SUM(CASE WHEN v.revoked_at IS NULL AND ?<>''
          AND r.rule_id=? AND r.passed=1 AND r.observed_version=''
          AND (?='' OR r.received_at>?) THEN 1 ELSE 0 END),0)
@@ -836,7 +842,7 @@ SELECT COUNT(*),
   JOIN verifiers AS v ON v.verifier_id=r.verifier_id
  WHERE r.job_id=? AND r.evidence_role=?`,
 		artifactDigest, expectedVersion, model.IndependentRuleOpenClawCurrentRelease,
-		expectedVersion, terminal, terminal, expectedVersion,
+		expectedVersion, terminal, terminal, terminal, terminal, expectedVersion,
 		model.IndependentRuleOpenClawCurrentRelease, terminal, terminal,
 		jobID, JobVerificationRoleIndependent).
 		Scan(&counts.Rows, &counts.Live, &counts.LiveProducers, &counts.LiveDigestClashes,

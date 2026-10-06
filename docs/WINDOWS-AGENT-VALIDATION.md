@@ -54,3 +54,10 @@ Hub 的 bootstrap release 保留 Linux amd64／arm64 必要組；同目錄若出
    不記錄任何 token。
 
 遇到失敗時，保留 installer 的失敗步驟。Linux 上的編譯與 `go test` 不是這一步。
+
+## 實機 profile 驗收
+
+以這台已報到的 Windows 預覽一個只含 exact Node runtime 版本的 profile，
+核對 target 為 windows、套件版本與 artifact digest 固定。指派後核對工作單
+回報的 Node／npm 執行驗證（`bin/node.exe`）。這仍需 Windows 實機結果，Linux
+上的打包與交叉編譯不構成實機驗收。

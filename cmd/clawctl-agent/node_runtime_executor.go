@@ -77,13 +77,13 @@ func (e nodeRuntimeExecutor) Run(ctx context.Context, job model.JobResponse) ([]
 	}
 	if samePath(currentRelease, release) {
 		return verifyNodeRuntimeRelease(ctx, d, release, spec.Version, spec.Artifact.SHA256,
-			"node-runtime-current"), nil
+			spec.TargetOS, "node-runtime-current"), nil
 	}
 	if err := setNodeRuntimeCurrent(d, root, release, job.JobID); err != nil {
 		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "activate", "切換 Node runtime current", err)}, nil
 	}
 	verifications := verifyNodeRuntimeRelease(ctx, d, release, spec.Version, spec.Artifact.SHA256,
-		"node-runtime-activate")
+		spec.TargetOS, "node-runtime-activate")
 	if allPassed(verifications) {
 		return verifications, nil
 	}
@@ -111,7 +111,7 @@ func (e nodeRuntimeExecutor) gate(job model.JobResponse) (model.NodeRuntimeSpec,
 		return spec, rejectPrecondition("Node runtime identity 不合法")
 	}
 	if spec.TargetOS != e.targetOS || spec.TargetArch != e.targetArch ||
-		(spec.TargetOS != "linux" && spec.TargetOS != "darwin") ||
+		(spec.TargetOS != "linux" && spec.TargetOS != "darwin" && spec.TargetOS != "windows") ||
 		(spec.TargetArch != "amd64" && spec.TargetArch != "arm64") {
 		return spec, rejectPrecondition("Node runtime target 與 agent 平台不一致")
 	}
@@ -143,7 +143,7 @@ func (e nodeRuntimeExecutor) ensureRelease(ctx context.Context, d execDeps, job 
 ) (*model.JobVerificationRequest, error) {
 	if info, err := os.Lstat(d.fsPath(release)); err == nil {
 		if info.IsDir() && allPassed(verifyNodeRuntimeRelease(ctx, d, release, spec.Version,
-			spec.Artifact.SHA256, "node-runtime-stage")) {
+			spec.Artifact.SHA256, spec.TargetOS, "node-runtime-stage")) {
 			return nil, nil
 		}
 		if ctx.Err() != nil {
@@ -190,11 +190,11 @@ func (e nodeRuntimeExecutor) ensureRelease(ctx context.Context, d execDeps, job 
 		return nodeRuntimeFailure(d, "stage", "展開 Node runtime bundle", err), nil
 	}
 	marker := filepath.Join(payload, nodeRuntimeArtifactMarker)
-	if err := atomicWriteFile(d.fsPath(marker), []byte("sha256:"+spec.Artifact.SHA256+"\n"), 0o600); err != nil {
+	if err := writeNodeRuntimeMarker(d.fsPath(marker), []byte("sha256:"+spec.Artifact.SHA256+"\n")); err != nil {
 		return nodeRuntimeFailure(d, "stage", "記錄 Node runtime artifact identity", err), nil
 	}
 	checks := verifyNodeRuntimeRelease(ctx, d, payload, spec.Version, spec.Artifact.SHA256,
-		"node-runtime-stage")
+		spec.TargetOS, "node-runtime-stage")
 	if !allPassed(checks) {
 		failure := checks[0]
 		for _, check := range checks {
@@ -337,7 +337,8 @@ func nodeRuntimeArchivePath(raw string) (name, platform, relative string, err er
 	parts := strings.Split(name, "/")
 	if parts[0] != "node-runtime" || (len(parts) > 1 &&
 		parts[1] != "linux-amd64" && parts[1] != "linux-arm64" &&
-		parts[1] != "darwin-amd64" && parts[1] != "darwin-arm64") {
+		parts[1] != "darwin-amd64" && parts[1] != "darwin-arm64" &&
+		parts[1] != "windows-amd64" && parts[1] != "windows-arm64") {
 		return "", "", "", fmt.Errorf("Node runtime bundle 路徑超出 layout：%s", name)
 	}
 	if len(parts) >= 2 {
@@ -366,21 +367,13 @@ func nodeRuntimePathHasSymlinkAncestor(relative string, symlinks map[string]stru
 	return false
 }
 
-func verifyNodeRuntimeRelease(ctx context.Context, d execDeps, release, version, artifactSHA256,
+func verifyNodeRuntimeRelease(ctx context.Context, d execDeps, release, version, artifactSHA256, targetOS,
 	rulePrefix string,
 ) []model.JobVerificationRequest {
 	markerLogical := filepath.Join(release, nodeRuntimeArtifactMarker)
 	markerPath := d.fsPath(markerLogical)
-	markerInfo, err := os.Lstat(markerPath)
-	if err != nil || !markerInfo.Mode().IsRegular() || markerInfo.Mode().Perm() != 0o600 || markerInfo.Size() != 72 {
-		if err == nil {
-			err = errors.New("artifact identity marker 不是 0600 regular file")
-		}
-		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, rulePrefix+"-artifact",
-			"cat "+markerLogical, err)}
-	}
-	marker, err := os.ReadFile(markerPath)
 	wantMarker := "sha256:" + artifactSHA256 + "\n"
+	marker, err := readPrivateRegularFile(markerPath)
 	markerPassed := err == nil && string(marker) == wantMarker
 	if err == nil && !markerPassed {
 		err = errors.New("artifact identity marker 與工作單 digest 不符")
@@ -390,12 +383,13 @@ func verifyNodeRuntimeRelease(ctx context.Context, d execDeps, release, version,
 	if !markerPassed {
 		return results
 	}
-	nodeLogical := filepath.Join(release, "bin", "node")
+	nodeLogical := filepath.Join(release, nodeRuntimeNodeRelative(targetOS))
 	npmLogical := filepath.Join(release, "lib", "node_modules", "npm", "bin", "npm-cli.js")
 	nodePath, npmPath := d.fsPath(nodeLogical), d.fsPath(npmLogical)
-	if info, err := os.Lstat(nodePath); err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+	if info, err := os.Lstat(nodePath); err != nil || !info.Mode().IsRegular() ||
+		(runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0) {
 		if err == nil {
-			err = errors.New("bin/node 不是可執行 regular file")
+			err = errors.New(nodeRuntimeNodeRelative(targetOS) + " 不是可執行 regular file")
 		}
 		return append(results, *nodeRuntimeFailure(d, rulePrefix+"-node", nodeLogical+" --version", err))
 	}
@@ -474,6 +468,26 @@ func nodeRuntimeFailure(d execDeps, rule, command string, err error) *model.JobV
 	return &result
 }
 
+func nodeRuntimeNodeRelative(targetOS string) string {
+	if targetOS == "windows" {
+		return filepath.Join("bin", "node.exe")
+	}
+	return filepath.Join("bin", "node")
+}
+
+// writeNodeRuntimeMarker keeps the fsync'd 0600 write on unix; Windows needs
+// the owner-only ACL that writePrivateFile applies.
+func writeNodeRuntimeMarker(path string, body []byte) error {
+	if runtime.GOOS == "windows" {
+		return writePrivateFile(path, body)
+	}
+	return atomicWriteFile(path, body, 0o600)
+}
+
+func nodeRuntimeCurrentUsesSymlink() bool {
+	return runtime.GOOS != "windows"
+}
+
 func readNodeRuntimeCurrent(d execDeps, root, releases string) (nodeRuntimeActivation, string, error) {
 	current := filepath.Join(root, "current")
 	info, err := os.Lstat(d.fsPath(current))
@@ -483,12 +497,24 @@ func readNodeRuntimeCurrent(d execDeps, root, releases string) (nodeRuntimeActiv
 	if err != nil {
 		return nodeRuntimeActivation{}, "", err
 	}
-	if info.Mode()&os.ModeSymlink == 0 {
-		return nodeRuntimeActivation{}, "", errors.New("current 不是 symlink")
-	}
-	target, err := os.Readlink(d.fsPath(current))
-	if err != nil {
-		return nodeRuntimeActivation{}, "", err
+	var target string
+	if nodeRuntimeCurrentUsesSymlink() {
+		if info.Mode()&os.ModeSymlink == 0 {
+			return nodeRuntimeActivation{}, "", errors.New("current 不是 symlink")
+		}
+		target, err = os.Readlink(d.fsPath(current))
+		if err != nil {
+			return nodeRuntimeActivation{}, "", err
+		}
+	} else {
+		body, err := readPrivateRegularFile(d.fsPath(current))
+		if err != nil {
+			return nodeRuntimeActivation{}, "", err
+		}
+		target = strings.TrimSpace(string(body))
+		if target == "" || strings.ContainsAny(target, "\n\r") {
+			return nodeRuntimeActivation{}, "", errors.New("current 指標不合法")
+		}
 	}
 	logicalTarget := target
 	if !filepath.IsAbs(logicalTarget) {
@@ -512,12 +538,23 @@ func readNodeRuntimeCurrent(d execDeps, root, releases string) (nodeRuntimeActiv
 
 func setNodeRuntimeCurrent(d execDeps, root, release, jobID string) error {
 	current := filepath.Join(root, "current")
-	if info, err := os.Lstat(d.fsPath(current)); err == nil && info.Mode()&os.ModeSymlink == 0 {
-		return errors.New("current 不是 symlink")
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+	if info, err := os.Lstat(d.fsPath(current)); err == nil {
+		if nodeRuntimeCurrentUsesSymlink() && info.Mode()&os.ModeSymlink == 0 {
+			return errors.New("current 不是 symlink")
+		}
+		if !nodeRuntimeCurrentUsesSymlink() && !info.Mode().IsRegular() {
+			return errors.New("current 不是 private regular file")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	target := filepath.Join("releases", filepath.Base(release))
+	if !nodeRuntimeCurrentUsesSymlink() {
+		if err := writePrivateFile(d.fsPath(current), []byte(target+"\n")); err != nil {
+			return err
+		}
+		return syncNodeRuntimeDirectory(d.fsPath(root))
+	}
 	tmp := current + ".tmp-" + safeJobID(jobID)
 	_ = os.Remove(d.fsPath(tmp))
 	if err := os.Symlink(target, d.fsPath(tmp)); err != nil {
@@ -534,13 +571,17 @@ func rollbackNodeRuntimeCurrent(d execDeps, root string, previous nodeRuntimeAct
 	current := filepath.Join(root, "current")
 	var err error
 	if previous.existed {
-		tmp := current + ".rollback-" + safeJobID(jobID)
-		_ = os.Remove(d.fsPath(tmp))
-		if err = os.Symlink(previous.target, d.fsPath(tmp)); err == nil {
-			err = os.Rename(d.fsPath(tmp), d.fsPath(current))
-		}
-		if err != nil {
+		if nodeRuntimeCurrentUsesSymlink() {
+			tmp := current + ".rollback-" + safeJobID(jobID)
 			_ = os.Remove(d.fsPath(tmp))
+			if err = os.Symlink(previous.target, d.fsPath(tmp)); err == nil {
+				err = os.Rename(d.fsPath(tmp), d.fsPath(current))
+			}
+			if err != nil {
+				_ = os.Remove(d.fsPath(tmp))
+			}
+		} else {
+			err = writePrivateFile(d.fsPath(current), []byte(previous.target+"\n"))
 		}
 	} else {
 		err = os.Remove(d.fsPath(current))

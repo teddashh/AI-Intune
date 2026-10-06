@@ -529,7 +529,10 @@ func EvaluateIndependentVerdict(artifactDigest, expectedVersion string, terminal
 		if fresh {
 			counts.LiveFresh++
 		}
-		if !row.Passed {
+		// Pre-terminal failures cannot describe the end state. Counting them as
+		// LiveFailed lets a later fresh pass still read as failed, which is the
+		// lock the promotion gate already refuses.
+		if !row.Passed && fresh {
 			counts.LiveFailed++
 		}
 		if fresh && expectedVersion != "" &&

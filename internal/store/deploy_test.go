@@ -1199,6 +1199,95 @@ func TestDarwinNodeRuntimeCannotSucceedFromSelfAttestedEvidence(t *testing.T) {
 	}
 }
 
+func TestWindowsNodeRuntimeCannotSucceedFromSelfAttestedEvidence(t *testing.T) {
+	s := newDeployTestStore(t)
+	registerDeployMachine(t, s, "windows-node")
+	spec := `{"kind":"node-runtime","version":"24.15.0","target_os":"windows","target_arch":"amd64","bundle_layout":"node-runtime-bundle:v1","artifact":{"sha256":"` + strings.Repeat("a", 64) + `","size":1,"url":"/v1/artifacts/` + strings.Repeat("a", 64) + `"}}`
+	tx, err := s.DB().Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	desiredID, revision, err := createDesiredStateTx(tx, "machine", "windows-node", "node-runtime", "node-runtime",
+		spec, "operator", deployTestNow)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	jobID, err := createManagedJobTx(tx, "windows-node", desiredID, revision, NewJob{
+		ArtifactDigest: "sha256:" + strings.Repeat("a", 64),
+	}, deployTestNow)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.ClaimJob(jobID, "windows-node", deployTestNow, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []deploy.Event{deploy.Start, deploy.FinishWork} {
+		if _, err := s.AdvanceJobByAgent(jobID, "windows-node", token, event, deployTestNow); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.RecordVerification(jobID, "windows-node", token, "scheduled-task",
+		`Get-ScheduledTask -TaskName clawctl-agent`,
+		0, "State = Ready", "", true, deployTestNow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); !errors.Is(err, ErrNoVerification) {
+		t.Fatalf("self-attested Windows Node evidence error=%v want ErrNoVerification", err)
+	}
+	job, err := s.JobForMachine(jobID, "windows-node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.State == deploy.Succeeded {
+		t.Fatal("Windows Node runtime succeeded without Node/npm runtime measurements")
+	}
+	nodePath := `C:\Users\operator\.local\share\clawctl\node-runtime\releases\24.15.0\bin\node.exe`
+	if err := s.RecordVerification(jobID, "windows-node", token, "node-runtime-activate-node",
+		nodePath+" --version", 0, "v24.15.0\n", "", true, deployTestNow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); !errors.Is(err, ErrNoVerification) {
+		t.Fatalf("missing npm measurement error=%v want ErrNoVerification", err)
+	}
+	if err := s.RecordVerification(jobID, "windows-node", token, "node-runtime-activate-npm",
+		nodePath+` C:\Users\operator\.local\share\clawctl\node-runtime\releases\24.15.0\lib\node_modules\npm\bin\npm-cli.js --version`,
+		0, "11.7.0\n", "", true, deployTestNow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); !errors.Is(err, ErrNoVerification) {
+		t.Fatalf("missing exact artifact measurement error=%v want ErrNoVerification", err)
+	}
+	if err := s.RecordVerification(jobID, "windows-node", token, "node-runtime-activate-artifact",
+		`cat C:\Users\operator\.local\share\clawctl\node-runtime\releases\24.15.0\.clawctl-artifact-sha256`,
+		0, "sha256:"+strings.Repeat("b", 64)+"\n", "", true, deployTestNow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); !errors.Is(err, ErrNoVerification) {
+		t.Fatalf("wrong artifact measurement error=%v want ErrNoVerification", err)
+	}
+	for _, evidence := range []struct {
+		rule, command, stdout string
+	}{
+		{"node-runtime-current-artifact", `cat C:\Users\operator\.local\share\clawctl\node-runtime\releases\24.15.0\.clawctl-artifact-sha256`, "sha256:" + strings.Repeat("a", 64) + "\n"},
+		{"node-runtime-current-node", nodePath + " --version", "v24.15.0\n"},
+		{"node-runtime-current-npm", nodePath + ` C:\Users\operator\.local\share\clawctl\node-runtime\releases\24.15.0\lib\node_modules\npm\bin\npm-cli.js --version`, "11.7.0\n"},
+	} {
+		if err := s.RecordVerification(jobID, "windows-node", token, evidence.rule,
+			evidence.command, 0, evidence.stdout, "", true, deployTestNow); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if state, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); err != nil || state != deploy.Succeeded {
+		t.Fatalf("measured Windows Node runtime state=%q error=%v", state, err)
+	}
+}
+
 // ⚠⚠ 守住只看見一筆通過就忽略同張單的失敗證據，錯誤宣告 succeeded 的錯。
 func TestMarkSucceededIfVerifiedRejectsAnyFailedResult(t *testing.T) {
 	s := newDeployTestStore(t)
