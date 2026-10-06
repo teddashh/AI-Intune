@@ -29,7 +29,7 @@ func msgsOf(j Judgement, kind string) string {
 	return b.String()
 }
 
-// ⚠⚠ 這是 operator 要的那個狀態機的核心測試：sampleagent2 的 watcher 檔案是新的
+// ⚠⚠ 這是 Ted 要的那個狀態機的核心測試：sampleagent2 的 watcher 檔案是新的
 // （它活得好好的），但它在喊 baseline_hash_mismatch —— 這台必須是 Degraded。
 // 在這個功能之前，這台是全綠的。
 func TestActiveNotOKEventDegradesEvenWhenArtifactIsFresh(t *testing.T) {

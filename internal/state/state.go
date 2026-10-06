@@ -920,7 +920,7 @@ func HumanDur(d time.Duration) string { return humanDur(d) }
 //
 // ⚠⚠ 這裡最重要的一句話：**這個 finding 只要條件還在就會一直在**。
 // 它不是「今天新出現了 N 次」，是「現在這台機器上有一個沒有被解決的狀況」。
-// operator 的原話是「control panel 是一個狀態機，我們永遠就能看到一些 error 在那裏」——
+// Ted 的原話是「control panel 是一個狀態機，我們永遠就能看到一些 error 在那裏」——
 // 而 clawctl 整台引擎本來建立在**變化偵測**上，一個穩定地失敗的東西
 // 在變化偵測裡是靜止的（實測 sampleagent2 八天每小時 48/48/49/49/48/48/49，完全平的）。
 // 所以這一段刻意不看「比上次多了幾次」，只看「現在有沒有」。
