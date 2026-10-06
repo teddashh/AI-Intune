@@ -14,11 +14,11 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 # sqlite 用 modernc.org/sqlite（純 Go），就是為了這個。
 BUILD := CGO_ENABLED=0 $(GO) build -buildvcs=false -trimpath -ldflags "$(LDFLAGS)"
 
-.PHONY: all build hub agent agent-bundles agent-bundles-darwin test test-go test-ops vet fmt clean probe cross cross-darwin
+.PHONY: all build hub agent operator agent-bundles agent-bundles-darwin test test-go test-ops vet fmt clean probe cross cross-darwin
 
 all: build
 
-build: hub agent
+build: hub agent operator
 
 hub:
 	@mkdir -p build
@@ -27,6 +27,10 @@ hub:
 agent:
 	@mkdir -p build
 	$(BUILD) -o build/clawctl-agent ./cmd/clawctl-agent
+
+operator:
+	@mkdir -p build
+	$(BUILD) -o build/clawctl-operator ./cmd/clawctl-operator
 
 # 機隊是多台 Linux 主機，x86_64 與 aarch64 都有。
 cross:

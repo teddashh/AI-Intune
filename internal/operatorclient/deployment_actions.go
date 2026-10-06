@@ -487,7 +487,8 @@ var deploymentActionContinueBlockers = map[string]int{
 	"deployment_not_paused": 0, "nonterminal_jobs": 1, "no_opened_batch": 2,
 	"next_batch_empty": 3, "invalid_material": 4, "stable_promotion_locked": 5,
 	"active_resource_deployment": 6, "control_revision_exhausted": 7,
-	"material_unavailable": 8, "material_identity_changed": 8,
+	"failed_batch_requires_explicit_skip": 8,
+	"material_unavailable":                9, "material_identity_changed": 9,
 }
 
 var deploymentActionRetryBlockers = map[string]int{

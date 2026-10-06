@@ -74,8 +74,10 @@ type deploymentPage struct {
 	CanarySilent     []rollout.SilentFailure
 	Independent      deploymentIndependentSummary
 	Continue         deploymentActionEligibility
+	SkipFailedBatch  deploymentActionEligibility
 	Retry            deploymentActionEligibility
 	Abandon          deploymentActionEligibility
+	Rollout          rollout.CanaryAssessment
 }
 
 // deploymentIndependentSummary is the deployment's own cross-domain line. It
@@ -305,13 +307,38 @@ func (s *Server) deployment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	dp.Independent = deploymentIndependentFromSafe(detail.Independent)
+	dp.Rollout = canaryAssessment(detail)
 	dp.Continue = deploymentActionView("continue", detail.Actions.Continue)
+	dp.SkipFailedBatch = deploymentActionView("skip_failed_batch", detail.Actions.SkipFailedBatch)
 	dp.Retry = deploymentActionView("retry", detail.Actions.Retry)
 	dp.Abandon = deploymentActionView("abandon", detail.Actions.Abandon)
 	s.render(w, r, "deployment.html", page{
 		Title: "部署 " + short(detail.Item.DeploymentID, 8), Nav: "deployments-detail",
 		Now: now.Local().Format("2006-01-02 15:04"), Deployment: dp,
 	})
+}
+
+func canaryAssessment(detail operator.DeploymentDetailResult) rollout.CanaryAssessment {
+	in := rollout.CanaryInput{
+		State: detail.Item.State, OpenedBatch: detail.Item.OpenedBatch,
+		TotalBatches: detail.Item.TotalBatches, BatchSize: detail.Item.BatchSize,
+		PauseAfterCanary: detail.Item.PauseAfterCanary,
+	}
+	for _, target := range detail.Targets {
+		machine := rollout.CanaryMachine{
+			MachineID: target.MachineID, DisplayName: target.DisplayName, BatchNo: target.BatchNo,
+			Excluded: target.ExcludedReason != nil,
+			Opened:   target.JobID != nil && *target.JobID != "",
+		}
+		if target.JobState != nil {
+			machine.JobState = *target.JobState
+		}
+		if target.Independent != nil {
+			machine.IndependentVerdict = target.Independent.Verdict
+		}
+		in.Targets = append(in.Targets, machine)
+	}
+	return rollout.AssessCanary(in)
 }
 
 func deploymentTargetFromSafe(target operator.DeploymentTargetSummary) deploymentTargetRow {

@@ -1,0 +1,23 @@
+# Example Cloudflare Tunnel config for clawctl-hub agent-plane experiments.
+#
+# Prefer the dashboard "token" install (CLOUDFLARE_TUNNEL_TOKEN) instead of
+# committing credentials. If you use a config file, keep credentials JSON
+# outside git (chmod 600) and point credentials-file at it.
+#
+# Replace 100.64.0.12:8787 with THIS host's CLAWCTL_LISTEN value.
+# Hub only binds that Tailscale IP — do not use 127.0.0.1 or localhost here
+# unless you have also changed Hub to listen there (it currently refuses).
+
+tunnel: <TUNNEL_UUID>
+credentials-file: /etc/cloudflared/<TUNNEL_UUID>.json
+
+ingress:
+  # Experimental public agent ingress. Agents may use https://hub.example.com
+  # as hub_url; machine bearer routes do not pin Host today.
+  # Operator UI at this hostname will fail Host authority + LocalAPI WhoIs.
+  - hostname: hub.example.com
+    service: http://100.64.0.12:8787
+    originRequest:
+      # Do not invent X-Forwarded-* identity; Hub ignores those headers for auth.
+      noTLSVerify: false
+  - service: http_status:404

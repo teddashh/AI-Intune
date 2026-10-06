@@ -32,6 +32,7 @@ func HTTPError(err error) (status int, code, detail string) {
 		store.OperatorCodeEnrollTokenNotPending, store.OperatorCodeDeploymentNotPaused,
 		store.OperatorCodeDeploymentActiveJobs, store.OperatorCodeDeploymentNoRetryTargets,
 		store.OperatorCodeDeploymentNoIncludedTargets, store.OperatorCodeDeploymentPromotionBlocked,
+		store.OperatorCodeDeploymentContinueRefused,
 		store.OperatorCodeArtifactFetchActive:
 		status = http.StatusConflict
 	case store.OperatorCodeMachineRenameUnchanged, store.OperatorCodeMachineRenameNameTaken,

@@ -1,0 +1,106 @@
+# clawctl-hub on any Linux + Docker host (not Oracle-specific).
+#
+# HARD CONSTRAINT (do not "fix" this with 0.0.0.0 / 127.0.0.1):
+#   clawctl-hub --listen MUST be a canonical literal Tailscale node IP:port.
+#   operatorDestinationFromListen / ParseListen reject wildcard, loopback,
+#   LAN/public IPs, and hostnames. Operator identity is Tailscale LocalAPI
+#   WhoIsForIP on Request.RemoteAddr — Hub does NOT trust X-Forwarded-*.
+#
+# Therefore this compose file uses network_mode: host so the container can
+# bind the host's Tailscale IP and reach /var/run/tailscale/tailscaled.sock.
+#
+# Quick start (on a small VPS that already joined your free Tailscale tailnet):
+#   1. cp ops/docker/hub.env.example ops/docker/hub.env
+#   2. Set CLAWCTL_LISTEN=$(tailscale ip -4):8787 and capability prefix
+#   3. docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env up -d
+#   4. Open http://$CLAWCTL_LISTEN/ from an authorized tailnet device
+#
+# Optional Cloudflare Tunnel profile is for agent-plane experiments only.
+# It does NOT make the operator UI work on a public hostname today.
+
+name: clawctl
+
+services:
+  hub:
+    build:
+      context: ../..
+      dockerfile: ops/docker/Dockerfile
+      args:
+        VERSION: ${CLAWCTL_VERSION:-dev}
+    image: clawctl-hub:${CLAWCTL_VERSION:-local}
+    container_name: clawctl-hub
+    restart: unless-stopped
+    # Required: bind host Tailscale IP + share host routes to LocalAPI peers.
+    network_mode: host
+    # Pass secrets/config via: docker compose --env-file ops/docker/hub.env ...
+    # (do not commit hub.env). Values below are injected into the container.
+    environment:
+      # Compose substitutes from the shell / --env-file passed to `docker compose`.
+      CLAWCTL_LISTEN: ${CLAWCTL_LISTEN:?set CLAWCTL_LISTEN to host Tailscale IP:8787}
+      CLAWCTL_OPERATOR_CAPABILITY_PREFIX: ${CLAWCTL_OPERATOR_CAPABILITY_PREFIX:?set capability prefix}
+      CLAWCTL_DB: /var/lib/clawctl/clawctl.sqlite
+      CLAWCTL_REPORT_STAMP: /var/lib/clawctl/last-report.stamp
+      CLAWCTL_PUBLIC_URL: ${CLAWCTL_PUBLIC_URL:-}
+      CLAWCTL_NOTIFY_CMD: ${CLAWCTL_NOTIFY_CMD:-}
+      CLAWCTL_REPORT_AT: ${CLAWCTL_REPORT_AT:-08:00}
+      CLAWCTL_REPORT_PING_URL: ${CLAWCTL_REPORT_PING_URL:-}
+      CLAWCTL_REPORT_PING_FAIL_URL: ${CLAWCTL_REPORT_PING_FAIL_URL:-}
+      # Optional object storage. Empty values keep local artifact files.
+      # See docs/DEPLOY-OSS.md. Do not commit hub.env.
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      R2_REGION: ${R2_REGION:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-}
+    volumes:
+      # Named volume must be writable by distroless nonroot (uid 65532).
+      # If SQLite open fails with permission denied:
+      #   docker run --rm -v clawctl-data:/data busybox chown -R 65532:65532 /data
+      - clawctl-data:/var/lib/clawctl
+      # Operator auth: LocalAPI WhoIs. If Hub returns AUTH_SOURCE_UNAVAILABLE,
+      # fix socket permissions for the container UID (distroless nonroot=65532)
+      # or prefer the host systemd install (ops/install-hub.sh).
+      - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock:ro
+    # Type=notify is a systemd concern; without NOTIFY_SOCKET Hub skips sd_notify.
+    healthcheck:
+      # Distroless has no shell/curl; use the binary's own HTTP via a tiny
+      # busybox sidecar is overkill — probe from the host instead:
+      #   curl -fsS "http://${CLAWCTL_LISTEN}/healthz"
+      disable: true
+
+  # Optional: Cloudflare Tunnel sidecar (profile "tunnel").
+  #
+  # LIMITS (read before enabling):
+  # - Operator UI still requires browsing http://<Tailscale-IP>:8787 with
+  #   app-cap grants. A public hostname will fail Host pinning and WhoIs.
+  # - Agent bearer routes do not pin Host today, so a tunnel that forwards to
+  #   http://<CLAWCTL_LISTEN> can be used for experimental public agent ingress.
+  # - Do NOT claim Cloudflare Access replaces Tailscale operator auth yet.
+  cloudflared:
+    profiles: ["tunnel"]
+    image: cloudflare/cloudflared:latest
+    container_name: clawctl-cloudflared
+    restart: unless-stopped
+    network_mode: host
+    # Prefer a token from the Cloudflare Zero Trust dashboard (no config file
+    # with secrets in git). Alternatively mount cloudflared.yml.
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN when using profile tunnel}
+    # If you use a config file instead of a token:
+    # volumes:
+    #   - ./cloudflared.yml:/etc/cloudflared/config.yml:ro
+    # command: ["tunnel", "--config", "/etc/cloudflared/config.yml", "run"]
+
+volumes:
+  clawctl-data:
+    name: clawctl-data

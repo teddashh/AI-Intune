@@ -16,3 +16,6 @@ node_modules/
 __pycache__/
 .venv/
 .DS_Store
+
+# Docker Hub env (secrets / Tailscale listen) — never commit
+ops/docker/hub.env

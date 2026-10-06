@@ -23,8 +23,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/blobstore"
 	"github.com/teddashh/AI-Intune/internal/expect"
 	"github.com/teddashh/AI-Intune/internal/ledgerlock"
+	"github.com/teddashh/AI-Intune/internal/objectref"
 	"github.com/teddashh/AI-Intune/internal/operator"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/operatorendpoint"
@@ -58,6 +60,10 @@ type hub struct {
 	// Machine download routes 只從這裡讀；只有受 admin 保護的 operator
 	// artifact-intake worker 會依固定 policy 連 production registry。
 	artifactsDir string
+
+	// blobs 是選擇性的 R2/S3 耐久副本。nil 代表沿用本機 artifacts 目錄，
+	// 不建立 object_blobs 列。有設定時，SQLite 只留 digest 與 object key。
+	blobs blobstore.Backend
 
 	// drillStamp：上一次還原演練蓋的章（restoredrill.go）。空字串 = 不看。
 	drillStamp string
@@ -398,7 +404,7 @@ func runRollbackCompatibility(argv []string, out io.Writer) error {
 
 func serve(argv []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("listen", "127.0.0.1:8770", "監聽位址")
+	addr := fs.String("listen", "127.0.0.1:8770", "監聽位址（literal Tailscale IP:port；未指定時讀 $CLAWCTL_LISTEN）")
 	dbPath := fs.String("db", defaultDB(), "SQLite 檔位置")
 	hubHost := fs.String("hub-host", hostname(), "這台的名字；用來偵測 Hub 是不是裝在它自己管的機器上")
 	notify := fs.String("notify-cmd", os.Getenv("CLAWCTL_NOTIFY_CMD"), "早報要餵給哪個指令（全文走 stdin）")
@@ -412,6 +418,11 @@ func serve(argv []string) {
 	operatorCapabilityPrefix := fs.String("operator-capability-prefix", os.Getenv("CLAWCTL_OPERATOR_CAPABILITY_PREFIX"),
 		"Tailscale grants app capability 前綴（<owned-domain>/cap/<application>）")
 	_ = fs.Parse(argv)
+	listenSet := false
+	fs.Visit(func(f *flag.Flag) { listenSet = listenSet || f.Name == "listen" })
+	if !listenSet {
+		*addr = serveListenDefault()
+	}
 	if err := rejectUnexpectedServePositionals(fs.Args()); err != nil {
 		log.Fatal(err)
 	}
@@ -437,6 +448,10 @@ func serve(argv []string) {
 	operatorBase, why := publicBase(*addr)
 	if why != "" {
 		log.Fatalf("operator console 位址設定不合法：%s", why)
+	}
+	objectBlobs, objectBlobSummary, err := blobstore.FromEnv(os.Getenv)
+	if err != nil {
+		log.Fatalf("object storage 設定不合法：%v", err)
 	}
 	// Own the exact configured address before opening/migrating SQLite. A
 	// syntactically valid 100.x address can belong to another tailnet peer; if
@@ -484,8 +499,12 @@ func serve(argv []string) {
 		StampPath:  drillStampPath(*dbPath),
 		Live:       st,
 	})
+	if objectBlobs != nil {
+		operatorService.SetArtifactBlobPublisher(objectref.Publisher{Backend: objectBlobs, Store: st})
+		log.Printf("object storage: %s", objectBlobSummary)
+	}
 	h := &hub{
-		store: st, tailnet: tailnetCache, artifactsDir: artifactsDir, operatorService: operatorService, publicURL: operatorBase,
+		store: st, tailnet: tailnetCache, artifactsDir: artifactsDir, blobs: objectBlobs, operatorService: operatorService, publicURL: operatorBase,
 		hubHost:   *hubHost,
 		startedAt: time.Now(), drillStamp: drillStampPath(*dbPath),
 		notifyCmd: *notify, reportAt: *reportAt, reportStamp: *stamp,
@@ -609,6 +628,17 @@ func serve(argv []string) {
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutCtx)
+}
+
+// serveListenDefault returns the --listen flag default: CLAWCTL_LISTEN when
+// set, otherwise the historical fail-closed loopback placeholder (still
+// rejected by ParseListen before the DB opens). Docker/distroless images have
+// no shell to expand ${CLAWCTL_LISTEN} in CMD, so the binary must read env.
+func serveListenDefault() string {
+	if v := os.Getenv("CLAWCTL_LISTEN"); v != "" {
+		return v
+	}
+	return "127.0.0.1:8770"
 }
 
 func operatorDestinationFromListen(listen string) (netip.Addr, error) {

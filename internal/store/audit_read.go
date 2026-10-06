@@ -43,6 +43,7 @@ var allAuditActions = [...]AuditAction{
 	AuditDeploymentCreate,
 	AuditDeploymentRetry,
 	AuditDeploymentContinue,
+	AuditDeploymentSkipFailedBatch,
 	AuditDeploymentAbandon,
 	AuditArtifactFetch,
 	AuditCatalogManifest,

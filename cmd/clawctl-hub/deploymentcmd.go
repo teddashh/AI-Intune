@@ -237,7 +237,7 @@ func runDeploymentPreviewCommand(ctx context.Context, argv []string, out, errOut
 	channel := fs.String("channel", "", "canary 或 stable")
 	version := fs.String("version", "", "OpenClaw 版本")
 	artifactSHA := fs.String("artifact", "", "指定 artifact SHA-256（64 個小寫 hex）")
-	batch := fs.Int("batch", operator.DefaultDeploymentBatchSize, "每批台數（1 到 5）")
+	batch := fs.Int("batch", operator.DefaultDeploymentBatchSize, "後續每批台數（1 到 5）。第一批永遠是 1 台；省略或 1 代表後面也是 1 台")
 	timeout := fs.Int("timeout", operator.DefaultDeploymentTimeout, "執行逾時（秒）")
 	irreversible := fs.Bool("irreversible", false, "失敗不可逆")
 	if err := fs.Parse(argv); err != nil {
@@ -691,7 +691,7 @@ func parseDeploymentMutationCommand(argv []string, errOut io.Writer) (deployment
 	channel := fs.String("channel", "", "create 的 canary 或 stable channel")
 	version := fs.String("version", "", "create 的 OpenClaw 版本")
 	artifactSHA := fs.String("artifact", "", "create 指定 artifact SHA-256（64 個小寫 hex）")
-	batch := fs.Int("batch", operator.DefaultDeploymentBatchSize, "create 每批台數（1 到 5）")
+	batch := fs.Int("batch", operator.DefaultDeploymentBatchSize, "create 後續每批台數（1 到 5）。第一批永遠是 1 台；省略或 1 代表後面也是 1 台")
 	timeout := fs.Int("timeout", operator.DefaultDeploymentTimeout, "create 執行逾時（秒）")
 	irreversible := fs.Bool("irreversible", false, "create 失敗不可逆")
 	confirmChannel := fs.String("confirm-channel", "", "逐字確認 canary 或 stable channel")

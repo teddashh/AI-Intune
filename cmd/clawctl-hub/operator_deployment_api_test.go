@@ -160,8 +160,9 @@ func TestOperatorDeploymentCreateRequiresEveryPlanningFieldBeforeLedger(t *testi
 		"preview_digest": preview.PreviewDigest, "confirm_channel": "canary",
 		"confirm_version": record.Version, "reason": "all planning fields are explicit",
 	}
+	// batch_size 省略是合法的 canary-first（後續批也是 1）。明確 0 仍在下面拒絕。
 	planningFields := []string{
-		"channel", "version", "artifact_sha256", "batch_size", "execution_timeout_seconds", "irreversible",
+		"channel", "version", "artifact_sha256", "execution_timeout_seconds", "irreversible",
 	}
 	for _, missing := range planningFields {
 		t.Run(missing, func(t *testing.T) {
@@ -258,7 +259,7 @@ func TestOperatorDeploymentConfirmationMismatchDetailIsAccurateForEveryAction(t 
 				}
 				var record artifactSidecar
 				f, record = deploymentMutationFixture(t, machineCount)
-				parent, _ := seedPausedDeploymentMutation(t, f, record, machineCount)
+				parent, _ := seedPausedDeploymentMutation(t, f, record, machineCount, deploy.Failed)
 				base := "/v1/operator/deployments/" + parent.DeploymentID
 				previewLeaf := map[string]string{
 					"continue": "/continuation-preview",
@@ -348,12 +349,12 @@ func TestOperatorDeploymentContinuePreviewApplyAndReplay(t *testing.T) {
 	if err := json.Unmarshal(createdRec.Body.Bytes(), &created); err != nil || len(created.Jobs) != 1 {
 		t.Fatalf("created=%+v err=%v", created, err)
 	}
-	failedAt := time.Now().UTC().Truncate(time.Second)
+	succeededAt := time.Now().UTC().Truncate(time.Second)
 	if _, err := f.store.DB().Exec(`UPDATE jobs SET state=?,terminal_at=? WHERE job_id=?`,
-		deploy.Failed, failedAt.Format(time.RFC3339Nano), created.Jobs[0].JobID); err != nil {
+		deploy.Succeeded, succeededAt.Format(time.RFC3339Nano), created.Jobs[0].JobID); err != nil {
 		t.Fatal(err)
 	}
-	if changed, err := f.store.SetDeploymentState(created.DeploymentID, store.DeploymentRunning, store.DeploymentPaused, failedAt); err != nil || !changed {
+	if changed, err := f.store.SetDeploymentState(created.DeploymentID, store.DeploymentRunning, store.DeploymentPaused, succeededAt); err != nil || !changed {
 		t.Fatalf("pause changed=%t err=%v", changed, err)
 	}
 

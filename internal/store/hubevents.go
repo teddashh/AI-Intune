@@ -11,20 +11,22 @@ import (
 // 它回答「觀測者那幾分鐘為什麼沒在聽」，不回答「Hub 健不健康」。
 
 const (
-	HubStarted                  = "started"                    // 程序起來了；detail 帶「上一次活著是多久前」
-	HubStopping                 = "stopping"                   // 收到停止訊號（kill -9 不會有這一筆，那是預期的）
-	HubReconcileSlow            = "reconcile_slow"             // 一輪對帳花得比節奏還久
-	HubLoopStall                = "loop_stall"                 // 對帳迴圈本身很久沒被排到（整個程序卡住）
-	HubClockJump                = "clock_jump"                 // 主機時鐘比程序的單調時鐘多走：睡著、被暫停、或時鐘被調過
-	JobLeaseExpired             = "job_lease_expired"          // 工作單因 agent 沒回來而由 Hub 收成 lease_expired
-	JobTimeout                  = "job_timeout"                // 工作單持續續租但超過 executor 的最壞預算
-	HubDeploymentCreated        = "deployment_created"         // 人核准一張新的 deployment；desired/snapshot/first batch 同 tx
-	HubDeploymentRetried        = "deployment_retried"         // 人針對終態失敗 targets 建立新 attempt；parent/child 同 tx
-	HubDeploymentPaused         = "deployment_paused"          // 某一批出現失敗終態，Hub 停止開後續批次（沒有 auto-continue）
-	HubDeploymentBoundaryPaused = "deployment_boundary_paused" // 下一批被 deterministic safety guard 擋住，原因在 detail 與 boundary ledger
-	HubDeploymentFinished       = "deployment_finished"        // 已規劃的批次全部開完且最後一批全部 succeeded，或人 continue 之後沒有下一批
-	HubDeploymentContinued      = "deployment_continued"       // 人按了 Continue next batch；stuck 的機器不重開
-	HubDeploymentAbandoned      = "deployment_abandoned"       // 人明確放棄 paused deployment；未開批次永遠不再開，釋放資源 owner
+	HubStarted                      = "started"                      // 程序起來了；detail 帶「上一次活著是多久前」
+	HubStopping                     = "stopping"                     // 收到停止訊號（kill -9 不會有這一筆，那是預期的）
+	HubReconcileSlow                = "reconcile_slow"               // 一輪對帳花得比節奏還久
+	HubLoopStall                    = "loop_stall"                   // 對帳迴圈本身很久沒被排到（整個程序卡住）
+	HubClockJump                    = "clock_jump"                   // 主機時鐘比程序的單調時鐘多走：睡著、被暫停、或時鐘被調過
+	JobLeaseExpired                 = "job_lease_expired"            // 工作單因 agent 沒回來而由 Hub 收成 lease_expired
+	JobTimeout                      = "job_timeout"                  // 工作單持續續租但超過 executor 的最壞預算
+	HubDeploymentCreated            = "deployment_created"           // 人核准一張新的 deployment；desired/snapshot/first batch 同 tx
+	HubDeploymentRetried            = "deployment_retried"           // 人針對終態失敗 targets 建立新 attempt；parent/child 同 tx
+	HubDeploymentPaused             = "deployment_paused"            // 某一批出現失敗終態，Hub 停止開後續批次（沒有 auto-continue）
+	HubDeploymentCanaryHeld         = "deployment_canary_held"       // 新 deployment 的 canary 批次已是 Hub succeeded；停下等明確 Continue
+	HubDeploymentSkippedFailedBatch = "deployment_skip_failed_batch" // 人用單獨的 skip failed batch 越過失敗批次；理由在 detail
+	HubDeploymentBoundaryPaused     = "deployment_boundary_paused"   // 下一批被 deterministic safety guard 擋住，原因在 detail 與 boundary ledger
+	HubDeploymentFinished           = "deployment_finished"          // 已規劃的批次全部開完且最後一批全部 succeeded，或人 continue 之後沒有下一批
+	HubDeploymentContinued          = "deployment_continued"         // 人按了 Continue next batch；stuck 的機器不重開
+	HubDeploymentAbandoned          = "deployment_abandoned"         // 人明確放棄 paused deployment；未開批次永遠不再開，釋放資源 owner
 )
 
 type HubEvent struct {

@@ -55,6 +55,8 @@
     <div class="action-form">
     {{if eq $p.Action "continue"}}
       <label><span class="field-label">輸入 channel：{{$d.Channel}}</span><input name="confirm_channel" autocomplete="off" required></label>
+    {{else if eq $p.Action "skip_failed_batch"}}
+      <label><span class="field-label">輸入 channel：{{$d.Channel}}</span><input name="confirm_channel" autocomplete="off" required></label>
     {{else if eq $p.Action "retry"}}
       <label><span class="field-label">輸入 channel：{{$d.Channel}}</span><input name="confirm_channel" autocomplete="off" required></label>
       <label><span class="field-label">輸入 version：{{with $d.Material.Version}}{{.}}{{end}}</span><input name="confirm_version" autocomplete="off" required></label>

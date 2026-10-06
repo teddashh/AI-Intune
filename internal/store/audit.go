@@ -27,37 +27,38 @@ import (
 type AuditAction string
 
 const (
-	AuditConnect              AuditAction = "connect"
-	AuditRetire               AuditAction = "retire"
-	AuditUnretire             AuditAction = "unretire"
-	AuditEnrollToken          AuditAction = "enroll-token"
-	AuditRevokeToken          AuditAction = "revoke-token"
-	AuditEnrollmentLimit      AuditAction = "enrollment-limit"
-	AuditDeploymentCreate     AuditAction = "deployment-create"
-	AuditDeploymentRetry      AuditAction = "deployment-retry"
-	AuditDeploymentContinue   AuditAction = "deployment-continue"
-	AuditDeploymentAbandon    AuditAction = "deployment-abandon"
-	AuditArtifactFetch        AuditAction = "artifact-fetch"
-	AuditCatalogManifest      AuditAction = "catalog-manifest"
-	AuditMachineProfile       AuditAction = "machine-profile"
-	AuditMachineProfileAssign AuditAction = "machine-profile-assign"
-	AuditMachineChannel       AuditAction = "machine-channel"
-	AuditMachineLifecycle     AuditAction = "machine-lifecycle"
-	AuditMachineRename        AuditAction = "machine-rename"
-	AuditMachineNotes         AuditAction = "machine-notes"
-	AuditDiagnosticNoop       AuditAction = "diagnostic-noop"
-	AuditDeviceSync           AuditAction = "device-sync"
-	AuditTailnetPeerIgnore    AuditAction = "tailnet-peer-ignore"
-	AuditRetentionPrune       AuditAction = "retention-prune"
-	AuditRestoreDrill         AuditAction = "restore-drill"
-	AuditVerifierRegister     AuditAction = "verifier-register"
-	AuditVerifierRevoke       AuditAction = "verifier-revoke"
-	AuditVerificationAssign   AuditAction = "verification-assign"
-	AuditSettingPolicy        AuditAction = "setting-policy"
-	AuditSettingAssign        AuditAction = "setting-assign"
-	AuditCompliancePolicy     AuditAction = "compliance-policy"
-	AuditComplianceAssign     AuditAction = "compliance-assign"
-	AuditOperatorDenied       AuditAction = "operator-denied"
+	AuditConnect                   AuditAction = "connect"
+	AuditRetire                    AuditAction = "retire"
+	AuditUnretire                  AuditAction = "unretire"
+	AuditEnrollToken               AuditAction = "enroll-token"
+	AuditRevokeToken               AuditAction = "revoke-token"
+	AuditEnrollmentLimit           AuditAction = "enrollment-limit"
+	AuditDeploymentCreate          AuditAction = "deployment-create"
+	AuditDeploymentRetry           AuditAction = "deployment-retry"
+	AuditDeploymentContinue        AuditAction = "deployment-continue"
+	AuditDeploymentSkipFailedBatch AuditAction = "deployment-skip-failed-batch"
+	AuditDeploymentAbandon         AuditAction = "deployment-abandon"
+	AuditArtifactFetch             AuditAction = "artifact-fetch"
+	AuditCatalogManifest           AuditAction = "catalog-manifest"
+	AuditMachineProfile            AuditAction = "machine-profile"
+	AuditMachineProfileAssign      AuditAction = "machine-profile-assign"
+	AuditMachineChannel            AuditAction = "machine-channel"
+	AuditMachineLifecycle          AuditAction = "machine-lifecycle"
+	AuditMachineRename             AuditAction = "machine-rename"
+	AuditMachineNotes              AuditAction = "machine-notes"
+	AuditDiagnosticNoop            AuditAction = "diagnostic-noop"
+	AuditDeviceSync                AuditAction = "device-sync"
+	AuditTailnetPeerIgnore         AuditAction = "tailnet-peer-ignore"
+	AuditRetentionPrune            AuditAction = "retention-prune"
+	AuditRestoreDrill              AuditAction = "restore-drill"
+	AuditVerifierRegister          AuditAction = "verifier-register"
+	AuditVerifierRevoke            AuditAction = "verifier-revoke"
+	AuditVerificationAssign        AuditAction = "verification-assign"
+	AuditSettingPolicy             AuditAction = "setting-policy"
+	AuditSettingAssign             AuditAction = "setting-assign"
+	AuditCompliancePolicy          AuditAction = "compliance-policy"
+	AuditComplianceAssign          AuditAction = "compliance-assign"
+	AuditOperatorDenied            AuditAction = "operator-denied"
 )
 
 // These prefixes are persisted classification markers for the legacy audit
@@ -130,7 +131,7 @@ func IsCanonicalOperatorAction(action AuditAction) bool {
 	return action == AuditMachineChannel || action == AuditMachineLifecycle || action == AuditMachineRename || action == AuditMachineNotes || action == AuditEnrollToken || action == AuditRevokeToken ||
 		action == AuditEnrollmentLimit ||
 		action == AuditDeploymentCreate || action == AuditDeploymentRetry ||
-		action == AuditDeploymentContinue || action == AuditDeploymentAbandon ||
+		action == AuditDeploymentContinue || action == AuditDeploymentSkipFailedBatch || action == AuditDeploymentAbandon ||
 		action == AuditArtifactFetch || action == AuditCatalogManifest || action == AuditMachineProfile ||
 		action == AuditMachineProfileAssign || action == AuditDiagnosticNoop || action == AuditDeviceSync || action == AuditTailnetPeerIgnore ||
 		action == AuditRetentionPrune || action == AuditRestoreDrill ||

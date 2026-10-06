@@ -1,7 +1,7 @@
 {{define "updates.html"}}{{template "head" .}}
 {{$u := .Updates}}
 
-<div class="page-heading"><div><h1>更新</h1><p>Artifact catalog、channel 成員、最近部署與 rollout gate。</p></div></div>
+<div class="page-heading"><div><h1>更新</h1><p>Artifact catalog、channel 成員、最近部署與 rollout gate。第一批一台的部署在 <a href="/deployments?view=new">新增部署</a> 建立，phase 在該 deployment 的動作區。Hub 在 canary 工作單 succeeded 之後才開下一批；失敗會暫停。</p></div></div>
 
 <div class="section-title"><h2 id="artifacts" class="section-anchor" tabindex="-1">Hub artifact catalog evidence</h2><p class="active-filter">本頁 {{len $u.Artifacts}} 項；符合條件共 {{$u.ArtifactTotal}} 項</p></div>
 <div class="panel" style="padding:4px 6px">

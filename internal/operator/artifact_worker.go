@@ -97,6 +97,20 @@ func (s *Service) RunArtifactFetchOperation(ctx context.Context, operationID str
 	if err := ctx.Err(); err != nil {
 		return claim.Operation, err
 	}
+	// Mirror after the local tarball exists and before the ledger says success.
+	// A failed upload leaves the operation running or terminally failed so the
+	// next drain can retry from the cache hit. A nil publisher is local-only.
+	if s.blobPublisher != nil {
+		if err := s.blobPublisher.PublishArtifact(ctx, s.artifactsDir, record.SHA256, record.Size); err != nil {
+			if artifactFetchWorkerMustRemainRunning(ctx, err) {
+				return claim.Operation, err
+			}
+			return s.finishArtifactFetchFailure(ctx, claim, artifactFetchFailure{
+				code:   ArtifactFetchFailureStorage,
+				detail: "remote object publish failed",
+			})
+		}
+	}
 	completed, err := s.store.SucceedArtifactFetchOperation(
 		claim.Operation.OperationID, claim.RunToken, record.SHA256, record.Size)
 	if err != nil {

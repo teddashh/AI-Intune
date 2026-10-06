@@ -123,6 +123,15 @@ func webDeploymentWithBatchSize(t *testing.T, st *store.Store, channel string, b
 	return d, jobs, ids
 }
 
+func succeedDeploymentJob(t *testing.T, st *store.Store, job store.Job, now time.Time) {
+	t.Helper()
+	at := now.UTC().Truncate(time.Second)
+	if _, err := st.DB().Exec(`UPDATE jobs SET state=?,terminal_at=?,lease_token=NULL,lease_expires_at=NULL WHERE job_id=?`,
+		deploy.Succeeded, at.Format(time.RFC3339Nano), job.JobID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func failDeploymentJob(t *testing.T, st *store.Store, job store.Job, now time.Time) {
 	t.Helper()
 	if _, err := st.ClaimJob(job.JobID, job.MachineID, now.Add(-time.Minute), time.Hour); err != nil {
@@ -315,20 +324,36 @@ func TestDeploymentContinueIsPOSTConfirmedAuditedAndDoesNotRetryStuck(t *testing
 	pausedPage := get(t, s, "/deployments/"+d.DeploymentID)
 	for _, want := range []string{
 		"paused", "批次 1 失敗即停；後續批次沒有開始（沒有 auto-continue）",
-		`action="/deployments/` + d.DeploymentID + `/continue-preview"`,
+		"plain Continue 拒絕失敗批次", "skip failed batch",
+		`action="/deployments/` + d.DeploymentID + `/skip-failed-batch-preview"`,
 		`action="/deployments/` + d.DeploymentID + `/retry-preview"`,
 	} {
 		if !strings.Contains(pausedPage, want) {
 			t.Errorf("paused deployment 頁缺少 %q", want)
 		}
 	}
+	if strings.Contains(pausedPage, `action="/deployments/`+d.DeploymentID+`/continue-preview"`) {
+		t.Fatal("failed batch still offered plain Continue")
+	}
 	if strings.Contains(pausedPage, "clawctl-hub deployment") || strings.Contains(pausedPage, `name="confirm_channel"`) {
 		t.Fatal("deployment detail exposed CLI-only instructions or skipped the review step")
 	}
+	emptyReason := postForm(t, s, "/deployments/"+d.DeploymentID+"/skip-failed-batch-preview", url.Values{"reason": {""}})
+	if emptyReason.Code != http.StatusBadRequest || !strings.Contains(emptyReason.Body.String(), "必須留下理由") {
+		t.Fatalf("empty skip reason = %d %s", emptyReason.Code, emptyReason.Body.String())
+	}
 
-	preview := postForm(t, s, "/deployments/"+d.DeploymentID+"/continue-preview", url.Values{"reason": {"review next batch"}})
-	if preview.Code != http.StatusOK || preview.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("continue preview=%d cache=%q: %s", preview.Code, preview.Header().Get("Cache-Control"), preview.Body.String())
+	continuePreview := postForm(t, s, "/deployments/"+d.DeploymentID+"/continue-preview", url.Values{"reason": {"review next batch"}})
+	if continuePreview.Code != http.StatusOK || !strings.Contains(continuePreview.Body.String(), "plain Continue 拒絕失敗批次") ||
+		strings.Contains(continuePreview.Body.String(), `name="confirm_channel"`) {
+		t.Fatalf("continue preview did not refuse the failed batch: %d %s", continuePreview.Code, continuePreview.Body.String())
+	}
+
+	preview := postForm(t, s, "/deployments/"+d.DeploymentID+"/skip-failed-batch-preview", url.Values{"reason": {"review next batch"}})
+	if preview.Code != http.StatusOK || preview.Header().Get("Cache-Control") != "no-store" ||
+		!strings.Contains(preview.Body.String(), "skip failed batch") ||
+		!strings.Contains(preview.Body.String(), `name="confirm_channel"`) {
+		t.Fatalf("skip preview=%d cache=%q: %s", preview.Code, preview.Header().Get("Cache-Control"), preview.Body.String())
 	}
 	applyForm := url.Values{
 		"preview_digest":            {hiddenFormValue(t, preview.Body.String(), "preview_digest")},
@@ -338,7 +363,7 @@ func TestDeploymentContinueIsPOSTConfirmedAuditedAndDoesNotRetryStuck(t *testing
 		"idempotency_key":           {hiddenFormValue(t, preview.Body.String(), "idempotency_key")},
 		"confirm_channel":           {"stable"},
 	}
-	wrong := postForm(t, s, "/deployments/"+d.DeploymentID+"/continue", applyForm)
+	wrong := postForm(t, s, "/deployments/"+d.DeploymentID+"/skip-failed-batch", applyForm)
 	if wrong.Code != http.StatusBadRequest {
 		t.Fatalf("確認字打錯 = %d，預期 400：%s", wrong.Code, wrong.Body.String())
 	}
@@ -353,9 +378,9 @@ func TestDeploymentContinueIsPOSTConfirmedAuditedAndDoesNotRetryStuck(t *testing
 
 	// A rejected typed confirmation owns its key. Reloading the preview mints a
 	// new request identity for the corrected operator decision.
-	preview = postForm(t, s, "/deployments/"+d.DeploymentID+"/continue-preview", url.Values{"reason": {"review next batch"}})
+	preview = postForm(t, s, "/deployments/"+d.DeploymentID+"/skip-failed-batch-preview", url.Values{"reason": {"review next batch"}})
 	if preview.Code != http.StatusOK {
-		t.Fatalf("fresh continue preview=%d: %s", preview.Code, preview.Body.String())
+		t.Fatalf("fresh skip preview=%d: %s", preview.Code, preview.Body.String())
 	}
 	applyForm = url.Values{
 		"preview_digest":            {hiddenFormValue(t, preview.Body.String(), "preview_digest")},
@@ -365,10 +390,10 @@ func TestDeploymentContinueIsPOSTConfirmedAuditedAndDoesNotRetryStuck(t *testing
 		"idempotency_key":           {hiddenFormValue(t, preview.Body.String(), "idempotency_key")},
 		"confirm_channel":           {"canary"},
 	}
-	ok := postForm(t, s, "/deployments/"+d.DeploymentID+"/continue", applyForm)
+	ok := postForm(t, s, "/deployments/"+d.DeploymentID+"/skip-failed-batch", applyForm)
 	if ok.Code != http.StatusOK || ok.Header().Get("Cache-Control") != "no-store" ||
-		!strings.Contains(ok.Body.String(), "已 continue deployment") {
-		t.Fatalf("continue = %d cache=%q body=%s", ok.Code, ok.Header().Get("Cache-Control"), ok.Body.String())
+		!strings.Contains(ok.Body.String(), "已 skip failed batch") {
+		t.Fatalf("skip = %d cache=%q body=%s", ok.Code, ok.Header().Get("Cache-Control"), ok.Body.String())
 	}
 	view, err := st.DeploymentView(d.DeploymentID, time.Now().UTC())
 	if err != nil || view.State != store.DeploymentRunning || view.Stuck != 1 || len(view.Counts) != 2 {
@@ -380,7 +405,7 @@ func TestDeploymentContinueIsPOSTConfirmedAuditedAndDoesNotRetryStuck(t *testing
 	if err := os.Remove(filepath.Join(artifactDir, record.SHA256+".tgz")); err != nil {
 		t.Fatal(err)
 	}
-	replayed := postForm(t, s, "/deployments/"+d.DeploymentID+"/continue", applyForm)
+	replayed := postForm(t, s, "/deployments/"+d.DeploymentID+"/skip-failed-batch", applyForm)
 	if replayed.Code != http.StatusOK || !strings.Contains(replayed.Body.String(), "replay") {
 		t.Fatalf("continue replay=%d: %s", replayed.Code, replayed.Body.String())
 	}
@@ -391,7 +416,7 @@ func TestDeploymentContinueIsPOSTConfirmedAuditedAndDoesNotRetryStuck(t *testing
 	entries, err := st.Audit("", 20)
 	foundAudit := false
 	for _, entry := range entries {
-		if entry.Action == store.AuditDeploymentContinue && entry.OK && entry.Subject == d.DeploymentID {
+		if entry.Action == store.AuditDeploymentSkipFailedBatch && entry.OK && entry.Subject == d.DeploymentID {
 			foundAudit = true
 		}
 	}
@@ -401,12 +426,12 @@ func TestDeploymentContinueIsPOSTConfirmedAuditedAndDoesNotRetryStuck(t *testing
 	events, _ := st.HubEventsBetween(d.CreatedAt, time.Now().UTC().Add(time.Second))
 	found := false
 	for _, event := range events {
-		if event.Kind == store.HubDeploymentContinued {
+		if event.Kind == store.HubDeploymentSkippedFailedBatch && strings.Contains(event.Detail, "review next batch") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("沒有 deployment_continued Hub event：%+v", events)
+		t.Fatalf("沒有帶理由的 deployment_skip_failed_batch Hub event：%+v", events)
 	}
 }
 

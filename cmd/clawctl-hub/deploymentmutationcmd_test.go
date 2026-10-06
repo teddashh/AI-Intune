@@ -121,7 +121,14 @@ func TestDeploymentControlCLIHTTPFreshAndReplay(t *testing.T) {
 				machineCount = 1
 			}
 			f, record := deploymentMutationFixture(t, machineCount)
-			parent, jobs := seedPausedDeploymentMutation(t, f, record, machineCount)
+			// Plain Continue refuses a failed batch. The continue case is the
+			// legitimate expand after a succeeded opened batch; retry still needs
+			// a failed terminal, and abandon stops a failed deployment.
+			jobState := deploy.Failed
+			if action == "continue" {
+				jobState = deploy.Succeeded
+			}
+			parent, jobs := seedPausedDeploymentMutation(t, f, record, machineCount, jobState)
 			var mu sync.Mutex
 			var calls []string
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -575,7 +582,7 @@ func deploymentMutationFixture(t *testing.T, machineCount int) (jobsFixture, art
 }
 
 func seedPausedDeploymentMutation(t *testing.T, f jobsFixture, record artifactSidecar,
-	machineCount int,
+	machineCount int, jobState deploy.JobState,
 ) (store.Deployment, []store.Job) {
 	t.Helper()
 	material, err := prepareOpenClawJob(f.artifactsDir, record.Version, record.SHA256)
@@ -602,12 +609,12 @@ func seedPausedDeploymentMutation(t *testing.T, f jobsFixture, record artifactSi
 	if err != nil || len(jobs) != 1 {
 		t.Fatalf("seed deployment=%+v jobs=%+v err=%v", d, jobs, err)
 	}
-	failedAt := time.Now().UTC().Truncate(time.Second)
+	terminalAt := time.Now().UTC().Truncate(time.Second)
 	if _, err := f.store.DB().Exec(`UPDATE jobs SET state=?,terminal_at=? WHERE job_id=?`,
-		deploy.Failed, failedAt.Format(time.RFC3339Nano), jobs[0].JobID); err != nil {
+		jobState, terminalAt.Format(time.RFC3339Nano), jobs[0].JobID); err != nil {
 		t.Fatal(err)
 	}
-	if changed, err := f.store.SetDeploymentState(d.DeploymentID, store.DeploymentRunning, store.DeploymentPaused, failedAt); err != nil || !changed {
+	if changed, err := f.store.SetDeploymentState(d.DeploymentID, store.DeploymentRunning, store.DeploymentPaused, terminalAt); err != nil || !changed {
 		t.Fatalf("pause deployment changed=%t err=%v", changed, err)
 	}
 	return d, jobs
@@ -669,8 +676,14 @@ func directDeploymentControlFixture(t *testing.T, action string) (string, string
 	// under -race. Anchor the synthetic terminal/pause lifecycle to the durable
 	// deployment creation clock, never to the earlier check-in fixture clock.
 	lifecycleAt := parent.CreatedAt.UTC().Truncate(time.Second)
+	// Continue is the expand after a succeeded batch. Retry and abandon keep
+	// the failed terminal: retry binds it, abandon stops without opening more.
+	jobState := deploy.Failed
+	if action == "continue" {
+		jobState = deploy.Succeeded
+	}
 	if _, err := st.DB().Exec(`UPDATE jobs SET state=?,terminal_at=? WHERE job_id=?`,
-		deploy.Failed, lifecycleAt.Format(time.RFC3339Nano), jobs[0].JobID); err != nil {
+		jobState, lifecycleAt.Format(time.RFC3339Nano), jobs[0].JobID); err != nil {
 		t.Fatal(err)
 	}
 	if changed, err := st.SetDeploymentState(parent.DeploymentID, store.DeploymentRunning, store.DeploymentPaused, lifecycleAt); err != nil || !changed {

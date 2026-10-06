@@ -719,3 +719,103 @@ func TestRecoverArtifactFetchOperationsStopsWhenReconcileFails(t *testing.T) {
 		t.Fatalf("reconcile failure started queued work: %+v", current)
 	}
 }
+
+type recordingBlobPublisher struct {
+	digest string
+	size   int64
+	dir    string
+	err    error
+	calls  int
+}
+
+func (p *recordingBlobPublisher) PublishArtifact(_ context.Context, artifactsDir, digest string, size int64) error {
+	p.calls++
+	p.dir = artifactsDir
+	p.digest = digest
+	p.size = size
+	return p.err
+}
+
+func TestRunArtifactFetchOperationPublishesMeasuredBlobBeforeSuccess(t *testing.T) {
+	plan := artifactWorkerPlan("2026.10.5")
+	backend := &artifactWorkerBackend{plans: map[string]artifact.PreviewPlan{plan.Version: plan}}
+	service, _, dir := artifactFetchTestService(t, backend)
+	queued := enqueueArtifactWorkerOperation(t, service, plan, "worker-blob-ok")
+	publisher := &recordingBlobPublisher{}
+	service.SetArtifactBlobPublisher(publisher)
+	record := artifactWorkerRecord(plan, 42)
+	backend.fetch = func(_ context.Context, _ artifact.PreviewPlan, _ string, progress artifact.ProgressFunc) (artifact.Sidecar, bool, error) {
+		if err := reportArtifactWorkerPhases(progress, 42); err != nil {
+			return artifact.Sidecar{}, false, err
+		}
+		return record, true, nil
+	}
+	completed, err := service.RunArtifactFetchOperation(context.Background(), queued.OperationID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.State != store.ArtifactFetchSucceeded || publisher.calls != 1 ||
+		publisher.digest != record.SHA256 || publisher.size != 42 || publisher.dir != dir {
+		t.Fatalf("completed=%+v publisher=%+v", completed, publisher)
+	}
+}
+
+func TestRunArtifactFetchOperationStorageFailureDoesNotSucceed(t *testing.T) {
+	plan := artifactWorkerPlan("2026.10.6")
+	backend := &artifactWorkerBackend{plans: map[string]artifact.PreviewPlan{plan.Version: plan}}
+	service, st, _ := artifactFetchTestService(t, backend)
+	queued := enqueueArtifactWorkerOperation(t, service, plan, "worker-blob-fail")
+	publisher := &recordingBlobPublisher{err: errors.New("put s3://secret-bucket/private failed")}
+	service.SetArtifactBlobPublisher(publisher)
+	record := artifactWorkerRecord(plan, 42)
+	backend.fetch = func(_ context.Context, _ artifact.PreviewPlan, _ string, progress artifact.ProgressFunc) (artifact.Sidecar, bool, error) {
+		if err := reportArtifactWorkerPhases(progress, 42); err != nil {
+			return artifact.Sidecar{}, false, err
+		}
+		return record, false, nil
+	}
+	failed, err := service.RunArtifactFetchOperation(context.Background(), queued.OperationID, false)
+	if err != nil {
+		t.Fatalf("storage failure returned a worker error: %v", err)
+	}
+	if failed.State != store.ArtifactFetchFailed || failed.ErrorCode == nil ||
+		*failed.ErrorCode != ArtifactFetchFailureStorage || failed.ErrorDetail == nil ||
+		*failed.ErrorDetail != "remote object publish failed" || strings.Contains(*failed.ErrorDetail, "secret") {
+		t.Fatalf("failure=%+v", failed)
+	}
+	if publisher.calls != 1 || publisher.digest != record.SHA256 {
+		t.Fatalf("publisher=%+v", publisher)
+	}
+	current, err := st.GetArtifactFetchOperation(queued.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.State != store.ArtifactFetchFailed || current.ResultSHA256 != nil {
+		t.Fatalf("persisted=%+v", current)
+	}
+}
+
+func TestRunArtifactFetchOperationBlobClaimLossStaysRunning(t *testing.T) {
+	plan := artifactWorkerPlan("2026.10.7")
+	backend := &artifactWorkerBackend{plans: map[string]artifact.PreviewPlan{plan.Version: plan}}
+	service, st, _ := artifactFetchTestService(t, backend)
+	queued := enqueueArtifactWorkerOperation(t, service, plan, "worker-blob-claim")
+	service.SetArtifactBlobPublisher(&recordingBlobPublisher{err: store.ErrArtifactFetchClaimLost})
+	backend.fetch = func(_ context.Context, workerPlan artifact.PreviewPlan, _ string, progress artifact.ProgressFunc) (artifact.Sidecar, bool, error) {
+		if err := reportArtifactWorkerPhases(progress, 42); err != nil {
+			return artifact.Sidecar{}, false, err
+		}
+		return artifactWorkerRecord(workerPlan, 42), false, nil
+	}
+	_, err := service.RunArtifactFetchOperation(context.Background(), queued.OperationID, false)
+	if !errors.Is(err, store.ErrArtifactFetchClaimLost) {
+		t.Fatalf("claim loss err=%v", err)
+	}
+	current, err := st.GetArtifactFetchOperation(queued.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.State != store.ArtifactFetchRunning || current.ErrorCode != nil || current.FinishedAt != nil {
+		t.Fatalf("claim loss became terminal: %+v", current)
+	}
+}

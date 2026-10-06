@@ -326,6 +326,9 @@ func (h *hub) handleGetArtifact(w http.ResponseWriter, r *http.Request, machineI
 	path := filepath.Join(h.artifactsDir, digest+".tgz")
 	entry, err := os.Lstat(path)
 	if err != nil || !entry.Mode().IsRegular() {
+		if h.serveRemoteArtifact(w, r, digest) {
+			return
+		}
 		writeErr(w, http.StatusNotFound, model.ErrArtifactNotFound, "artifact 不存在")
 		return
 	}

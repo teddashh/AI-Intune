@@ -100,6 +100,10 @@ func (s *Server) previewDeploymentAbandon(w http.ResponseWriter, r *http.Request
 	s.previewDeploymentControl(w, r, "abandon")
 }
 
+func (s *Server) previewDeploymentSkipFailedBatch(w http.ResponseWriter, r *http.Request) {
+	s.previewDeploymentControl(w, r, "skip_failed_batch")
+}
+
 func (s *Server) previewDeploymentControl(w http.ResponseWriter, r *http.Request, action string) {
 	w.Header().Set("Cache-Control", "no-store")
 	values, err := parseDeploymentWebForm(w, r, map[string]bool{"reason": true}, nil)
@@ -109,6 +113,11 @@ func (s *Server) previewDeploymentControl(w http.ResponseWriter, r *http.Request
 		return
 	}
 	reason := strings.TrimSpace(values.Get("reason"))
+	if action == "skip_failed_batch" && reason == "" {
+		s.renderActionStatus(w, r, http.StatusBadRequest, r.PathValue("id"),
+			"沒有建立 skip failed batch preview", "skip failed batch 必須留下理由。", "/deployments/"+r.PathValue("id"))
+		return
+	}
 	if len(reason) > 500 {
 		s.renderActionStatus(w, r, http.StatusBadRequest, r.PathValue("id"),
 			"沒有建立 deployment action preview", "變更理由最多 500 bytes。", "/deployments/"+r.PathValue("id"))
@@ -123,6 +132,8 @@ func (s *Server) previewDeploymentControl(w http.ResponseWriter, r *http.Request
 		preview, err = s.operator.PreviewDeploymentRetryContext(r.Context(), operator.DeploymentRetryPreviewRequest{DeploymentID: id}, now)
 	case "abandon":
 		preview, err = s.operator.PreviewDeploymentAbandonContext(r.Context(), operator.DeploymentAbandonPreviewRequest{DeploymentID: id}, now)
+	case "skip_failed_batch":
+		preview, err = s.operator.PreviewDeploymentSkipFailedBatchContext(r.Context(), operator.DeploymentContinuePreviewRequest{DeploymentID: id}, now)
 	default:
 		err = errors.New("invalid deployment action")
 	}
@@ -148,6 +159,11 @@ func (s *Server) previewDeploymentControl(w http.ResponseWriter, r *http.Request
 	if action == "abandon" {
 		review.CapabilityAllowed = access.CanAdmin
 	}
+	if action == "skip_failed_batch" {
+		review.ApplyPath = "/deployments/" + id + "/skip-failed-batch"
+		review.Title = "skip failed batch"
+		review.Button = "skip failed batch"
+	}
 	s.render(w, r, "deployment_action_review.html", page{
 		Title: "確認 " + action + " deployment", Nav: "deployments-detail",
 		Now: time.Now().Local().Format("2006-01-02 15:04"), DeploymentActionReview: review,
@@ -166,6 +182,10 @@ func (s *Server) applyDeploymentAbandon(w http.ResponseWriter, r *http.Request) 
 	s.applyDeploymentControl(w, r, "abandon")
 }
 
+func (s *Server) applyDeploymentSkipFailedBatch(w http.ResponseWriter, r *http.Request) {
+	s.applyDeploymentControl(w, r, "skip_failed_batch")
+}
+
 func (s *Server) applyDeploymentControl(w http.ResponseWriter, r *http.Request, action string) {
 	w.Header().Set("Cache-Control", "no-store")
 	allowed := map[string]bool{
@@ -173,7 +193,7 @@ func (s *Server) applyDeploymentControl(w http.ResponseWriter, r *http.Request, 
 		"reason": true, "idempotency_key": true,
 	}
 	switch action {
-	case "continue":
+	case "continue", "skip_failed_batch":
 		allowed["confirm_channel"] = true
 	case "retry":
 		allowed["confirm_channel"], allowed["confirm_version"] = true, true
@@ -181,7 +201,7 @@ func (s *Server) applyDeploymentControl(w http.ResponseWriter, r *http.Request, 
 		allowed["confirm_deployment_id"] = true
 	}
 	required := []string{"preview_digest", "expected_control_revision", "expected_opened_batch", "idempotency_key"}
-	if action == "continue" {
+	if action == "continue" || action == "skip_failed_batch" {
 		required = append(required, "confirm_channel")
 	} else if action == "retry" {
 		required = append(required, "confirm_channel", "confirm_version")
@@ -206,6 +226,11 @@ func (s *Server) applyDeploymentControl(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	reason := strings.TrimSpace(values.Get("reason"))
+	if action == "skip_failed_batch" && reason == "" {
+		s.rejectDeploymentWebForm(w, r, operator.DeploymentTransportRejectionSkipFailedBatch, r.PathValue("id"),
+			errors.New("skip failed batch 必須留下理由"))
+		return
+	}
 	if len(reason) > 500 {
 		s.rejectDeploymentWebForm(w, r, deploymentTransportRejectionAction(action), r.PathValue("id"),
 			errors.New("變更理由最多 500 bytes"))
@@ -236,15 +261,29 @@ func (s *Server) applyDeploymentControl(w http.ResponseWriter, r *http.Request, 
 			ConfirmDeploymentID: values.Get("confirm_deployment_id"), Reason: reason,
 			IdempotencyKey: values.Get("idempotency_key"), Actor: actor,
 		})
+	case "skip_failed_batch":
+		result, err = s.operator.ApplyDeploymentSkipFailedBatchContext(r.Context(), operator.DeploymentContinueApplyRequest{
+			DeploymentID: id, PreviewDigest: values.Get("preview_digest"),
+			ExpectedControlRevision: &expectedRevision, ExpectedOpenedBatch: &expectedOpened,
+			ConfirmChannel: values.Get("confirm_channel"), Reason: reason,
+			IdempotencyKey: values.Get("idempotency_key"), Actor: actor,
+		})
 	default:
 		err = errors.New("invalid deployment action")
 	}
 	if err != nil {
-		s.renderDeploymentWebError(w, r, action, id, "沒有 "+action+" deployment", "/deployments/"+id, err)
+		headline := "沒有 " + action + " deployment"
+		if action == "skip_failed_batch" {
+			headline = "沒有 skip failed batch"
+		}
+		s.renderDeploymentWebError(w, r, action, id, headline, "/deployments/"+id, err)
 		return
 	}
-	s.renderDeploymentMutation(w, r, result, "已 "+action+" deployment",
-		"已確認原本的 deployment "+action+" 結果（replay）")
+	fresh, replay := "已 "+action+" deployment", "已確認原本的 deployment "+action+" 結果（replay）"
+	if action == "skip_failed_batch" {
+		fresh, replay = "已 skip failed batch", "已確認原本的 skip failed batch 結果（replay）"
+	}
+	s.renderDeploymentMutation(w, r, result, fresh, replay)
 }
 
 func parseDeploymentCreateForm(w http.ResponseWriter, r *http.Request, apply bool) (operator.DeploymentCreatePreviewRequest, string, error) {
@@ -331,6 +370,8 @@ func deploymentTransportRejectionAction(action string) operator.DeploymentTransp
 	switch action {
 	case "continue":
 		return operator.DeploymentTransportRejectionContinue
+	case "skip_failed_batch":
+		return operator.DeploymentTransportRejectionSkipFailedBatch
 	case "retry":
 		return operator.DeploymentTransportRejectionRetry
 	case "abandon":

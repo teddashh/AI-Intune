@@ -116,12 +116,12 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		t.Fatalf("non-operator registered=%d policies=%d, want 18/18",
 			len(nonOperatorRegistered), len(nonOperatorRoutePolicies))
 	}
-	if len(operatorRegistered) != 179 || len(operatorRoutePolicies) != 179 {
-		t.Fatalf("operator registered=%d policies=%d, want 179/179",
+	if len(operatorRegistered) != 183 || len(operatorRoutePolicies) != 183 {
+		t.Fatalf("operator registered=%d policies=%d, want 183/183",
 			len(operatorRegistered), len(operatorRoutePolicies))
 	}
-	if len(nonOperatorRegistered)+len(operatorRegistered) != 197 {
-		t.Fatalf("all registered routes=%d, want 197", len(nonOperatorRegistered)+len(operatorRegistered))
+	if len(nonOperatorRegistered)+len(operatorRegistered) != 201 {
+		t.Fatalf("all registered routes=%d, want 201", len(nonOperatorRegistered)+len(operatorRegistered))
 	}
 	counts := map[operatorauth.Permission]int{}
 	representations := map[operatorRepresentation]int{}
@@ -129,11 +129,11 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		counts[policy.Permission]++
 		representations[policy.Representation]++
 	}
-	if counts[operatorauth.View] != 79 || counts[operatorauth.Operate] != 17 || counts[operatorauth.Admin] != 83 {
-		t.Fatalf("permission counts=%v, want view=79 operate=17 admin=83", counts)
+	if counts[operatorauth.View] != 79 || counts[operatorauth.Operate] != 21 || counts[operatorauth.Admin] != 83 {
+		t.Fatalf("permission counts=%v, want view=79 operate=21 admin=83", counts)
 	}
-	if representations[operatorJSON] != 91 || representations[operatorHTML] != 88 {
-		t.Fatalf("representation counts=%v, want JSON=91 HTML=88", representations)
+	if representations[operatorJSON] != 93 || representations[operatorHTML] != 90 {
+		t.Fatalf("representation counts=%v, want JSON=93 HTML=90", representations)
 	}
 }
 
@@ -319,6 +319,8 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		{"POST /v1/operator/deployments/{id}/retries", "/v1/operator/deployments/deployment-1/retries", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI}},
 		{"POST /v1/operator/deployments/{id}/abandonment-preview", "/v1/operator/deployments/deployment-1/abandonment-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI}},
 		{"POST /v1/operator/deployments/{id}/abandonments", "/v1/operator/deployments/deployment-1/abandonments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI}},
+		{"POST /v1/operator/deployments/{id}/skip-failed-batch-preview", "/v1/operator/deployments/deployment-1/skip-failed-batch-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI}},
+		{"POST /v1/operator/deployments/{id}/skip-failed-batches", "/v1/operator/deployments/deployment-1/skip-failed-batches", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI}},
 		{"GET /v1/operator/machines/{id}/channel", "/v1/operator/machines/machine-1/channel", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI}},
 		{"GET /v1/operator/machines/{id}/enrollment-token", "/v1/operator/machines/machine-1/enrollment-token", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI}},
 		{"POST /v1/operator/machines/{id}/diagnostic-noop-preview", "/v1/operator/machines/machine-1/diagnostic-noop-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI}},
@@ -360,6 +362,8 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		{"POST /deployments/{id}/retry", "/deployments/deploy-1/retry", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb}},
 		{"POST /deployments/{id}/abandon-preview", "/deployments/deploy-1/abandon-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb}},
 		{"POST /deployments/{id}/abandon", "/deployments/deploy-1/abandon", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb}},
+		{"POST /deployments/{id}/skip-failed-batch-preview", "/deployments/deploy-1/skip-failed-batch-preview", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb}},
+		{"POST /deployments/{id}/skip-failed-batch", "/deployments/deploy-1/skip-failed-batch", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb}},
 		{"POST /machines/{id}/retire", "/machines/machine-1/retire", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb}},
 		{"POST /machines/{id}/unretire", "/machines/machine-1/unretire", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb}},
 		{"POST /machines/{id}/lifecycle-preview", "/machines/machine-1/lifecycle-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb}},
@@ -1775,7 +1779,8 @@ func TestEnrollmentWritesCostAdminOnEveryPlane(t *testing.T) {
 }
 
 // 這條規則跟上面四支不同：它釘的是 exact 分級，不是 admin 地板。
-// 開新計畫與撕掉計畫是 admin；執行已核准計畫與重開失敗 target 是 operate。
+// 開新計畫與撕掉計畫是 admin；執行已核准計畫、重開失敗 target，
+// 以及單獨標示的 skip failed batch 是 operate。
 // 兩個平面對同一動作用了不同路徑名稱，所以分級必須同時認得兩種名字。
 func TestDeploymentWritesCostTheirExactCapabilityOnEveryPlane(t *testing.T) {
 	operateWrites := 0
@@ -1789,7 +1794,7 @@ func TestDeploymentWritesCostTheirExactCapabilityOnEveryPlane(t *testing.T) {
 			continue
 		}
 		want := operatorauth.Admin
-		if strings.Contains(path, "/continu") || strings.Contains(path, "/retr") {
+		if strings.Contains(path, "/continu") || strings.Contains(path, "/retr") || strings.Contains(path, "/skip-failed-batch") {
 			want = operatorauth.Operate
 			operateWrites++
 		} else {
@@ -1799,8 +1804,8 @@ func TestDeploymentWritesCostTheirExactCapabilityOnEveryPlane(t *testing.T) {
 			t.Errorf("%s 實際需要 %s，預期 %s；降成 operate 會讓只有 operate 的憑證拿到高風險寫入，誤升成 admin 會讓值班無法在同一個主控台續跑已核准計畫", pattern, policy.Permission, want)
 		}
 	}
-	if operateWrites != 8 {
-		t.Fatalf("實際掃到 %d 條 deployment operate 寫入路徑，預期 8 條；少一條表示有路徑改名沒被涵蓋，多一條表示有新的 deployment 寫入路徑進來", operateWrites)
+	if operateWrites != 12 {
+		t.Fatalf("實際掃到 %d 條 deployment operate 寫入路徑，預期 12 條（continue/retry 8 加上 skip failed batch 4）；少一條表示有路徑改名沒被涵蓋，多一條表示有新的 deployment 寫入路徑進來", operateWrites)
 	}
 	if adminWrites != 8 {
 		t.Fatalf("實際掃到 %d 條 deployment admin 寫入路徑，預期 8 條；少一條表示有路徑改名沒被涵蓋，多一條表示有新的 deployment 寫入路徑進來", adminWrites)

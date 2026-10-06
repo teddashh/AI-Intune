@@ -259,6 +259,10 @@ var operatorRoutePolicies = map[string]operatorRoutePolicy{
 	"POST /v1/operator/enrollment-tokens":                                 {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI},
 	"POST /v1/operator/machines/{id}/enrollment-token/revocation-preview": {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI},
 	"POST /v1/operator/machines/{id}/enrollment-token/revocations":        {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI},
+	"POST /deployments/{id}/skip-failed-batch-preview":                    {operatorauth.Operate, operatorHTML, operator.SourceKindWeb},
+	"POST /deployments/{id}/skip-failed-batch":                            {operatorauth.Operate, operatorHTML, operator.SourceKindWeb},
+	"POST /v1/operator/deployments/{id}/skip-failed-batch-preview":        {operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI},
+	"POST /v1/operator/deployments/{id}/skip-failed-batches":              {operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI},
 }
 
 const (

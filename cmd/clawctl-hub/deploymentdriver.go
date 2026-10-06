@@ -42,6 +42,20 @@ func (h *hub) advanceDeployments(now time.Time) {
 				}
 			}
 		case rollout.OpenNext:
+			if view.PauseAfterCanary && view.OpenedBatch == 1 {
+				changed, err := h.store.SetDeploymentState(view.DeploymentID, store.DeploymentRunning, store.DeploymentPaused, now)
+				if err != nil {
+					log.Printf("deployment driver：canary hold 暫停 %s 失敗：%v", view.DeploymentID, err)
+					continue
+				}
+				if changed {
+					detail := fmt.Sprintf("deployment %s canary batch succeeded；expansion waits for explicit Continue", view.DeploymentID)
+					if err := h.store.RecordHubEvent(store.HubDeploymentCanaryHeld, detail, now); err != nil {
+						log.Printf("deployment driver：寫 canary hold 事件失敗：%v", err)
+					}
+				}
+				continue
+			}
 			if _, err := h.store.OpenDeploymentBatch(view.DeploymentID, view.OpenedBatch+1, now); err != nil {
 				kind, deterministic := store.DeploymentBoundaryPauseKind(err)
 				if !deterministic {

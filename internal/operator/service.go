@@ -29,6 +29,7 @@ type Service struct {
 	artifactFetcher artifactFetchBackend
 	tailnetSource   TailnetSource
 	restoreDrill    *restoredrill.Runner
+	blobPublisher   ArtifactBlobPublisher
 }
 
 func (s *Service) ConfigureRestoreDrill(runner restoredrill.Runner) {
@@ -56,6 +57,21 @@ func NewControlPlane(st *store.Store, artifactsDir string, source TailnetSource)
 	service := NewWithArtifacts(st, artifactsDir)
 	service.tailnetSource = source
 	return service
+}
+
+// ArtifactBlobPublisher stores Hub-measured artifact bytes outside the local
+// artifacts directory. A nil publisher keeps local files only.
+type ArtifactBlobPublisher interface {
+	PublishArtifact(ctx context.Context, artifactsDir, digest string, size int64) error
+}
+
+// SetArtifactBlobPublisher attaches the optional remote blob mirror. The Hub
+// calls it once on the process-lifetime service. Tests leave it nil.
+func (s *Service) SetArtifactBlobPublisher(publisher ArtifactBlobPublisher) {
+	if s == nil {
+		return
+	}
+	s.blobPublisher = publisher
 }
 
 const (

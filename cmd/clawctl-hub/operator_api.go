@@ -162,6 +162,8 @@ func (h *hub) operatorRoutes(mux *http.ServeMux) []string {
 		"POST /v1/operator/machines/{id}/notes-preview",
 		"PUT /v1/operator/machines/{id}/notes",
 		"GET /v1/operator/daily-report",
+		"POST /v1/operator/deployments/{id}/skip-failed-batch-preview",
+		"POST /v1/operator/deployments/{id}/skip-failed-batches",
 	}
 	mux.HandleFunc(patterns[0], h.handleListOperatorMachines)
 	mux.HandleFunc(patterns[1], h.handleGetOperatorMachine)
@@ -254,6 +256,8 @@ func (h *hub) operatorRoutes(mux *http.ServeMux) []string {
 	mux.HandleFunc(patterns[88], h.handlePreviewOperatorMachineNotes)
 	mux.HandleFunc(patterns[89], h.handlePutOperatorMachineNotes)
 	mux.HandleFunc(patterns[90], h.handleGetOperatorDailyReport)
+	mux.HandleFunc(patterns[91], h.handlePreviewOperatorDeploymentSkipFailedBatch)
+	mux.HandleFunc(patterns[92], h.handleSkipFailedBatchOperatorDeployment)
 	return patterns
 }
 

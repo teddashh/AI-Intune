@@ -207,7 +207,7 @@ func TestApplyDeploymentCreateStaleAndConfirmationRejectionsReplay(t *testing.T)
 
 func TestDeploymentContinuePreviewApplyAndReplayDoNotReopenBatch(t *testing.T) {
 	svc, st, artifactDir, record, parent, jobs := deploymentActionFixture(t, 2, 1)
-	markDeploymentJobTerminal(t, st, jobs[0].JobID, deploy.Failed)
+	markDeploymentJobTerminal(t, st, jobs[0].JobID, deploy.Succeeded)
 	pauseDeploymentForAction(t, st, parent.DeploymentID)
 	preview, err := svc.PreviewDeploymentContinue(DeploymentContinuePreviewRequest{DeploymentID: parent.DeploymentID}, time.Now().UTC())
 	if err != nil {
@@ -247,7 +247,7 @@ func TestDeploymentContinuePreviewApplyAndReplayDoNotReopenBatch(t *testing.T) {
 
 func TestDeploymentContinuePreviewBlocksSplitAuthorityJobTemplate(t *testing.T) {
 	svc, st, _, _, parent, jobs := deploymentActionFixture(t, 2, 1)
-	markDeploymentJobTerminal(t, st, jobs[0].JobID, deploy.Failed)
+	markDeploymentJobTerminal(t, st, jobs[0].JobID, deploy.Succeeded)
 	pauseDeploymentForAction(t, st, parent.DeploymentID)
 	eligiblePreview, err := svc.PreviewDeploymentContinue(
 		DeploymentContinuePreviewRequest{DeploymentID: parent.DeploymentID}, time.Now().UTC())
@@ -318,7 +318,7 @@ func TestDeploymentContinuePreviewBlocksSplitAuthorityJobTemplate(t *testing.T) 
 
 func TestDeploymentFinishOnlyContinueDoesNotRequireArtifactBytes(t *testing.T) {
 	svc, st, artifactDir, record, parent, jobs := deploymentActionFixture(t, 1, 1)
-	markDeploymentJobTerminal(t, st, jobs[0].JobID, deploy.Failed)
+	markDeploymentJobTerminal(t, st, jobs[0].JobID, deploy.Succeeded)
 	pauseDeploymentForAction(t, st, parent.DeploymentID)
 	if err := os.Remove(filepath.Join(artifactDir, record.SHA256+".tgz")); err != nil {
 		t.Fatal(err)
@@ -344,7 +344,40 @@ func TestDeploymentFinishOnlyContinueDoesNotRequireArtifactBytes(t *testing.T) {
 }
 
 func TestDeploymentRetryBindsExactTerminalFailuresAndRejectsStaleJobState(t *testing.T) {
-	svc, st, _, _, parent, jobs := deploymentActionFixture(t, 2, 2)
+	// Product create is canary-first, so a two-machine plan opens one job.
+	// This test needs two jobs in the same opened batch: one failed, one
+	// succeeded. The parent is a direct store create with caller-supplied
+	// batch numbers. PauseAfterCanary stays false; retry binding does not
+	// depend on the canary hold.
+	st := newDeploymentOperatorStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := prepareDeploymentObservationPolicy(st, now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		id := "machine-" + string(rune('a'+i))
+		name := "node-" + string(rune('a'+i))
+		observeDeploymentMachine(t, st, id, name, "canary", "24.15.0", deploymentTestVersion, now)
+	}
+	artifactDir := t.TempDir()
+	record := writeDeploymentArtifact(t, artifactDir, deploymentTestVersion, ">=24.15.0 <25", now.Add(-time.Hour))
+	material, err := artifact.ResolveOpenClawMaterial(artifactDir, deploymentTestVersion, record.SHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, jobs, err := st.CreateDeployment(store.NewDeployment{
+		Channel: "canary", ResourceKind: "openclaw", ResourceID: "openclaw",
+		Spec: material.Spec, BatchSize: 2, CreatedBy: "retry-binding-fixture",
+		Targets: []store.NewDeploymentTarget{
+			{MachineID: "machine-a", BatchNo: 1},
+			{MachineID: "machine-b", BatchNo: 1},
+		},
+		Job: store.NewJob{ArtifactDigest: material.Digest, ExecutionTimeout: 600},
+	})
+	if err != nil || len(jobs) != 2 {
+		t.Fatalf("parent=%+v jobs=%d err=%v", parent, len(jobs), err)
+	}
+	svc := NewWithArtifacts(st, artifactDir)
 	markDeploymentJobTerminal(t, st, jobs[0].JobID, deploy.Failed)
 	markDeploymentJobTerminal(t, st, jobs[1].JobID, deploy.Succeeded)
 	pauseDeploymentForAction(t, st, parent.DeploymentID)
@@ -539,8 +572,9 @@ func writeDeploymentSidecar(t *testing.T, dir string, record artifact.Sidecar) {
 // 409「仍有未終態 job」拒絕，而不是 412「請重新預覽」。STALE 的語意是
 // snapshot 已經改變，而這裡的 snapshot 並沒有變。
 func TestContinuingPastALiveJobIsRefusedAsActiveJobsNotAsAStalePreview(t *testing.T) {
-	svc, st, _, _, parent, jobs := deploymentActionFixture(t, 3, 2)
-	markDeploymentJobTerminal(t, st, jobs[0].JobID, deploy.Failed)
+	// The opened canary job stays not_started. Marking it failed would add
+	// failed_batch_requires_explicit_skip and hide the active-job mapping.
+	svc, st, _, _, parent, _ := deploymentActionFixture(t, 3, 2)
 	pauseDeploymentForAction(t, st, parent.DeploymentID)
 
 	preview, err := svc.PreviewDeploymentContinue(
@@ -581,7 +615,7 @@ func TestContinuingPastALiveJobIsRefusedAsActiveJobsNotAsAStalePreview(t *testin
 // 它變回來，operator 必須回到名冊重新尋找。
 func TestControlActionsOnAMissingDeploymentSayNotFoundNotStalePreview(t *testing.T) {
 	svc, st, _, _, parent, jobs := deploymentActionFixture(t, 2, 1)
-	markDeploymentJobTerminal(t, st, jobs[0].JobID, deploy.Failed)
+	markDeploymentJobTerminal(t, st, jobs[0].JobID, deploy.Succeeded)
 	pauseDeploymentForAction(t, st, parent.DeploymentID)
 
 	preview, err := svc.PreviewDeploymentContinue(
