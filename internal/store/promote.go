@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -19,7 +20,7 @@ import (
 // ⚠ 不能只做「每小時一個點」：deployment 若在那一小時中間完成，持續到完成後的失敗會被前一個點吞掉。
 // continuity 刻意不用 reason 當 key；finding 文字可能含「已經 8h01m」這種每輪都變的時長。
 func (s *Store) RecordCanarySilentFailure(machineID, reason string, now time.Time) (bool, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "record_canary_silent_failure")
 	if err != nil {
 		return false, fmt.Errorf("store: begin canary silent failure: %w", err)
 	}
@@ -34,7 +35,7 @@ func (s *Store) RecordCanarySilentFailure(machineID, reason string, now time.Tim
 	return recorded, nil
 }
 
-func recordCanarySilentFailureTx(tx *sql.Tx, machineID, reason string, now time.Time) (bool, error) {
+func recordCanarySilentFailureTx(tx dbTx, machineID, reason string, now time.Time) (bool, error) {
 	if machineID == "" || reason == "" {
 		return false, errors.New("store: canary silent failure needs machine and reason")
 	}
@@ -74,11 +75,11 @@ func recordCanarySilentFailureTx(tx *sql.Tx, machineID, reason string, now time.
 }
 
 // closeCanarySilentFailureTx 只接受明確的健康 judgement；時間沒再抽到不是 recovery。
-func closeCanarySilentFailureTx(tx *sql.Tx, machineID string, now time.Time) error {
+func closeCanarySilentFailureTx(tx dbTx, machineID string, now time.Time) error {
 	return closeCanarySilentFailureWithEvidenceTx(tx, machineID, now, now)
 }
 
-func closeCanarySilentFailureWithEvidenceTx(tx *sql.Tx, machineID string, evidenceAt, receivedAt time.Time) error {
+func closeCanarySilentFailureWithEvidenceTx(tx dbTx, machineID string, evidenceAt, receivedAt time.Time) error {
 	if machineID == "" {
 		return errors.New("store: close canary silent failure needs machine")
 	}
@@ -98,7 +99,7 @@ func closeCanarySilentFailureWithEvidenceTx(tx *sql.Tx, machineID string, eviden
 // 只能完整地排在這次 judgement 前面或後面，不能插進 derive/materialize 之間。
 func (s *Store) ReconcileFleet(now time.Time) error {
 	now = now.UTC()
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "reconcile_fleet")
 	if err != nil {
 		return fmt.Errorf("store: begin fleet reconcile: %w", err)
 	}
@@ -152,7 +153,7 @@ func (s *Store) CanarySilentFailuresSince(machineIDs []string, since, now time.T
 		args = append(args, id)
 	}
 	args = append(args, fmtTime(now), fmtTime(since))
-	rows, err := s.db.Query(`SELECT f.first_seen_at,f.last_seen_at,m.display_name,f.reason
+	rows, err := s.rdb.Query(`SELECT f.first_seen_at,f.last_seen_at,m.display_name,f.reason
  FROM canary_silent_failures f JOIN machine_registry m ON m.machine_id=f.machine_id
 	 WHERE f.machine_id IN (`+marks+`) AND (f.open=1 OR (f.first_seen_at <= ? AND f.last_seen_at >= ?))
 	 ORDER BY f.first_seen_at,f.machine_id,f.reason`, args...)
@@ -177,7 +178,7 @@ func (s *Store) CanarySilentFailuresSince(machineIDs []string, since, now time.T
 // 一張較新的 paused／不同版本 deployment。retry 則沿 retry_of 聚合，保留前一輪已成功的證人。
 func (s *Store) PromoteFacts(version, digest string, now time.Time) (rollout.PromoteFacts, error) {
 	facts := rollout.PromoteFacts{Version: version, Digest: strings.TrimPrefix(digest, "sha256:")}
-	rows, err := s.db.Query(`SELECT p.deployment_id,p.channel,p.desired_id,p.resource_kind,p.resource_id,
+	rows, err := s.rdb.Query(`SELECT p.deployment_id,p.channel,p.desired_id,p.resource_kind,p.resource_id,
 		 p.revision,p.control_revision,p.batch_size,p.pause_after_canary,p.state,p.created_at,p.created_by,p.paused_at,p.finished_at,p.retry_of,d.spec
 	 FROM deployments p JOIN desired_state d ON d.desired_id=p.desired_id
 	 WHERE p.channel='canary' ORDER BY p.rowid DESC`)
@@ -232,7 +233,7 @@ func (s *Store) PromoteFacts(version, digest string, now time.Time) (rollout.Pro
 		return facts, nil
 	}
 	var soakBoundaryEvidenceID int64
-	if err := s.db.QueryRow(`SELECT evidence_id FROM deployment_soak_boundaries WHERE deployment_id=?`,
+	if err := s.rdb.QueryRow(`SELECT evidence_id FROM deployment_soak_boundaries WHERE deployment_id=?`,
 		latest.DeploymentID).Scan(&soakBoundaryEvidenceID); errors.Is(err, sql.ErrNoRows) {
 		// schema migration can create the boundary table, but it cannot reconstruct
 		// which observations were appended before an already-finished deployment.
@@ -272,17 +273,17 @@ func (s *Store) PromoteFacts(version, digest string, now time.Time) (rollout.Pro
 
 	// 同一條 cycle/depth guard 同時給 DB view 與 create transaction 使用；這裡再逐張
 	// 載入 target，一條長 lineage 仍是 O(n)，不會每個 ancestor 又重走一次 ancestry。
-	deployments, err := deploymentRetryLineage(s.db, latest)
+	deployments, err := deploymentRetryLineage(s.rdb, latest)
 	if err != nil {
 		return facts, err
 	}
 	lineage := make([]DeploymentView, 0, len(deployments))
 	lineageJobIDs := make(map[string]struct{})
 	for i, deployment := range deployments {
-		if err := validateDeploymentJobGraph(s.db, deployment.DeploymentID); err != nil {
+		if err := validateDeploymentJobGraph(s.rdb, deployment.DeploymentID); err != nil {
 			return facts, err
 		}
-		if err := validateStoredDeploymentBatchPlan(s.db, deployment); err != nil {
+		if err := validateStoredDeploymentBatchPlan(s.rdb, deployment); err != nil {
 			return facts, err
 		}
 		if i > 0 {
@@ -298,7 +299,7 @@ func (s *Store) PromoteFacts(version, digest string, now time.Time) (rollout.Pro
 			if deployment.State != DeploymentPaused && deployment.State != DeploymentFinished {
 				return facts, fmt.Errorf("%w: ancestor %s has state %q", ErrDeploymentRetryParentRunning, deployment.DeploymentID, deployment.State)
 			}
-			active, err := deploymentHasNonTerminalJobs(s.db, deployment.DeploymentID)
+			active, err := deploymentHasNonTerminalJobs(s.rdb, deployment.DeploymentID)
 			if err != nil {
 				return facts, err
 			}
@@ -306,7 +307,7 @@ func (s *Store) PromoteFacts(version, digest string, now time.Time) (rollout.Pro
 				return facts, fmt.Errorf("%w: ancestor %s", ErrDeploymentRetryParentActive, deployment.DeploymentID)
 			}
 		}
-		if err := validateDeploymentJobMaterialGraph(s.db, deployment.DeploymentID); err != nil {
+		if err := validateDeploymentJobMaterialGraph(s.rdb, deployment.DeploymentID); err != nil {
 			return facts, err
 		}
 		targets, err := s.DeploymentTargets(deployment.DeploymentID)
@@ -499,7 +500,7 @@ func (s *Store) promotionIndependentGateState(jobID, expectedVersion string, now
 		return "", err
 	}
 	var assigned, active int
-	if err := s.db.QueryRow(`SELECT COUNT(*),
+	if err := s.rdb.QueryRow(`SELECT COUNT(*),
 	       COALESCE(SUM(CASE WHEN v.revoked_at IS NULL THEN 1 ELSE 0 END),0)
 	  FROM verification_assignments AS a
 	  JOIN verifiers AS v ON v.verifier_id=a.verifier_id
@@ -515,7 +516,7 @@ func (s *Store) promotionIndependentGateState(jobID, expectedVersion string, now
 	}
 
 	var rows, live, current, clashes, releaseClashes, fresh, failed, releaseUnreported, complete int
-	err := s.db.QueryRow(`
+	err := s.rdb.QueryRow(`
 WITH current_assignments AS (
   SELECT a.verifier_id,MAX(a.assigned_at) AS assigned_at
     FROM verification_assignments AS a
@@ -596,7 +597,7 @@ SELECT COALESCE(SUM(rows),0),COALESCE(SUM(live),0),COALESCE(SUM(current_rows),0)
 
 func (s *Store) validatePromotionIndependentGateTimes(jobID string) error {
 	// 空的 INDEPENDENT received_at 仍代表沒有合格證據；它不參與下方的時間比較。
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT 'assignment assigned_at',a.assigned_at
   FROM verification_assignments AS a
   JOIN verifiers AS v ON v.verifier_id=a.verifier_id
@@ -633,7 +634,7 @@ SELECT 'job terminal_at',j.terminal_at
 
 func (s *Store) canaryEvidenceEpoch() (time.Time, bool, error) {
 	var raw string
-	err := s.db.QueryRow(`SELECT started_at FROM canary_evidence_epoch WHERE singleton=1`).Scan(&raw)
+	err := s.rdb.QueryRow(`SELECT started_at FROM canary_evidence_epoch WHERE singleton=1`).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, false, nil
 	}
@@ -698,7 +699,7 @@ func (s *Store) latestWorkloadObservationWitnesses(machineIDs []string) (map[str
 	for _, machineID := range machineIDs {
 		var witness workloadObservationWitness
 		var received, evidence string
-		err := s.db.QueryRow(`SELECT verdict,received_at,evidence_at,openclaw_present,running_version,workload_policy_token,policy_valid
+		err := s.rdb.QueryRow(`SELECT verdict,received_at,evidence_at,openclaw_present,running_version,workload_policy_token,policy_valid
 		 FROM workload_observation_witness WHERE machine_id=?`, machineID).
 			Scan(&witness.verdict, &received, &evidence, &witness.openClawPresent, &witness.runningVersion,
 				&witness.policyToken, &witness.policyValid)
@@ -734,7 +735,7 @@ func (s *Store) workloadObservationCoverage(machineID, displayName, version stri
 		return false, "active workload policy 無效，無法驗證連續觀測", nil
 	}
 	expectedToken := workloadPolicyToken(policy.fingerprint, policy.generation, displayName)
-	rows, err := s.db.Query(`SELECT received_at,evidence_at,verdict,openclaw_present,
+	rows, err := s.rdb.Query(`SELECT received_at,evidence_at,verdict,openclaw_present,
 		 running_version,workload_policy_token,policy_valid
 		 FROM workload_observation_evidence
 		 WHERE machine_id=? AND evidence_id>? ORDER BY evidence_id`, machineID, afterEvidenceID)
@@ -844,7 +845,7 @@ func activeWorkloadPolicyFrom(q workloadPolicyQueryRower) (activeWorkloadPolicy,
 }
 
 func (s *Store) activeWorkloadPolicy() (activeWorkloadPolicy, error) {
-	policy, err := activeWorkloadPolicyFrom(s.db)
+	policy, err := activeWorkloadPolicyFrom(s.rdb)
 	if err != nil || !s.expectsLoaded {
 		return policy, err
 	}
@@ -908,7 +909,7 @@ type appliedOpenClawWitness struct {
 func (s *Store) latestSucceededOpenClawWitnesses(machineIDs []string) (map[string]appliedOpenClawWitness, error) {
 	out := make(map[string]appliedOpenClawWitness, len(machineIDs))
 	for _, machineID := range machineIDs {
-		rows, err := s.db.Query(`SELECT j.job_id,j.state,j.artifact_digest,j.terminal_at,d.spec,d.resource_kind,d.resource_id
+		rows, err := s.rdb.Query(`SELECT j.job_id,j.state,j.artifact_digest,j.terminal_at,d.spec,d.resource_kind,d.resource_id
 		 FROM jobs j JOIN desired_state d ON d.desired_id=j.desired_id
 		 WHERE j.machine_id=?
 		 ORDER BY j.rowid DESC`, machineID)

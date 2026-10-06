@@ -220,7 +220,7 @@ func (s *Store) ApplyOperatorArtifactFetch(req OperatorArtifactFetchRequest,
 	}
 	audit := operatorArtifactFetchAudit(req)
 
-	lookupTx, err := s.db.Begin()
+	lookupTx, err := s.beginWrite(context.Background(), "apply_operator_artifact_fetch")
 	if err != nil {
 		return OperatorArtifactFetchResult{}, fmt.Errorf("store: begin artifact fetch idempotency lookup: %w", err)
 	}
@@ -271,7 +271,7 @@ func (s *Store) ApplyOperatorArtifactFetch(req OperatorArtifactFetchRequest,
 		}
 	}
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_artifact_fetch_2")
 	if err != nil {
 		return OperatorArtifactFetchResult{}, fmt.Errorf("store: begin artifact fetch enqueue: %w", err)
 	}
@@ -394,7 +394,7 @@ func loadOperatorArtifactFetchCached(q operatorRowQuerier, key string) (operator
 	return cached, true, nil
 }
 
-func (s *Store) rejectOperatorArtifactFetchTx(tx *sql.Tx, req OperatorArtifactFetchRequest,
+func (s *Store) rejectOperatorArtifactFetchTx(tx dbTx, req OperatorArtifactFetchRequest,
 	audit AuditEntry, code string, now time.Time,
 ) (OperatorArtifactFetchResult, error) {
 	detail, ok := canonicalOperatorArtifactFetchRejectionDetail(code)
@@ -460,7 +460,7 @@ func isCanonicalOperatorArtifactFetchRejection(code string) bool {
 	return ok
 }
 
-func (s *Store) replayOperatorArtifactFetch(tx *sql.Tx, req OperatorArtifactFetchRequest,
+func (s *Store) replayOperatorArtifactFetch(tx dbTx, req OperatorArtifactFetchRequest,
 	audit AuditEntry, cached operatorCachedRequest,
 ) (OperatorArtifactFetchResult, error) {
 	requestAt, err := canonicalArtifactFetchNow(s.now())
@@ -549,7 +549,7 @@ func (s *Store) replayOperatorArtifactFetch(tx *sql.Tx, req OperatorArtifactFetc
 	return OperatorArtifactFetchResult{Operation: record.Operation, Replayed: true, Audited: true}, nil
 }
 
-func (s *Store) rejectInvalidOperatorArtifactFetchCache(tx *sql.Tx,
+func (s *Store) rejectInvalidOperatorArtifactFetchCache(tx dbTx,
 	audit AuditEntry,
 ) (OperatorArtifactFetchResult, error) {
 	audit.Subject = "artifact fetch idempotency cache"
@@ -565,7 +565,7 @@ func (s *Store) rejectInvalidOperatorArtifactFetchCache(tx *sql.Tx,
 	return OperatorArtifactFetchResult{Audited: true}, ErrArtifactFetchCacheInvalid
 }
 
-func validateOperatorArtifactFetchOriginalAudit(tx *sql.Tx, req OperatorArtifactFetchRequest,
+func validateOperatorArtifactFetchOriginalAudit(tx dbTx, req OperatorArtifactFetchRequest,
 	createdAt string, ok bool, detail string,
 ) (bool, error) {
 	audit := operatorArtifactFetchAudit(req)
@@ -648,7 +648,7 @@ func (s *Store) getArtifactFetchRecord(operationID string) (artifactFetchRecord,
 	if !validArtifactFetchIdentifier(operationID, 128) {
 		return artifactFetchRecord{}, ErrArtifactFetchNotFound
 	}
-	return artifactFetchRecordByID(s.db, operationID)
+	return artifactFetchRecordByID(s.rdb, operationID)
 }
 
 func (s *Store) ListArtifactFetchOperations(req ArtifactFetchListRequest) (ArtifactFetchListResult, error) {
@@ -690,7 +690,7 @@ func (s *Store) ListArtifactFetchOperations(req ArtifactFetchListRequest) (Artif
 	// a deferred transaction even though write transactions use _txlock=immediate,
 	// allowing WAL writers to proceed without splitting this result across two
 	// database versions.
-	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	tx, err := s.rdb.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return ArtifactFetchListResult{}, fmt.Errorf("store: begin artifact fetch list snapshot: %w", err)
 	}
@@ -738,7 +738,7 @@ func (s *Store) ListArtifactFetchOperationIDsForWorker(state ArtifactFetchState,
 		limit < 1 || limit > MaxArtifactFetchReadLimit {
 		return nil, ErrArtifactFetchInvalid
 	}
-	rows, err := s.db.Query(`SELECT operation_id FROM artifact_fetch_operations
+	rows, err := s.rdb.Query(`SELECT operation_id FROM artifact_fetch_operations
  WHERE state=? ORDER BY created_at ASC,operation_id ASC LIMIT ?`, state, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: list artifact fetch worker queue: %w", err)
@@ -766,7 +766,7 @@ func (s *Store) ListArtifactFetchOperationIDsForWorker(state ArtifactFetchState,
 // evidence. A READY-time worker may subsequently reclaim these running rows;
 // every progress/terminal write carrying an older token will fail closed.
 func (s *Store) FenceRunningArtifactFetchOperations() (int, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "fence_running_artifact_fetch_operations")
 	if err != nil {
 		return 0, fmt.Errorf("store: begin artifact fetch startup fence: %w", err)
 	}
@@ -831,7 +831,7 @@ func (s *Store) ClaimArtifactFetchOperation(operationID string, reclaimRunning b
 	if !validArtifactFetchIdentifier(operationID, 128) {
 		return ArtifactFetchClaim{}, ErrArtifactFetchNotFound
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "claim_artifact_fetch_operation")
 	if err != nil {
 		return ArtifactFetchClaim{}, fmt.Errorf("store: begin artifact fetch claim: %w", err)
 	}
@@ -890,7 +890,7 @@ func (s *Store) AdvanceArtifactFetchOperation(operationID, runToken string,
 	if !ok || rank < 1 || rank > 3 || progressBytes < 0 {
 		return ArtifactFetchOperation{}, ErrArtifactFetchProgress
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "advance_artifact_fetch_operation")
 	if err != nil {
 		return ArtifactFetchOperation{}, fmt.Errorf("store: begin artifact fetch progress: %w", err)
 	}
@@ -935,7 +935,7 @@ func (s *Store) SucceedArtifactFetchOperation(operationID, runToken, sha256Hex s
 	if !validArtifactFetchSHA256(sha256Hex) || sizeBytes < 0 {
 		return ArtifactFetchOperation{}, ErrArtifactFetchProgress
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "succeed_artifact_fetch_operation")
 	if err != nil {
 		return ArtifactFetchOperation{}, fmt.Errorf("store: begin artifact fetch success: %w", err)
 	}
@@ -977,7 +977,7 @@ func (s *Store) FailArtifactFetchOperation(operationID, runToken, code, detail s
 	if !validArtifactFetchErrorCode(code) || !validArtifactFetchText(detail, ArtifactFetchMaxErrorBytes, false) {
 		return ArtifactFetchOperation{}, ErrArtifactFetchProgress
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "fail_artifact_fetch_operation")
 	if err != nil {
 		return ArtifactFetchOperation{}, fmt.Errorf("store: begin artifact fetch failure: %w", err)
 	}

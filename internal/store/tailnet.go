@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -19,15 +20,14 @@ func (s *Store) IgnorePeer(hostname, note string) error {
 	if h == "" {
 		return errors.New("store: 要忽略哪一台？hostname 是空的")
 	}
-	_, err := s.db.Exec(
-		`INSERT INTO tailnet_ignored (hostname, note, created_at) VALUES (?,?,?)
+	_, err := s.execWrite(context.Background(), "ignore_peer", `INSERT INTO tailnet_ignored (hostname, note, created_at) VALUES (?,?,?)
 		 ON CONFLICT(hostname) DO UPDATE SET note = excluded.note`,
 		h, nullStr(note), fmtTime(time.Now()))
 	return err
 }
 
 func (s *Store) UnignorePeer(hostname string) error {
-	_, err := s.db.Exec(`DELETE FROM tailnet_ignored WHERE hostname = ?`,
+	_, err := s.execWrite(context.Background(), "unignore_peer", `DELETE FROM tailnet_ignored WHERE hostname = ?`,
 		strings.ToLower(strings.TrimSpace(hostname)))
 	return err
 }
@@ -41,7 +41,7 @@ func (s *Store) IgnoredPeers() (map[string]bool, error) {
 // rules using one caller-supplied clock. Reconcile and the visible rule list
 // must agree at an expiry boundary instead of consulting two nearby instants.
 func (s *Store) IgnoredPeersAt(now time.Time) (map[string]bool, error) {
-	rows, err := s.db.Query(`SELECT hostname FROM tailnet_ignored`)
+	rows, err := s.rdb.Query(`SELECT hostname FROM tailnet_ignored`)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (s *Store) IgnoredPeersAt(now time.Time) (map[string]bool, error) {
 // or removed, even when the current Tailnet observation cannot be collected.
 func (s *Store) TailnetLegacyIgnoredCount() (int, error) {
 	var count int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM tailnet_ignored`).Scan(&count); err != nil {
+	if err := s.rdb.QueryRow(`SELECT COUNT(*) FROM tailnet_ignored`).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil

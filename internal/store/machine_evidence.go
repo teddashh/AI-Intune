@@ -661,7 +661,7 @@ func validMachineReadCredential(obs observation, credential model.Credential, de
 }
 
 func (s *Store) machineReadOccupancy(machineID string) ([]MachineReadOccupancy, int, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT provider, source, COUNT(*), MAX(measured_at), MAX(received_at),
        SUM(CASE WHEN last_error_text IS NOT NULL AND last_error_text != '' THEN 1 ELSE 0 END)
   FROM ticket_occupancy_observation
@@ -704,7 +704,7 @@ SELECT provider, source, COUNT(*), MAX(measured_at), MAX(received_at),
 }
 
 func (s *Store) machineReadOccupancyAgents(machineID, provider, source string) ([]string, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT agent_id FROM ticket_occupancy_observation
  WHERE machine_id = ? AND provider = ? AND source = ?
    AND agent_id IS NOT NULL AND agent_id != ''

@@ -154,7 +154,12 @@ func TestOperatorHubDiscoveryRejectsUnsafeConfigFile(t *testing.T) {
 			}
 		}},
 		{name: "group-writable", prepare: func(t *testing.T, path string) {
-			if err := os.WriteFile(path, []byte(`{"hub_url":"http://100.64.0.30:8787"}`), 0o620); err != nil {
+			if err := os.WriteFile(path, []byte(`{"hub_url":"http://100.64.0.30:8787"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// WriteFile modes are filtered by the process umask (022 strips the
+			// group-write bit), so set the unsafe mode explicitly.
+			if err := os.Chmod(path, 0o620); err != nil {
 				t.Fatal(err)
 			}
 		}},

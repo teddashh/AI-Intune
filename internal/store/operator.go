@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -362,7 +363,7 @@ func (s *Store) ApplyOperatorMachineChannel(req OperatorMachineChannelRequest) (
 	if audit.Subject == "" {
 		audit.Subject = req.MachineID
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_machine_channel")
 	if err != nil {
 		return OperatorMachineChannelResult{}, fmt.Errorf("store: begin operator machine channel: %w", err)
 	}
@@ -557,7 +558,7 @@ func operatorError(code, detail string) *OperatorRequestError {
 	return &OperatorRequestError{Code: code, Detail: detail}
 }
 
-func populateMachineChannelAudit(tx *sql.Tx, audit *AuditEntry, machineID, target string) {
+func populateMachineChannelAudit(tx dbTx, audit *AuditEntry, machineID, target string) {
 	var display string
 	var current sql.NullString
 	if err := tx.QueryRow(`SELECT display_name,channel FROM machine_registry WHERE machine_id=?`, machineID).

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"errors"
@@ -153,7 +154,7 @@ const OperatorDenialAuditLimit = 1000
 
 // RecordAudit 寫一筆。回傳 error 只是為了讓呼叫端能 log，**不准拿它中止動作**。
 func (s *Store) RecordAudit(e AuditEntry) error {
-	return s.recordAudit(s.db, e)
+	return s.recordAudit(boundExec{s: s, name: "record_audit"}, e)
 }
 
 // RecordOperatorDenial appends one sampled/aggregated boundary denial and
@@ -171,7 +172,7 @@ func (s *Store) recordOperatorDenialBounded(e AuditEntry, limit int) error {
 	if limit <= 0 {
 		return errors.New("store: operator denial audit limit must be positive")
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "record_operator_denial_bounded")
 	if err != nil {
 		return fmt.Errorf("store: begin bounded operator denial audit: %w", err)
 	}
@@ -203,7 +204,7 @@ type auditExecer interface {
 // recordAuditTx is used when the evidence and the authority-changing operator
 // mutation must commit together. Ordinary observational audit still uses
 // RecordAudit and remains non-gating.
-func (s *Store) recordAuditTx(tx *sql.Tx, e AuditEntry) error {
+func (s *Store) recordAuditTx(tx dbTx, e AuditEntry) error {
 	return s.recordAudit(tx, e)
 }
 
@@ -297,7 +298,7 @@ SELECT audit_id, at, action, COALESCE(machine_id,''), subject, COALESCE(reason,'
 	q += ` ORDER BY at DESC, audit_id DESC LIMIT ?`
 	args = append(args, limit)
 
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.rdb.Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: audit list: %w", err)
 	}
@@ -352,7 +353,7 @@ SELECT audit_id, at, action, COALESCE(machine_id,''), subject, COALESCE(reason,'
   FROM console_rows
  ORDER BY at DESC, audit_id DESC
  LIMIT ?`
-	rows, err := s.db.Query(q, args...)
+	rows, err := s.rdb.Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("store: console audit list: %w", err)
 	}

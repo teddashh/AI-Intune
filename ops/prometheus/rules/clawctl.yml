@@ -227,3 +227,33 @@ groups:
             ⚠ 這條**不管**「一個工作都沒宣告」那種安靜 —— 那是 sampleagent3 的情況，
             由 MachineReportsButNothingIsDeclaredForIt 接手，而且那是要人去
             決定「這台該不該有工作」，不是程式能替他回答的。
+
+  - name: clawctl-notify
+    interval: 60s
+    rules:
+      - alert: NotifyFailing
+        expr: clawctl_notify_consecutive_failures{kind="daily"} >= 3
+        for: 30m
+        labels:
+          severity: warning
+          source: clawctl
+        annotations:
+          summary: daily notify has failed {{ $value }} times since the last delivery
+          description: >-
+            The hub has recorded at least 3 undelivered daily-report attempts
+            since the last successful delivery, for 30 minutes. Backoff is
+            still retrying. A failed send does not consume the day. Check the
+            notify command and clawctl_notify_last_attempt_timestamp_seconds.
+
+      - alert: NotifyNotConfigured
+        expr: clawctl_notify_configured == 0
+        for: 30m
+        labels:
+          severity: warning
+          source: clawctl
+        annotations:
+          summary: the hub has no notify command configured
+          description: >-
+            clawctl_notify_configured is 0. The daily report is recorded once
+            as undelivered and is not retried that day. Set CLAWCTL_NOTIFY_CMD
+            so a failed hub is not silent.

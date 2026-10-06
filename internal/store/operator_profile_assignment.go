@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -213,7 +214,7 @@ var errMachineJobsEnabledProjectionInvalid = errors.New("store: machine jobs ena
 // registry identity looking unknown forever.
 func (s *Store) MachinePlatformIdentity(machineID string) (string, string, error) {
 	var registryOS, registryArch string
-	err := s.db.QueryRow(`SELECT COALESCE(os,''),COALESCE(arch,'') FROM machine_registry WHERE machine_id=?`,
+	err := s.rdb.QueryRow(`SELECT COALESCE(os,''),COALESCE(arch,'') FROM machine_registry WHERE machine_id=?`,
 		machineID).Scan(&registryOS, &registryArch)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", "", ErrNotFound
@@ -221,7 +222,7 @@ func (s *Store) MachinePlatformIdentity(machineID string) (string, string, error
 	if err != nil {
 		return "", "", fmt.Errorf("store: read machine platform identity: %w", err)
 	}
-	return latestProfileAssignmentPlatformIdentity(s.db, machineID, registryOS, registryArch)
+	return latestProfileAssignmentPlatformIdentity(s.rdb, machineID, registryOS, registryArch)
 }
 
 func latestProfileAssignmentPlatformIdentity(q operatorProfileAssignmentQueryer, machineID, registryOS,
@@ -298,7 +299,7 @@ func (s *Store) PreviewOperatorMachineProfileAssignment(machineID, profileID str
 	prepared OperatorMachineProfileAssignmentPrepared,
 ) (OperatorMachineProfileAssignmentPreviewResult, error) {
 	now := s.now().UTC().Truncate(time.Second)
-	return s.previewOperatorMachineProfileAssignment(s.db, machineID, profileID, profileRevision, prepared, now)
+	return s.previewOperatorMachineProfileAssignment(s.rdb, machineID, profileID, profileRevision, prepared, now)
 }
 
 func (s *Store) previewOperatorMachineProfileAssignment(q operatorProfileAssignmentQueryer,
@@ -807,7 +808,7 @@ func (s *Store) ApplyOperatorMachineProfileAssignment(req OperatorMachineProfile
 	audit.Action, audit.MachineID, audit.Subject = AuditMachineProfileAssign, req.MachineID, req.MachineID
 	audit.Reason, audit.IdempotencyKey, audit.RequestDigest = req.Reason, req.IdempotencyKey, req.RequestDigest
 
-	lookupTx, err := s.db.Begin()
+	lookupTx, err := s.beginWrite(context.Background(), "apply_operator_machine_profile_assignment")
 	if err != nil {
 		return OperatorMachineProfileAssignmentResult{}, fmt.Errorf("store: begin profile assignment idempotency lookup: %w", err)
 	}
@@ -831,7 +832,7 @@ func (s *Store) ApplyOperatorMachineProfileAssignment(req OperatorMachineProfile
 	}
 	prepared, prepareErr = prepare()
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_machine_profile_assignment_2")
 	if err != nil {
 		return OperatorMachineProfileAssignmentResult{}, fmt.Errorf("store: begin profile assignment apply: %w", err)
 	}
@@ -927,7 +928,7 @@ func (s *Store) ApplyOperatorMachineProfileAssignment(req OperatorMachineProfile
 	return result, nil
 }
 
-func (s *Store) mutateOperatorProfileAssignmentTx(tx *sql.Tx, req OperatorMachineProfileAssignmentRequest,
+func (s *Store) mutateOperatorProfileAssignmentTx(tx dbTx, req OperatorMachineProfileAssignmentRequest,
 	prepared OperatorMachineProfileAssignmentPrepared, preview OperatorMachineProfileAssignmentPreviewResult,
 	now time.Time,
 ) (operatorProfileAssignmentReceipt, error) {
@@ -1001,7 +1002,7 @@ func (s *Store) mutateOperatorProfileAssignmentTx(tx *sql.Tx, req OperatorMachin
 	}, nil
 }
 
-func operatorProfileAssignmentReceiptForCurrent(tx *sql.Tx,
+func operatorProfileAssignmentReceiptForCurrent(tx dbTx,
 	preview OperatorMachineProfileAssignmentPreviewResult,
 ) (operatorProfileAssignmentReceipt, error) {
 	var receipt operatorProfileAssignmentReceipt
@@ -1099,7 +1100,7 @@ func loadOperatorProfileAssignmentCached(q operatorRowQuerier, key string) (oper
 	return cached, true, nil
 }
 
-func (s *Store) rejectOperatorProfileAssignmentTx(tx *sql.Tx, req OperatorMachineProfileAssignmentRequest,
+func (s *Store) rejectOperatorProfileAssignmentTx(tx dbTx, req OperatorMachineProfileAssignmentRequest,
 	audit AuditEntry, code string, now time.Time,
 ) (OperatorMachineProfileAssignmentResult, error) {
 	detail, ok := canonicalOperatorProfileAssignmentRejectionDetail(code)
@@ -1125,7 +1126,7 @@ func (s *Store) rejectOperatorProfileAssignmentTx(tx *sql.Tx, req OperatorMachin
 	return OperatorMachineProfileAssignmentResult{}, rejection
 }
 
-func (s *Store) replayOperatorProfileAssignment(tx *sql.Tx, req OperatorMachineProfileAssignmentRequest,
+func (s *Store) replayOperatorProfileAssignment(tx dbTx, req OperatorMachineProfileAssignmentRequest,
 	audit AuditEntry, cached operatorCachedRequest,
 ) (OperatorMachineProfileAssignmentResult, error) {
 	audit.At = s.now().UTC().Truncate(time.Second)
@@ -1191,7 +1192,7 @@ func (s *Store) replayOperatorProfileAssignment(tx *sql.Tx, req OperatorMachineP
 	return result, nil
 }
 
-func (s *Store) rejectInvalidOperatorProfileAssignmentCache(tx *sql.Tx,
+func (s *Store) rejectInvalidOperatorProfileAssignmentCache(tx dbTx,
 	audit AuditEntry,
 ) (OperatorMachineProfileAssignmentResult, error) {
 	// Never copy a corrupt cached value into the returned error or the audit:
@@ -1274,7 +1275,7 @@ func validOperatorProfileAssignmentReceipt(receipt operatorProfileAssignmentRece
 	return true
 }
 
-func validateOperatorProfileAssignmentSuccessEvidence(tx *sql.Tx, receipt operatorProfileAssignmentReceipt,
+func validateOperatorProfileAssignmentSuccessEvidence(tx dbTx, receipt operatorProfileAssignmentReceipt,
 	req OperatorMachineProfileAssignmentRequest,
 ) (bool, error) {
 	var assignmentRows int
@@ -1337,7 +1338,7 @@ func cachedTimestampForReceipt(receipt operatorProfileAssignmentReceipt) string 
 	return fmtTime(receipt.AssignedAt)
 }
 
-func validateOperatorProfileAssignmentAudit(tx *sql.Tx, req OperatorMachineProfileAssignmentRequest,
+func validateOperatorProfileAssignmentAudit(tx dbTx, req OperatorMachineProfileAssignmentRequest,
 	at string, ok bool, detail string,
 ) (bool, error) {
 	query := `SELECT COUNT(*) FROM audit_log WHERE action=? AND machine_id=? AND COALESCE(reason,'')=?

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -45,7 +46,7 @@ func (s *Store) RecordHubEvent(kind, detail string, at time.Time) error {
 	if kind == "" || detail == "" {
 		return fmt.Errorf("store: hub event needs kind and detail")
 	}
-	_, err := s.db.Exec(`INSERT INTO hub_events (at, kind, detail) VALUES (?, ?, ?)`,
+	_, err := s.execWrite(context.Background(), "record_hub_event", `INSERT INTO hub_events (at, kind, detail) VALUES (?, ?, ?)`,
 		at.UTC().Format(time.RFC3339), kind, detail)
 	if err != nil {
 		return fmt.Errorf("store: record hub event: %w", err)
@@ -55,7 +56,7 @@ func (s *Store) RecordHubEvent(kind, detail string, at time.Time) error {
 
 // HubEventsBetween 回 [from, to] 內的事件，時間由舊到新。
 func (s *Store) HubEventsBetween(from, to time.Time) ([]HubEvent, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT at, kind, detail FROM hub_events
  WHERE at >= ? AND at <= ?
  ORDER BY at ASC, event_id ASC`,
@@ -79,7 +80,7 @@ SELECT at, kind, detail FROM hub_events
 
 // TouchHubAlive 蓋一次「我還活著」的章（對帳迴圈每一輪叫一次）。
 func (s *Store) TouchHubAlive(now time.Time) error {
-	_, err := s.db.Exec(`
+	_, err := s.execWrite(context.Background(), "touch_hub_alive", `
 INSERT INTO schema_meta (key, value) VALUES (?, ?)
 ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
 		hubAliveKey, now.UTC().Format(time.RFC3339))
@@ -92,7 +93,7 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
 // LastHubAlive 回上一次蓋章的時間。沒有蓋過（第一次跑、或舊版寫的資料庫）回 false。
 func (s *Store) LastHubAlive() (time.Time, bool, error) {
 	var v string
-	err := s.db.QueryRow(`SELECT value FROM schema_meta WHERE key = ?`, hubAliveKey).Scan(&v)
+	err := s.rdb.QueryRow(`SELECT value FROM schema_meta WHERE key = ?`, hubAliveKey).Scan(&v)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return time.Time{}, false, nil

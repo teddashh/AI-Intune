@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -151,7 +152,7 @@ func (s *Store) PreviewOperatorEnrollToken(displayName string, ttlSeconds int64)
 	// 註冊上限只是講出來給人看，不進 digest。分母每分鐘都在變，把它釘進預覽等於
 	// 每一份預覽在按下送出之前就過期了——而把上限「調高」也會作廢一份本來成立的
 	// 預覽，那是完全相反的方向。真正擋人的那一次數，發生在開票的同一筆交易裡。
-	limit, err := enrollmentLimitState(s.db)
+	limit, err := enrollmentLimitState(s.rdb)
 	if err != nil {
 		return OperatorEnrollTokenPreviewResult{}, err
 	}
@@ -293,7 +294,7 @@ func (s *Store) ApplyOperatorEnrollToken(req OperatorEnrollTokenCreateRequest) (
 	audit.IdempotencyKey = req.IdempotencyKey
 	audit.RequestDigest = req.RequestDigest
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_enroll_token")
 	if err != nil {
 		return OperatorEnrollTokenCreateResult{}, fmt.Errorf("store: begin operator enroll token: %w", err)
 	}
@@ -425,7 +426,7 @@ func (s *Store) ApplyOperatorEnrollToken(req OperatorEnrollTokenCreateRequest) (
 	return freshOperatorEnrollTokenResult(receipt, token), nil
 }
 
-func (s *Store) replayOperatorEnrollToken(tx *sql.Tx, req OperatorEnrollTokenCreateRequest,
+func (s *Store) replayOperatorEnrollToken(tx dbTx, req OperatorEnrollTokenCreateRequest,
 	audit AuditEntry, cached operatorCachedRequest,
 ) (OperatorEnrollTokenCreateResult, error) {
 	if cached.Operation != operatorEnrollTokenOperation || cached.Digest != req.RequestDigest {
@@ -503,7 +504,7 @@ func (s *Store) replayOperatorEnrollToken(tx *sql.Tx, req OperatorEnrollTokenCre
 	return result, nil
 }
 
-func (s *Store) rejectInvalidOperatorEnrollTokenCache(tx *sql.Tx,
+func (s *Store) rejectInvalidOperatorEnrollTokenCache(tx dbTx,
 	audit AuditEntry,
 ) (OperatorEnrollTokenCreateResult, error) {
 	// Never copy a corrupt cached value into either the returned error or audit.
@@ -528,7 +529,7 @@ func canonicalOperatorEnrollCacheTime(raw string) bool {
 	return !parsed.IsZero() && fmtTime(parsed) == raw && parsed.Equal(parsed.UTC().Truncate(time.Second))
 }
 
-func validateOperatorEnrollTokenRejectionEvidence(tx *sql.Tx, cached operatorCachedRequest,
+func validateOperatorEnrollTokenRejectionEvidence(tx dbTx, cached operatorCachedRequest,
 	req OperatorEnrollTokenCreateRequest,
 ) (bool, error) {
 	var originalRejectionAudits int
@@ -545,7 +546,7 @@ func validateOperatorEnrollTokenRejectionEvidence(tx *sql.Tx, cached operatorCac
 	return originalRejectionAudits == 1, nil
 }
 
-func validateOperatorEnrollTokenSuccessEvidence(tx *sql.Tx, receipt operatorEnrollTokenReceipt,
+func validateOperatorEnrollTokenSuccessEvidence(tx dbTx, receipt operatorEnrollTokenReceipt,
 	req OperatorEnrollTokenCreateRequest,
 ) (bool, error) {
 	var registryCreatedAt string

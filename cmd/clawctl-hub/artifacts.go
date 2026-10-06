@@ -311,8 +311,7 @@ func (h *hub) handleGetArtifact(w http.ResponseWriter, r *http.Request, machineI
 	}
 	allowed, err := h.store.MachineMayDownloadArtifact(machineID, digest)
 	if err != nil {
-		log.Printf("核對 machine artifact grant 失敗 machine=%s artifact=%s: %v", machineID, digest, err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL", "核對 artifact download grant 失敗")
+		h.finishStoreError(w, "核對 artifact download grant", machineID, "核對 artifact download grant 失敗", err)
 		return
 	}
 	if !allowed {

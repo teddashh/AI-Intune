@@ -47,7 +47,7 @@ func (s *Store) PendingEnrollmentTickets(now time.Time) (map[string]PendingEnrol
 	if now.IsZero() {
 		return nil, fmt.Errorf("store: pending enrollment tickets need a trusted clock")
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT e.used_by, e.created_at, e.expires_at, `+enrollmentTicketExpiredPredicate+`
   FROM enrollment_tokens e
  WHERE e.used_at IS NULL AND e.used_by IS NOT NULL AND e.used_by <> ''

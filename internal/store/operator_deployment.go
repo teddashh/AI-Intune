@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -139,7 +140,7 @@ func (s *Store) applyOperatorDeployment(action operatorDeploymentAction, req Ope
 
 	// Phase one reads only historical request identity. A hit is replayed and
 	// audited here, before Prepare can touch today's artifact or deployment.
-	lookupTx, err := s.db.Begin()
+	lookupTx, err := s.beginWrite(context.Background(), "apply_operator_deployment")
 	if err != nil {
 		return OperatorDeploymentResult{}, fmt.Errorf("store: begin operator deployment idempotency lookup: %w", err)
 	}
@@ -159,7 +160,7 @@ func (s *Store) applyOperatorDeployment(action operatorDeploymentAction, req Ope
 	// Re-reserve the writer and recheck the global key. This closes the race in
 	// which another process commits the same key between the historical lookup
 	// and our current-state phase. Prepare then runs under this writer reservation.
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_deployment_2")
 	if err != nil {
 		return OperatorDeploymentResult{}, fmt.Errorf("store: begin operator deployment apply: %w", err)
 	}
@@ -304,7 +305,7 @@ func loadOperatorDeploymentCached(q operatorRowQuerier, key string) (operatorCac
 	return cached, true, nil
 }
 
-func (s *Store) rejectOperatorDeploymentTx(tx *sql.Tx, action operatorDeploymentAction,
+func (s *Store) rejectOperatorDeploymentTx(tx dbTx, action operatorDeploymentAction,
 	operation string, req OperatorDeploymentRequest, audit AuditEntry, code string, writerNow time.Time,
 ) (OperatorDeploymentResult, error) {
 	detail, ok := canonicalOperatorDeploymentRejectionDetail(code)
@@ -331,7 +332,7 @@ func (s *Store) rejectOperatorDeploymentTx(tx *sql.Tx, action operatorDeployment
 	return OperatorDeploymentResult{}, rejection
 }
 
-func (s *Store) replayOperatorDeployment(tx *sql.Tx, action operatorDeploymentAction,
+func (s *Store) replayOperatorDeployment(tx dbTx, action operatorDeploymentAction,
 	operation string, req OperatorDeploymentRequest, audit AuditEntry, cached operatorCachedRequest,
 ) (OperatorDeploymentResult, error) {
 	audit.At = s.now().UTC().Truncate(time.Second)
@@ -407,7 +408,7 @@ func (s *Store) replayOperatorDeployment(tx *sql.Tx, action operatorDeploymentAc
 	return result, nil
 }
 
-func (s *Store) rejectInvalidOperatorDeploymentCache(tx *sql.Tx, audit AuditEntry) (OperatorDeploymentResult, error) {
+func (s *Store) rejectInvalidOperatorDeploymentCache(tx dbTx, audit AuditEntry) (OperatorDeploymentResult, error) {
 	audit.Subject = "deployment idempotency cache"
 	audit.Reason = ""
 	audit.OK = false
@@ -562,7 +563,7 @@ func validOperatorDeploymentPreviewDigest(value string) bool {
 	return strings.HasPrefix(value, "sha256:") && artifact.ValidSHA256Hex(strings.TrimPrefix(value, "sha256:"))
 }
 
-func validateOperatorDeploymentRejectionEvidence(tx *sql.Tx, action operatorDeploymentAction,
+func validateOperatorDeploymentRejectionEvidence(tx dbTx, action operatorDeploymentAction,
 	req OperatorDeploymentRequest, cached operatorCachedRequest,
 ) (bool, error) {
 	audit := operatorDeploymentAudit(action, req)
@@ -576,7 +577,7 @@ func validateOperatorDeploymentRejectionEvidence(tx *sql.Tx, action operatorDepl
 	return count == 1, err
 }
 
-func validateOperatorDeploymentSuccessEvidence(tx *sql.Tx, receipt operatorDeploymentReceipt,
+func validateOperatorDeploymentSuccessEvidence(tx dbTx, receipt operatorDeploymentReceipt,
 	req OperatorDeploymentRequest,
 ) (bool, error) {
 	stored, err := deploymentByID(tx, receipt.Deployment.DeploymentID)
@@ -665,7 +666,7 @@ func validateOperatorDeploymentSuccessEvidence(tx *sql.Tx, receipt operatorDeplo
 // Retry is wider: its mutation consumed and released the immediate parent's
 // authority, so every durable ancestor that justified that retry must still be
 // a complete, terminal, material-coherent graph.
-func validateOperatorDeploymentSuccessGraph(tx *sql.Tx, child Deployment, action operatorDeploymentAction,
+func validateOperatorDeploymentSuccessGraph(tx dbTx, child Deployment, action operatorDeploymentAction,
 	req OperatorDeploymentRequest,
 ) (bool, error) {
 	lineage := []Deployment{child}
@@ -856,7 +857,7 @@ func operatorDeploymentCodeForError(err error) (string, bool) {
 	}
 }
 
-func (s *Store) mutateOperatorDeploymentTx(tx *sql.Tx, action operatorDeploymentAction,
+func (s *Store) mutateOperatorDeploymentTx(tx dbTx, action operatorDeploymentAction,
 	req OperatorDeploymentRequest, prepared OperatorDeploymentPrepared, now time.Time,
 ) (Deployment, []Job, error) {
 	if action != operatorDeploymentCreate {
@@ -901,7 +902,7 @@ func (s *Store) mutateOperatorDeploymentTx(tx *sql.Tx, action operatorDeployment
 	}
 }
 
-func (s *Store) createOperatorDeploymentTx(tx *sql.Tx, n NewDeployment, now time.Time) (Deployment, []Job, error) {
+func (s *Store) createOperatorDeploymentTx(tx dbTx, n NewDeployment, now time.Time) (Deployment, []Job, error) {
 	if err := validateNewDeployment(n); err != nil {
 		return Deployment{}, nil, err
 	}
@@ -921,7 +922,7 @@ func (s *Store) createOperatorDeploymentTx(tx *sql.Tx, n NewDeployment, now time
 	return createDeploymentTx(tx, n, now)
 }
 
-func validateOperatorDeploymentRetryTargetsTx(tx *sql.Tx, parentID string,
+func validateOperatorDeploymentRetryTargetsTx(tx dbTx, parentID string,
 	prepared OperatorDeploymentPrepared,
 ) error {
 	if err := validateDeploymentJobGraph(tx, parentID); err != nil {

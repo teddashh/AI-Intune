@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -50,7 +51,7 @@ func (s *Store) PublishCatalogManifest(manifest appcatalog.Manifest, publishedBy
 		return CatalogManifestRecord{}, errors.New("store: catalog publisher is invalid")
 	}
 	now := s.now().UTC().Truncate(time.Second)
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "publish_catalog_manifest")
 	if err != nil {
 		return CatalogManifestRecord{}, fmt.Errorf("store: begin catalog manifest publication: %w", err)
 	}
@@ -83,12 +84,12 @@ func (s *Store) PublishCatalogManifest(manifest appcatalog.Manifest, publishedBy
 }
 
 func (s *Store) CatalogManifest(packageID, version string) (CatalogManifestRecord, error) {
-	return scanCatalogManifest(s.db.QueryRow(`SELECT manifest_json,manifest_digest,published_at,published_by
+	return scanCatalogManifest(s.rdb.QueryRow(`SELECT manifest_json,manifest_digest,published_at,published_by
 	 FROM catalog_manifests WHERE package_id=? AND package_version=?`, packageID, version), packageID, version)
 }
 
 func (s *Store) CatalogManifests() ([]CatalogManifestRecord, error) {
-	rows, err := s.db.Query(`SELECT package_id,package_version,manifest_json,manifest_digest,published_at,published_by
+	rows, err := s.rdb.Query(`SELECT package_id,package_version,manifest_json,manifest_digest,published_at,published_by
 	 FROM catalog_manifests ORDER BY package_id,package_version LIMIT ?`, maxStoredCatalogRecords+1)
 	if err != nil {
 		return nil, fmt.Errorf("store: list catalog manifests: %w", err)
@@ -142,7 +143,7 @@ func (s *Store) PublishMachineProfile(profile appcatalog.MachineProfile, publish
 		return MachineProfileRecord{}, err
 	}
 	now := s.now().UTC().Truncate(time.Second)
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "publish_machine_profile")
 	if err != nil {
 		return MachineProfileRecord{}, fmt.Errorf("store: begin machine profile publication: %w", err)
 	}
@@ -175,12 +176,12 @@ func (s *Store) PublishMachineProfile(profile appcatalog.MachineProfile, publish
 }
 
 func (s *Store) MachineProfile(profileID string, revision int64) (MachineProfileRecord, error) {
-	return scanMachineProfile(s.db.QueryRow(`SELECT profile_json,profile_digest,published_at,published_by
+	return scanMachineProfile(s.rdb.QueryRow(`SELECT profile_json,profile_digest,published_at,published_by
 	 FROM machine_profiles WHERE profile_id=? AND profile_revision=?`, profileID, revision), profileID, revision)
 }
 
 func (s *Store) MachineProfiles() ([]MachineProfileRecord, error) {
-	rows, err := s.db.Query(`SELECT profile_id,profile_revision,profile_json,profile_digest,published_at,published_by
+	rows, err := s.rdb.Query(`SELECT profile_id,profile_revision,profile_json,profile_digest,published_at,published_by
 	 FROM machine_profiles ORDER BY profile_id,profile_revision DESC LIMIT ?`, maxStoredCatalogRecords+1)
 	if err != nil {
 		return nil, fmt.Errorf("store: list machine profiles: %w", err)

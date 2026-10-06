@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,24 +39,13 @@ func (h *hub) resolveAgentSettings(machineID string) (settingpolicy.Settings, st
 	return effective.Settings, digest
 }
 
-// Tests that exercise only the machine protocol may omit metricsOverride and
-// get the raw handler. Production composition always supplies the
-// literal-authority wrapper in newHubHTTPHandler.
-func (h *hub) machineAndPublicRoutes(mux *http.ServeMux, metricsOverride ...http.Handler) []string {
-	metrics := http.Handler(http.HandlerFunc(h.handleMetrics))
-	if len(metricsOverride) > 1 {
-		panic("machineAndPublicRoutes accepts at most one metrics handler")
-	}
-	if len(metricsOverride) == 1 {
-		if metricsOverride[0] == nil {
-			panic("machineAndPublicRoutes metrics handler is nil")
-		}
-		metrics = metricsOverride[0]
-	}
+// machineAndPublicRoutes registers the machine plane and the public liveness
+// probe. /metrics is an operator view route; exposition unit tests mount
+// handleMetrics on their own mux.
+func (h *hub) machineAndPublicRoutes(mux *http.ServeMux) []string {
 	patterns := h.agentRoutes(mux)
-	patterns = append(patterns, "GET /healthz", "GET /metrics")
-	mux.HandleFunc(patterns[len(patterns)-2], h.handleHealthz)
-	mux.Handle(patterns[len(patterns)-1], metrics)
+	patterns = append(patterns, "GET /healthz")
+	mux.HandleFunc(patterns[len(patterns)-1], h.handleHealthz)
 	return patterns
 }
 
@@ -121,7 +112,12 @@ func (h *hub) authed(next func(w http.ResponseWriter, r *http.Request, machineID
 		machineID, err := h.store.AuthenticateAgent(tok)
 		if err != nil {
 			// ⚠ 不要在錯誤訊息裡透露 token 是「不存在」還是「不對」。
-			writeErr(w, http.StatusUnauthorized, model.ErrUnauthorized, "token 無效")
+			// 鎖競爭不是憑證錯誤：回 401 會讓 agent 丟掉 token。
+			if errors.Is(err, store.ErrUnauthorized) {
+				writeErr(w, http.StatusUnauthorized, model.ErrUnauthorized, "token 無效")
+				return
+			}
+			h.finishStoreError(w, "authenticate agent", "", "internal error", err)
 			return
 		}
 		next(w, r, machineID)
@@ -148,8 +144,7 @@ func (h *hub) handleEnroll(w http.ResponseWriter, r *http.Request) {
 				"報到 token 無效、已使用或已過期")
 			return
 		}
-		log.Printf("報到失敗 host=%s: %v", req.Hostname, err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL", "報到失敗")
+		h.writeStoreError(w, "報到", "", err)
 		return
 	}
 
@@ -175,8 +170,7 @@ func (h *hub) handleCheckin(w http.ResponseWriter, r *http.Request, machineID st
 	received := time.Now().UTC()
 
 	if err := h.store.RecordCheckin(machineID, c, received); err != nil {
-		log.Printf("寫入 check-in 失敗 machine=%s: %v", machineID, err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL", "寫入失敗")
+		h.writeStoreError(w, "寫入", machineID, err)
 		return
 	}
 	// ⚠ 期望是按**顯示名稱**宣告的（人寫設定檔時想的是 "sampleagent2"，
@@ -189,8 +183,7 @@ func (h *hub) handleCheckin(w http.ResponseWriter, r *http.Request, machineID st
 	}
 	policyToken, err := h.store.CurrentWorkloadPolicyToken(name)
 	if err != nil {
-		log.Printf("產生 workload policy token 失敗 machine=%s: %v", machineID, err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL", "下發期望失敗")
+		h.writeStoreError(w, "下發期望", machineID, err)
 		return
 	}
 	settings, settingsDigest := h.resolveAgentSettings(machineID)
@@ -207,8 +200,7 @@ func (h *hub) handleCheckin(w http.ResponseWriter, r *http.Request, machineID st
 func (h *hub) handleAgentReadiness(w http.ResponseWriter, r *http.Request, machineID string) {
 	result, err := h.store.AgentReadiness(machineID)
 	if err != nil {
-		log.Printf("讀取 agent readiness 失敗 machine=%s: %v", machineID, err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 agent readiness 失敗")
+		h.finishStoreError(w, "讀取 agent readiness", machineID, "讀取 agent readiness 失敗", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, model.AgentReadinessResponse{
@@ -230,8 +222,7 @@ func (h *hub) handleObservations(w http.ResponseWriter, r *http.Request, machine
 		return
 	}
 	if err := h.store.RecordObservation(machineID, b, time.Now().UTC()); err != nil {
-		log.Printf("寫入觀測失敗 machine=%s: %v", machineID, err)
-		writeErr(w, http.StatusInternalServerError, "INTERNAL", "寫入失敗")
+		h.writeStoreError(w, "寫入", machineID, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -273,5 +264,37 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func writeErr(w http.ResponseWriter, code int, apiCode, msg string) {
+	if apiCode == model.ErrHubBusy {
+		w.Header().Set("Retry-After", strconv.Itoa(hubBusyRetryAfter()))
+	}
 	writeJSON(w, code, model.APIError{Code: apiCode, Message: msg})
+}
+
+// hubBusyRetryAfter is a uniform integer in [5, 15] seconds. Agents that
+// honor Retry-After should spread their retries across that window.
+func hubBusyRetryAfter() int {
+	return 5 + rand.IntN(11)
+}
+
+// writeStoreError is the machine-plane mapping for a store failure. The
+// public message keeps the caller's existing text; lock contention is the
+// one case that changes status.
+func (h *hub) writeStoreError(w http.ResponseWriter, action, machineID string, err error) {
+	h.finishStoreError(w, action, machineID, action+"失敗", err)
+}
+
+func (h *hub) finishStoreError(w http.ResponseWriter, action, machineID, publicMessage string, err error) {
+	if machineID != "" {
+		log.Printf("action=%s machine=%s err=%v", action, machineID, err)
+	} else {
+		log.Printf("action=%s err=%v", action, err)
+	}
+	if store.IsBusy(err) {
+		if h != nil && h.store != nil {
+			h.store.NoteBusy(err)
+		}
+		writeErr(w, http.StatusServiceUnavailable, model.ErrHubBusy, "the hub is busy; retry shortly")
+		return
+	}
+	writeErr(w, http.StatusInternalServerError, "INTERNAL", publicMessage)
 }

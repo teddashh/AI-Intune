@@ -25,7 +25,12 @@ func (h *hub) verifierAuthed(next func(w http.ResponseWriter, r *http.Request, v
 		}
 		verifier, err := h.store.AuthenticateVerifier(token)
 		if err != nil {
-			writeErr(w, http.StatusUnauthorized, model.ErrUnauthorized, "token 無效")
+			// ⚠ 不要透露憑證不存在、已撤銷，或屬於另一個 plane。
+			if errors.Is(err, store.ErrUnauthorized) {
+				writeErr(w, http.StatusUnauthorized, model.ErrUnauthorized, "token 無效")
+				return
+			}
+			h.finishStoreError(w, "authenticate verifier", "", "internal error", err)
 			return
 		}
 		next(w, r, verifier)
@@ -62,7 +67,7 @@ func (h *hub) handleIndependentVerification(w http.ResponseWriter, r *http.Reque
 			writeErr(w, http.StatusForbidden, "VERIFIER_NOT_ELIGIBLE",
 				"這個 verifier 的 failure domain 與這張工作單的機器相同，或憑證已撤銷")
 		default:
-			writeJobInternalError(w, "寫入獨立驗證證據", err)
+			h.writeStoreError(w, "寫入獨立驗證證據", "", err)
 		}
 		return
 	}
@@ -80,7 +85,7 @@ func (h *hub) handleVerificationAssignments(w http.ResponseWriter, r *http.Reque
 	}
 	assignments, err := h.store.PendingVerificationAssignments(verifier.VerifierID)
 	if err != nil {
-		writeJobInternalError(w, "讀取待驗的工作單", err)
+		h.writeStoreError(w, "讀取待驗的工作單", "", err)
 		return
 	}
 	items := make([]model.VerificationAssignment, 0, len(assignments))

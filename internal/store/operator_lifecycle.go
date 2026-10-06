@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -162,7 +163,7 @@ func (s *Store) OperatorMachineLifecycle(machineID string) (OperatorMachineLifec
 	if err != nil {
 		return OperatorMachineLifecycleReadResult{}, fmt.Errorf("store: read machine lifecycle clock: %w", err)
 	}
-	snapshot, err := loadOperatorMachineLifecycleSnapshot(s.db, machineID, now)
+	snapshot, err := loadOperatorMachineLifecycleSnapshot(s.rdb, machineID, now)
 	if err != nil {
 		return OperatorMachineLifecycleReadResult{}, err
 	}
@@ -195,7 +196,7 @@ func (s *Store) PreviewOperatorMachineLifecycle(req OperatorMachineLifecyclePrev
 	if err != nil {
 		return OperatorMachineLifecyclePreviewResult{}, fmt.Errorf("store: preview machine lifecycle clock: %w", err)
 	}
-	snapshot, err := loadOperatorMachineLifecycleSnapshot(s.db, req.MachineID, now)
+	snapshot, err := loadOperatorMachineLifecycleSnapshot(s.rdb, req.MachineID, now)
 	if err != nil {
 		return OperatorMachineLifecyclePreviewResult{}, err
 	}
@@ -364,7 +365,7 @@ func (s *Store) ApplyOperatorMachineLifecycle(req OperatorMachineLifecycleReques
 	audit.Reason = req.Reason
 	audit.IdempotencyKey = req.IdempotencyKey
 	audit.RequestDigest = req.RequestDigest
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_machine_lifecycle")
 	if err != nil {
 		return OperatorMachineLifecycleResult{}, fmt.Errorf("store: begin operator machine lifecycle: %w", err)
 	}
@@ -587,7 +588,7 @@ func operatorMachineLifecycleResult(receipt operatorMachineLifecycleReceipt) Ope
 	}
 }
 
-func (s *Store) replayOperatorMachineLifecycle(tx *sql.Tx, req OperatorMachineLifecycleRequest,
+func (s *Store) replayOperatorMachineLifecycle(tx dbTx, req OperatorMachineLifecycleRequest,
 	audit AuditEntry, cached operatorCachedRequest,
 ) (OperatorMachineLifecycleResult, error) {
 	if cached.Operation != operatorMachineLifecycleOperation(req.MachineID) || cached.Digest != req.RequestDigest {
@@ -719,7 +720,7 @@ func validateOperatorMachineLifecycleReceipt(receipt operatorMachineLifecycleRec
 	return nil
 }
 
-func validateOperatorMachineLifecycleSuccessEvidence(tx *sql.Tx, receipt operatorMachineLifecycleReceipt,
+func validateOperatorMachineLifecycleSuccessEvidence(tx dbTx, receipt operatorMachineLifecycleReceipt,
 	req OperatorMachineLifecycleRequest,
 ) (bool, error) {
 	if receipt.Changed {
@@ -738,7 +739,7 @@ func validateOperatorMachineLifecycleSuccessEvidence(tx *sql.Tx, receipt operato
 		operatorMachineLifecycleSuccessAuditDetail(receipt))
 }
 
-func validateOperatorMachineLifecycleAuditEvidence(tx *sql.Tx, req OperatorMachineLifecycleRequest,
+func validateOperatorMachineLifecycleAuditEvidence(tx dbTx, req OperatorMachineLifecycleRequest,
 	at string, ok bool, detail string,
 ) (bool, error) {
 	var count int

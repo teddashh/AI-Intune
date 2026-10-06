@@ -52,7 +52,7 @@ type InstallIntent struct {
 // 適用 —— 因為一個掛著機器卻一列意圖都沒有的 channel，本身就是要被看見的發現，
 // 而那個發現在「先挑機器再查」的形狀裡永遠查不出來。
 func (s *Store) FleetInstallIntents() ([]InstallIntent, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT scope_type, scope_id, resource_kind, resource_id, desired_id, revision, spec, created_at, created_by
   FROM desired_state
  ORDER BY revision DESC, rowid DESC`)
@@ -138,7 +138,7 @@ type InstallIntentVersion struct {
 // 這裡不做 scope 的收攏——一版被 machine scope 與 channel scope 各指派過一次，
 // 算兩列意圖，因為「幾列意圖點名過它」問的就是這個。
 func (s *Store) FleetIntentVersions() ([]InstallIntentVersion, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT resource_kind, resource_id, spec, created_at
   FROM desired_state
  ORDER BY rowid`)

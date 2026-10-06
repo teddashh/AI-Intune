@@ -165,7 +165,7 @@ func (s *Store) ApplyOperatorRestoreDrill(req OperatorRestoreDrillRequest) (Oper
 		audit.Reason = req.Reason
 	}
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_restore_drill")
 	if err != nil {
 		return OperatorRestoreDrillResult{}, fmt.Errorf("store: begin restore drill enqueue: %w", err)
 	}
@@ -261,7 +261,7 @@ func (s *Store) ReplayOperatorRestoreDrill(req OperatorRestoreDrillRequest) (Ope
 		audit.Reason = req.Reason
 	}
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "replay_operator_restore_drill")
 	if err != nil {
 		return OperatorRestoreDrillResult{}, false, fmt.Errorf("store: begin restore drill replay: %w", err)
 	}
@@ -298,7 +298,7 @@ func loadRestoreDrillCached(q operatorRowQuerier, key string) (operatorCachedReq
 	return cached, true, nil
 }
 
-func (s *Store) rejectRestoreDrill(tx *sql.Tx, req OperatorRestoreDrillRequest, audit AuditEntry,
+func (s *Store) rejectRestoreDrill(tx dbTx, req OperatorRestoreDrillRequest, audit AuditEntry,
 	code string, now time.Time,
 ) (OperatorRestoreDrillResult, error) {
 	detail, ok := restoreDrillRejectionDetail(code)
@@ -339,7 +339,7 @@ func restoreDrillRejectionDetail(code string) (string, bool) {
 	}
 }
 
-func (s *Store) replayRestoreDrill(tx *sql.Tx, req OperatorRestoreDrillRequest, audit AuditEntry,
+func (s *Store) replayRestoreDrill(tx dbTx, req OperatorRestoreDrillRequest, audit AuditEntry,
 	cached operatorCachedRequest,
 ) (OperatorRestoreDrillResult, error) {
 	if cached.Operation != operatorRestoreDrillOperation || cached.Digest != req.RequestDigest {
@@ -433,7 +433,7 @@ func restoreDrillSuccessDetail(receipt operatorRestoreDrillReceipt) string {
 
 // ⚠ 原始列身分是 key、request digest、寫入時間、判決與 detail；subject 記的是判決當下最新備份，會隨輪替改變，不得讓回放依賴今天的外部世界。
 // ⚠ 成功列的 detail 已包含 operation_id、backup 與 sha256。
-func validateRestoreDrillOriginalAudit(tx *sql.Tx, req OperatorRestoreDrillRequest, createdAt string,
+func validateRestoreDrillOriginalAudit(tx dbTx, req OperatorRestoreDrillRequest, createdAt string,
 	ok bool, detail string,
 ) (bool, error) {
 	reason := ""
@@ -452,7 +452,7 @@ func validateRestoreDrillOriginalAudit(tx *sql.Tx, req OperatorRestoreDrillReque
 	return count == 1, nil
 }
 
-func (s *Store) invalidRestoreDrillCache(tx *sql.Tx, audit AuditEntry) (OperatorRestoreDrillResult, error) {
+func (s *Store) invalidRestoreDrillCache(tx dbTx, audit AuditEntry) (OperatorRestoreDrillResult, error) {
 	audit.Subject, audit.Reason, audit.OK, audit.Detail = "restore drill idempotency cache", "", false, restoreDrillCacheInvalid
 	if err := s.recordAuditTx(tx, audit); err != nil {
 		return OperatorRestoreDrillResult{}, err
@@ -464,7 +464,7 @@ func (s *Store) invalidRestoreDrillCache(tx *sql.Tx, audit AuditEntry) (Operator
 }
 
 func (s *Store) GetRestoreDrillOperation(id string) (RestoreDrillOperation, error) {
-	record, err := restoreDrillRecordByID(s.db, id)
+	record, err := restoreDrillRecordByID(s.rdb, id)
 	return record.Operation, err
 }
 
@@ -481,7 +481,7 @@ func (s *Store) ListRestoreDrillOperations(limit int) (RestoreDrillListResult, e
 	}
 	result := RestoreDrillListResult{SchemaVersion: RestoreDrillReadSchemaVersion,
 		Consistency: RestoreDrillReadConsistency, EvaluatedAt: now, Items: []RestoreDrillOperation{}}
-	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	tx, err := s.rdb.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return result, err
 	}
@@ -517,7 +517,7 @@ func (s *Store) ListRestoreDrillOperationIDsForWorker(state RestoreDrillState) (
 	if state != RestoreDrillQueued && state != RestoreDrillRunning {
 		return nil, ErrRestoreDrillInvalid
 	}
-	rows, err := s.db.Query(`SELECT operation_id FROM restore_drill_operations WHERE state=? ORDER BY created_at,operation_id`, state)
+	rows, err := s.rdb.Query(`SELECT operation_id FROM restore_drill_operations WHERE state=? ORDER BY created_at,operation_id`, state)
 	if err != nil {
 		return nil, err
 	}
@@ -537,7 +537,7 @@ func (s *Store) ListRestoreDrillOperationIDsForWorker(state RestoreDrillState) (
 }
 
 func (s *Store) FenceRunningRestoreDrillOperations() (int, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "fence_running_restore_drill_operations")
 	if err != nil {
 		return 0, err
 	}
@@ -583,7 +583,7 @@ func (s *Store) FenceRunningRestoreDrillOperations() (int, error) {
 }
 
 func (s *Store) ClaimRestoreDrillOperation(id string, reclaim bool) (RestoreDrillClaim, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "claim_restore_drill_operation")
 	if err != nil {
 		return RestoreDrillClaim{}, err
 	}
@@ -631,7 +631,7 @@ func (s *Store) ClaimRestoreDrillOperation(id string, reclaim bool) (RestoreDril
 }
 
 func (s *Store) SucceedRestoreDrillOperation(id, token string, result RestoreDrillWorkerResult) (RestoreDrillOperation, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "succeed_restore_drill_operation")
 	if err != nil {
 		return RestoreDrillOperation{}, err
 	}
@@ -676,7 +676,7 @@ func (s *Store) FailRestoreDrillOperation(id, token, code, detail string) (Resto
 	if !validArtifactFetchErrorCode(code) || !validArtifactFetchText(detail, RestoreDrillMaxErrorBytes, false) {
 		return RestoreDrillOperation{}, ErrRestoreDrillInvalidState
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "fail_restore_drill_operation")
 	if err != nil {
 		return RestoreDrillOperation{}, err
 	}

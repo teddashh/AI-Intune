@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -160,7 +161,7 @@ func (s *Store) SetMachineChannel(machineID, channel string) error {
 	if channel != "" && channel != "canary" && channel != "stable" {
 		return ErrBadChannel
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "set_machine_channel")
 	if err != nil {
 		return fmt.Errorf("store: begin setting channel: %w", err)
 	}
@@ -228,7 +229,7 @@ func (s *Store) MachinesInChannel(channel string) ([]Machine, error) {
 	if channel != "canary" && channel != "stable" {
 		return nil, ErrBadChannel
 	}
-	rows, err := s.db.Query(`SELECT `+machineCols+` FROM machine_registry
+	rows, err := s.rdb.Query(`SELECT `+machineCols+` FROM machine_registry
  WHERE channel = ? AND retired_at IS NULL ORDER BY display_name, machine_id`, channel)
 	if err != nil {
 		return nil, fmt.Errorf("store: machines in channel: %w", err)
@@ -316,7 +317,7 @@ func (s *Store) DeploymentFacts(members []Machine, now time.Time) ([]rollout.Mac
 
 // ActiveJobMachines 回報指定資源目前有非終態單的機器。
 func (s *Store) ActiveJobMachines(resourceKind, resourceID string) (map[string]bool, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT DISTINCT j.machine_id
   FROM jobs j JOIN desired_state d ON d.desired_id = j.desired_id
  WHERE d.resource_kind = ? AND d.resource_id = ?
@@ -474,7 +475,7 @@ func (s *Store) CreateDeployment(n NewDeployment) (Deployment, []Job, error) {
 	if n.Channel == "stable" {
 		return Deployment{}, nil, ErrStablePromoteGateRequired
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "create_deployment")
 	if err != nil {
 		return Deployment{}, nil, fmt.Errorf("store: begin deployment: %w", err)
 	}
@@ -516,7 +517,7 @@ func (s *Store) createStableOpenClawDeploymentWithPreview(n NewDeployment, previ
 	if err != nil {
 		return Deployment{}, nil, rollout.PromoteDecision{}, err
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "create_stable_open_claw_deployment_with_preview")
 	if err != nil {
 		return Deployment{}, nil, rollout.PromoteDecision{}, fmt.Errorf("store: begin stable deployment: %w", err)
 	}
@@ -618,7 +619,7 @@ func (s *Store) previewStableOpenClawPromotionAt(version, digest string, now tim
 	return rollout.PromoteGate(facts, now, loc), nil
 }
 
-func createDeploymentTx(tx *sql.Tx, n NewDeployment, now time.Time) (Deployment, []Job, error) {
+func createDeploymentTx(tx dbTx, n NewDeployment, now time.Time) (Deployment, []Job, error) {
 	lineage, err := validateDeploymentRetryLineage(tx, n)
 	if err != nil {
 		return Deployment{}, nil, err
@@ -700,7 +701,7 @@ func createDeploymentTx(tx *sql.Tx, n NewDeployment, now time.Time) (Deployment,
 	return d, jobs, nil
 }
 
-func createDeploymentBatchTx(tx *sql.Tx, d Deployment, batchNo int, n NewJob, now time.Time) ([]Job, error) {
+func createDeploymentBatchTx(tx dbTx, d Deployment, batchNo int, n NewJob, now time.Time) ([]Job, error) {
 	// Continue 也可能讀到升級前或手工寫入的 ledger；不能只靠 initial create
 	// 的檢查，否則錯標 material 的第二批仍能長出 OpenClaw job。
 	if err := validateDeploymentMaterial(d.ResourceKind, d.ResourceID, d.Spec, n.ArtifactDigest); err != nil {
@@ -849,7 +850,7 @@ func validateDeploymentMaterial(resourceKind, resourceID, raw, jobDigest string)
 	return nil
 }
 
-func validateDeploymentSnapshotTargets(tx *sql.Tx, n NewDeployment) error {
+func validateDeploymentSnapshotTargets(tx dbTx, n NewDeployment) error {
 	seen := make(map[string]struct{}, len(n.Targets))
 	for _, target := range n.Targets {
 		if _, duplicate := seen[target.MachineID]; duplicate {
@@ -901,7 +902,7 @@ func validateDeploymentSnapshotTargets(tx *sql.Tx, n NewDeployment) error {
 	return nil
 }
 
-func validateDeploymentRetryLineage(tx *sql.Tx, n NewDeployment) ([]Deployment, error) {
+func validateDeploymentRetryLineage(tx dbTx, n NewDeployment) ([]Deployment, error) {
 	if n.RetryOf == "" {
 		return nil, nil
 	}
@@ -945,7 +946,7 @@ func validateDeploymentRetryLineage(tx *sql.Tx, n NewDeployment) ([]Deployment, 
 	return lineage, nil
 }
 
-func activeDeploymentResourceOwnersTx(tx *sql.Tx, resourceKind, resourceID string) ([]string, error) {
+func activeDeploymentResourceOwnersTx(tx dbTx, resourceKind, resourceID string) ([]string, error) {
 	rows, err := tx.Query(`SELECT deployment_id FROM deployments
  WHERE resource_kind=? AND resource_id=? AND state IN (?,?)
  ORDER BY created_at,deployment_id`, resourceKind, resourceID, DeploymentRunning, DeploymentPaused)
@@ -977,7 +978,7 @@ func deploymentActiveResourceConflict(resourceKind, resourceID string, owners []
 // child is inserted, so Continue(parent) can never race into a disjoint batch.
 // Retrying an already-finished parent remains safe and preserves the established
 // CLI workflow: it owns no active slot and cannot be continued.
-func prepareDeploymentResourceOwnerTx(tx *sql.Tx, n NewDeployment, lineage []Deployment, now time.Time) error {
+func prepareDeploymentResourceOwnerTx(tx dbTx, n NewDeployment, lineage []Deployment, now time.Time) error {
 	owners, err := activeDeploymentResourceOwnersTx(tx, n.ResourceKind, n.ResourceID)
 	if err != nil {
 		return err
@@ -1029,7 +1030,7 @@ func prepareDeploymentResourceOwnerTx(tx *sql.Tx, n NewDeployment, lineage []Dep
 	return nil
 }
 
-func deploymentResourceHasNonTerminalJobsTx(tx *sql.Tx, resourceKind, resourceID string) (bool, error) {
+func deploymentResourceHasNonTerminalJobsTx(tx dbTx, resourceKind, resourceID string) (bool, error) {
 	var active bool
 	err := tx.QueryRow(`SELECT EXISTS(
  SELECT 1 FROM deployments p
@@ -1057,7 +1058,7 @@ func validateDeploymentControlRevisionIncrement(d Deployment) error {
 	return nil
 }
 
-func validateActiveDeploymentResourceOwnerTx(tx *sql.Tx, d Deployment) error {
+func validateActiveDeploymentResourceOwnerTx(tx dbTx, d Deployment) error {
 	owners, err := activeDeploymentResourceOwnersTx(tx, d.ResourceKind, d.ResourceID)
 	if err != nil {
 		return err
@@ -1275,7 +1276,7 @@ func validateDeploymentJobMaterialGraph(q deploymentQueryRower, deploymentID str
 	return nil
 }
 
-func jobTx(tx *sql.Tx, jobID string) (Job, error) {
+func jobTx(tx dbTx, jobID string) (Job, error) {
 	return scanJob(tx.QueryRow(`SELECT job_id,machine_id,desired_id,revision,state,lease_token,
  lease_expires_at,execution_timeout,artifact_digest,irreversible,created_at,terminal_at
  FROM jobs WHERE job_id = ?`, jobID))
@@ -1293,7 +1294,7 @@ func deploymentByID(q deploymentQueryRower, id string) (Deployment, error) {
 }
 
 func (s *Store) Deployment(id string) (Deployment, error) {
-	return deploymentByID(s.db, id)
+	return deploymentByID(s.rdb, id)
 }
 
 // deploymentRetryLineage 回傳 root → 最老 ancestor。DB 與 Tx 共用同一條 walker；
@@ -1353,7 +1354,7 @@ func scanDeployment(row rowScanner) (Deployment, error) {
 }
 
 func (s *Store) DeploymentTargets(id string) ([]DeploymentTarget, error) {
-	rows, err := s.db.Query(`SELECT t.machine_id,m.display_name,t.batch_no,t.job_id,t.excluded_reason,
+	rows, err := s.rdb.Query(`SELECT t.machine_id,m.display_name,t.batch_no,t.job_id,t.excluded_reason,
 	 j.machine_id,j.desired_id,j.revision,
 	 CASE WHEN t.job_id IS NULL THEN 0 ELSE (SELECT COUNT(*) FROM deployment_targets refs WHERE refs.job_id=t.job_id) END,
 	 j.state,j.created_at,j.terminal_at,
@@ -1388,10 +1389,10 @@ func (s *Store) DeploymentView(id string, now time.Time) (DeploymentView, error)
 	if err != nil {
 		return DeploymentView{}, err
 	}
-	if err := validateDeploymentJobGraph(s.db, id); err != nil {
+	if err := validateDeploymentJobGraph(s.rdb, id); err != nil {
 		return DeploymentView{}, err
 	}
-	lineage, err := deploymentRetryLineage(s.db, d)
+	lineage, err := deploymentRetryLineage(s.rdb, d)
 	if err != nil {
 		return DeploymentView{}, err
 	}
@@ -1400,7 +1401,7 @@ func (s *Store) DeploymentView(id string, now time.Time) (DeploymentView, error)
 		return DeploymentView{}, err
 	}
 	var desiredJobCount int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM jobs WHERE desired_id=?`, d.DesiredID).Scan(&desiredJobCount); err != nil {
+	if err := s.rdb.QueryRow(`SELECT COUNT(*) FROM jobs WHERE desired_id=?`, d.DesiredID).Scan(&desiredJobCount); err != nil {
 		return DeploymentView{}, fmt.Errorf("store: count deployment desired-state jobs: %w", err)
 	}
 	boundaryPause, err := s.deploymentBoundaryPause(id)
@@ -1436,7 +1437,7 @@ func (s *Store) DeploymentView(id string, now time.Time) (DeploymentView, error)
 func (s *Store) deploymentBoundaryPause(id string) (*DeploymentBoundaryPause, error) {
 	var pause DeploymentBoundaryPause
 	var pausedAt string
-	err := s.db.QueryRow(`SELECT opened_batch,kind,reason,paused_at
+	err := s.rdb.QueryRow(`SELECT opened_batch,kind,reason,paused_at
 	 FROM deployment_boundary_pauses WHERE deployment_id=?`, id).
 		Scan(&pause.OpenedBatch, &pause.Kind, &pause.Reason, &pausedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1450,7 +1451,7 @@ func (s *Store) deploymentBoundaryPause(id string) (*DeploymentBoundaryPause, er
 }
 
 func (s *Store) ListDeployments(now time.Time) ([]DeploymentView, error) {
-	rows, err := s.db.Query(`SELECT deployment_id FROM deployments ORDER BY created_at DESC,deployment_id DESC`)
+	rows, err := s.rdb.Query(`SELECT deployment_id FROM deployments ORDER BY created_at DESC,deployment_id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -1493,7 +1494,7 @@ func (s *Store) RunningDeployments(now time.Time) ([]DeploymentView, error) {
 	return out, nil
 }
 
-func deploymentJobTemplateTx(tx *sql.Tx, deploymentID string) (NewJob, error) {
+func deploymentJobTemplateTx(tx dbTx, deploymentID string) (NewJob, error) {
 	var n NewJob
 	var digest sql.NullString
 	err := tx.QueryRow(`SELECT j.artifact_digest,j.irreversible,j.execution_timeout
@@ -1510,7 +1511,7 @@ func deploymentJobTemplateTx(tx *sql.Tx, deploymentID string) (NewJob, error) {
 func (s *Store) DeploymentJobTemplate(deploymentID string) (NewJob, error) {
 	var n NewJob
 	var digest sql.NullString
-	err := s.db.QueryRow(`SELECT j.artifact_digest,j.irreversible,j.execution_timeout
+	err := s.rdb.QueryRow(`SELECT j.artifact_digest,j.irreversible,j.execution_timeout
  FROM deployment_targets t JOIN jobs j ON j.job_id=t.job_id
  WHERE t.deployment_id=? ORDER BY t.batch_no,t.machine_id LIMIT 1`, deploymentID).
 		Scan(&digest, &n.Irreversible, &n.ExecutionTimeout)
@@ -1584,7 +1585,7 @@ func validateStoredDeploymentBatchPlan(q deploymentQueryRower, d Deployment) err
 	return nil
 }
 
-func deploymentBatchStatusTx(tx *sql.Tx, deploymentID string, batchNo int) (deploymentBatchStatus, error) {
+func deploymentBatchStatusTx(tx dbTx, deploymentID string, batchNo int) (deploymentBatchStatus, error) {
 	var status deploymentBatchStatus
 	if err := tx.QueryRow(`SELECT COUNT(*),COALESCE(SUM(CASE WHEN job_id IS NOT NULL THEN 1 ELSE 0 END),0)
 	 FROM deployment_targets WHERE deployment_id=? AND batch_no=?`, deploymentID, batchNo).
@@ -1594,7 +1595,7 @@ func deploymentBatchStatusTx(tx *sql.Tx, deploymentID string, batchNo int) (depl
 	return status, nil
 }
 
-func deploymentOpenedBatchTx(tx *sql.Tx, deploymentID string) (int, error) {
+func deploymentOpenedBatchTx(tx dbTx, deploymentID string) (int, error) {
 	var opened int
 	if err := tx.QueryRow(`SELECT COALESCE(MAX(CASE WHEN job_id IS NOT NULL THEN batch_no ELSE 0 END),0)
 	 FROM deployment_targets WHERE deployment_id=?`, deploymentID).Scan(&opened); err != nil {
@@ -1603,7 +1604,7 @@ func deploymentOpenedBatchTx(tx *sql.Tx, deploymentID string) (int, error) {
 	return opened, nil
 }
 
-func deploymentOpenedPrefixCompleteTx(tx *sql.Tx, deploymentID string, opened int) (bool, error) {
+func deploymentOpenedPrefixCompleteTx(tx dbTx, deploymentID string, opened int) (bool, error) {
 	if opened <= 0 {
 		return false, nil
 	}
@@ -1617,7 +1618,7 @@ func deploymentOpenedPrefixCompleteTx(tx *sql.Tx, deploymentID string, opened in
 	return batches == opened && missingJobs == 0, nil
 }
 
-func deploymentOpenedPrefixAllSucceededTx(tx *sql.Tx, d Deployment, opened int) (bool, error) {
+func deploymentOpenedPrefixAllSucceededTx(tx dbTx, d Deployment, opened int) (bool, error) {
 	var targets, succeeded int
 	if err := tx.QueryRow(`SELECT COUNT(*),COALESCE(SUM(CASE WHEN j.state=?
 		AND j.machine_id=t.machine_id AND j.desired_id=? AND j.revision=? THEN 1 ELSE 0 END),0)
@@ -1630,7 +1631,7 @@ func deploymentOpenedPrefixAllSucceededTx(tx *sql.Tx, d Deployment, opened int) 
 	return targets > 0 && succeeded == targets, nil
 }
 
-func deploymentBatchAllTerminalTx(tx *sql.Tx, deploymentID string, batchNo int) (bool, error) {
+func deploymentBatchAllTerminalTx(tx dbTx, deploymentID string, batchNo int) (bool, error) {
 	var targets, terminal int
 	if err := tx.QueryRow(`SELECT COUNT(*),COALESCE(SUM(CASE WHEN j.state IN (?,?,?,?,?) THEN 1 ELSE 0 END),0)
 	 FROM deployment_targets t LEFT JOIN jobs j ON j.job_id=t.job_id
@@ -1668,7 +1669,7 @@ func (s *Store) gateStableBatchTx(d Deployment, n NewJob) error {
 // OpenDeploymentBatch 對已完整開過的批次只讀回原 job；真的要新增 job 時，
 // 只准開 next batch、前一批必須全成功，stable 還要在同一 writer transaction 重跑 gate。
 func (s *Store) OpenDeploymentBatch(id string, batchNo int, now time.Time) ([]Job, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "open_deployment_batch")
 	if err != nil {
 		return nil, err
 	}
@@ -1772,7 +1773,7 @@ func (s *Store) SetDeploymentState(id, from, to string, now time.Time) (bool, er
 	if from != DeploymentRunning || (to != DeploymentPaused && to != DeploymentFinished) {
 		return false, fmt.Errorf("%w: %q -> %q", ErrDeploymentBadTransition, from, to)
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "set_deployment_state")
 	if err != nil {
 		return false, fmt.Errorf("store: begin deployment state transition: %w", err)
 	}
@@ -1865,7 +1866,7 @@ func (s *Store) SetDeploymentState(id, from, to string, now time.Time) (bool, er
 // never changes job state and never relaxes a promote gate: only a paused
 // deployment whose opened jobs are already terminal can release ownership.
 func (s *Store) AbandonDeployment(id string, now time.Time) (Deployment, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "abandon_deployment")
 	if err != nil {
 		return Deployment{}, fmt.Errorf("store: begin abandon deployment: %w", err)
 	}
@@ -1883,7 +1884,7 @@ func (s *Store) AbandonDeployment(id string, now time.Time) (Deployment, error) 
 // abandonDeploymentTx is shared by the legacy Store call and the canonical
 // operator authority. The caller owns commit so lifecycle, event, receipt and
 // audit can be one atomic writer transaction.
-func (s *Store) abandonDeploymentTx(tx *sql.Tx, id string, now time.Time) (Deployment, error) {
+func (s *Store) abandonDeploymentTx(tx dbTx, id string, now time.Time) (Deployment, error) {
 	d, err := deploymentByID(tx, id)
 	if err != nil {
 		return Deployment{}, err
@@ -1961,7 +1962,7 @@ func (s *Store) PauseDeploymentAtBoundary(id string, expectedOpenedBatch int, ki
 		return false, fmt.Errorf("store: unknown deployment boundary pause kind %q", kind)
 	}
 	now = now.UTC()
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "pause_deployment_at_boundary")
 	if err != nil {
 		return false, fmt.Errorf("store: begin deployment boundary pause: %w", err)
 	}
@@ -2022,7 +2023,7 @@ func (s *Store) PauseDeploymentAtBoundary(id string, expectedOpenedBatch int, ki
 	return true, nil
 }
 
-func deploymentBatchHasFailureTerminalTx(tx *sql.Tx, id string, batch int) (bool, error) {
+func deploymentBatchHasFailureTerminalTx(tx dbTx, id string, batch int) (bool, error) {
 	var n int
 	err := tx.QueryRow(`SELECT COUNT(*) FROM deployment_targets t
  JOIN jobs j ON j.job_id=t.job_id
@@ -2048,7 +2049,7 @@ type deploymentContinuePolicy struct {
 // and older callers. Operator Continue does not use it: that path refuses a
 // failed batch. Skip failed batch is a separate operator action.
 func (s *Store) ContinueDeployment(id string, now time.Time) (Deployment, []Job, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "continue_deployment")
 	if err != nil {
 		return Deployment{}, nil, err
 	}
@@ -2065,7 +2066,7 @@ func (s *Store) ContinueDeployment(id string, now time.Time) (Deployment, []Job,
 
 // continueDeploymentTx is the sole state/job/event transition. The caller
 // owns commit so canonical operator idempotency and audit evidence can join it.
-func (s *Store) continueDeploymentTx(tx *sql.Tx, id string, now time.Time, policy deploymentContinuePolicy) (Deployment, []Job, error) {
+func (s *Store) continueDeploymentTx(tx dbTx, id string, now time.Time, policy deploymentContinuePolicy) (Deployment, []Job, error) {
 	d, err := scanDeployment(tx.QueryRow(`SELECT p.deployment_id,p.channel,p.desired_id,p.resource_kind,p.resource_id,
 	 p.revision,p.control_revision,p.batch_size,p.pause_after_canary,p.state,p.created_at,p.created_by,p.paused_at,p.finished_at,p.retry_of,d.spec
  FROM deployments p JOIN desired_state d ON d.desired_id=p.desired_id WHERE p.deployment_id=?`, id))
@@ -2231,7 +2232,7 @@ func (s *Store) continueDeploymentTx(tx *sql.Tx, id string, now time.Time, polic
 // the append order of workload evidence under the same SQLite writer lock.
 // Wall-clock timestamps alone cannot distinguish evidence appended before a
 // canary from evidence received afterwards when the Hub clock moves backward.
-func recordDeploymentSoakBoundaryTx(tx *sql.Tx, deploymentID string) error {
+func recordDeploymentSoakBoundaryTx(tx dbTx, deploymentID string) error {
 	var evidenceID int64
 	if err := tx.QueryRow(`SELECT COALESCE(MAX(evidence_id),0) FROM workload_observation_evidence`).Scan(&evidenceID); err != nil {
 		return fmt.Errorf("store: capture deployment soak evidence boundary: %w", err)

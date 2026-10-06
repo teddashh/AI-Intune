@@ -66,6 +66,10 @@ LockPersonality=true
 
 # 觀測不該吃掉機器。一台因為監控而變慢的機器，人會把監控關掉。
 CPUQuota=20%
+# MemoryHigh makes the kernel reclaim page cache and throttle before the
+# hard MemoryMax OOM kill. The cgroup counts child processes and page cache,
+# not just the agent heap.
+MemoryHigh=224M
 MemoryMax=256M
 
 [Install]

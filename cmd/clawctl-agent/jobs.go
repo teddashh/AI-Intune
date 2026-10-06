@@ -546,6 +546,9 @@ type jobsRunner struct {
 	pollJitter   func(time.Duration) time.Duration
 	nudge        chan<- struct{}
 	watermarks   watermarkJournal
+	// pollFailures counts consecutive GET /v1/jobs/next failures that use the
+	// exponential delay. A successful poll (200 or 204) resets it.
+	pollFailures int
 }
 
 func startJobs(ctx context.Context, cfg config, nudge chan<- struct{}) {
@@ -607,9 +610,9 @@ func newJobsRunner(opts jobsOptions) (*jobsRunner, error) {
 		opts.Sleep = sleepWithContext
 	}
 	if opts.RetryBackoff == nil {
-		opts.RetryBackoff = func(attempt int) time.Duration {
-			return time.Duration(attempt) * 250 * time.Millisecond
-		}
+		// Full jitter over 500ms * 2^(attempt-1), capped at 30s. post applies
+		// the Retry-After floor on top of whatever this returns.
+		opts.RetryBackoff = defaultJobPostBackoff
 	}
 	if opts.PollJitter == nil {
 		opts.PollJitter = jitter
@@ -673,11 +676,19 @@ func (r *jobsRunner) run(ctx context.Context) {
 		job, ok, err := r.next(ctx)
 		if err != nil {
 			log.Printf("拉工作單失敗：%v", err)
-			if r.poll(ctx) != nil {
+			var sleepErr error
+			if jobPollShouldBackOff(err) {
+				r.pollFailures++
+				sleepErr = r.pollAfterError(ctx, err)
+			} else {
+				sleepErr = r.poll(ctx)
+			}
+			if sleepErr != nil {
 				return
 			}
 			continue
 		}
+		r.pollFailures = 0
 		if !ok {
 			if r.poll(ctx) != nil {
 				return
@@ -702,6 +713,23 @@ func (r *jobsRunner) run(ctx context.Context) {
 
 func (r *jobsRunner) poll(ctx context.Context) error {
 	return r.sleep(ctx, r.pollJitter(r.pollInterval))
+}
+
+// pollAfterError waits out a failed GET /v1/jobs/next. The delay is the
+// jittered exponential starting at the poll interval (capped at 5 minutes),
+// and never shorter than a parsed Retry-After.
+func (r *jobsRunner) pollAfterError(ctx context.Context, err error) error {
+	delay := r.pollJitter(pollBackoffCeiling(r.pollInterval, r.pollFailures))
+	if delay > pollBackoffCap {
+		delay = pollBackoffCap
+	}
+	if delay < 0 {
+		delay = 0
+	}
+	if ra := honoredRetryAfter(err); ra > delay {
+		delay = ra
+	}
+	return r.sleep(ctx, delay)
 }
 
 func (r *jobsRunner) next(ctx context.Context) (model.JobResponse, bool, error) {
@@ -1039,7 +1067,11 @@ func (r *jobsRunner) post(ctx context.Context, endpoint string, body, out any, w
 		if attempt == maxJobPostAttempts {
 			break
 		}
-		if err := r.sleep(ctx, r.retryBackoff(attempt)); err != nil {
+		delay := r.retryBackoff(attempt)
+		if ra := honoredRetryAfter(lastErr); ra > delay {
+			delay = ra
+		}
+		if err := r.sleep(ctx, delay); err != nil {
 			return err
 		}
 	}

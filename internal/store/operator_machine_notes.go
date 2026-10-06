@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -75,7 +76,7 @@ type OperatorMachineNotesResult struct {
 }
 
 func (s *Store) PreviewOperatorMachineNotes(machineID, notes string) (OperatorMachineNotesPreviewResult, error) {
-	displayName, current, err := machineNotesCurrent(s.db, machineID)
+	displayName, current, err := machineNotesCurrent(s.rdb, machineID)
 	if err != nil {
 		return OperatorMachineNotesPreviewResult{}, err
 	}
@@ -107,7 +108,7 @@ func (s *Store) ApplyOperatorMachineNotes(req OperatorMachineNotesRequest) (Oper
 	if audit.Subject == "" {
 		audit.Subject = req.MachineID
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_machine_notes")
 	if err != nil {
 		return OperatorMachineNotesResult{}, fmt.Errorf("store: begin machine notes update: %w", err)
 	}
@@ -272,13 +273,13 @@ func machineNotesAuditDetail(notes string) string {
 	return "名冊備註已更新；機器設定與 agent 不變"
 }
 
-func (s *Store) rejectMachineNotes(tx *sql.Tx, req OperatorMachineNotesRequest, audit *AuditEntry,
+func (s *Store) rejectMachineNotes(tx dbTx, req OperatorMachineNotesRequest, audit *AuditEntry,
 	operation, code, detail string,
 ) error {
 	return s.policyReject(tx, req.IdempotencyKey, operation, req.RequestDigest, audit, code, detail)
 }
 
-func (s *Store) commitMachineNotes(tx *sql.Tx, req OperatorMachineNotesRequest, operation string,
+func (s *Store) commitMachineNotes(tx dbTx, req OperatorMachineNotesRequest, operation string,
 	audit *AuditEntry, result OperatorMachineNotesResult,
 ) error {
 	raw, err := json.Marshal(result)

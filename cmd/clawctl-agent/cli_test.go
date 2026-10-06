@@ -41,7 +41,7 @@ func TestAnUnknownArgumentNeverStartsTheDaemon(t *testing.T) {
 func TestObservationNudgeWakesBeforeThePeriodicTimer(t *testing.T) {
 	nudge := make(chan struct{}, 1)
 	nudge <- struct{}{}
-	if got := waitNextObservation(context.Background(), time.Hour, nudge); got != observationNudged {
+	if got := waitNextObservation(context.Background(), time.Hour, 0, nudge); got != observationNudged {
 		t.Errorf("等待原因 = %v；工作單 nudge 已先排隊，應立刻醒來", got)
 	}
 }

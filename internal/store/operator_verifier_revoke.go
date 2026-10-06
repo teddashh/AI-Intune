@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -102,7 +103,7 @@ type operatorVerifierRevocationReceipt struct {
 
 // PreviewOperatorVerifierRevocation is read-only and consumes no key.
 func (s *Store) PreviewOperatorVerifierRevocation(verifierID string) (OperatorVerifierRevocationPreviewResult, error) {
-	verifier, impact, err := loadOperatorVerifierRevocationTarget(s.db, verifierID)
+	verifier, impact, err := loadOperatorVerifierRevocationTarget(s.rdb, verifierID)
 	if err != nil {
 		return OperatorVerifierRevocationPreviewResult{}, err
 	}
@@ -264,7 +265,7 @@ func (s *Store) ApplyOperatorVerifierRevocation(req OperatorVerifierRevocationRe
 	audit.IdempotencyKey = req.IdempotencyKey
 	audit.RequestDigest = req.RequestDigest
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_verifier_revocation")
 	if err != nil {
 		return OperatorVerifierRevocationResult{}, fmt.Errorf("store: begin operator verifier revocation: %w", err)
 	}
@@ -393,7 +394,7 @@ func operatorVerifierRevocationResultFrom(receipt operatorVerifierRevocationRece
 	}
 }
 
-func (s *Store) replayOperatorVerifierRevocation(tx *sql.Tx, req OperatorVerifierRevocationRequest,
+func (s *Store) replayOperatorVerifierRevocation(tx dbTx, req OperatorVerifierRevocationRequest,
 	audit AuditEntry, cached operatorCachedRequest,
 ) (OperatorVerifierRevocationResult, error) {
 	if cached.Operation != operatorVerifierRevokeOperation(req.VerifierID) ||
@@ -467,7 +468,7 @@ func (s *Store) replayOperatorVerifierRevocation(tx *sql.Tx, req OperatorVerifie
 	return operatorVerifierRevocationResultFrom(receipt, currentOperatorVerifierRevocationPolicy(receipt.Kind), true), nil
 }
 
-func (s *Store) rejectInvalidOperatorVerifierRevocationCache(tx *sql.Tx,
+func (s *Store) rejectInvalidOperatorVerifierRevocationCache(tx dbTx,
 	audit AuditEntry,
 ) (OperatorVerifierRevocationResult, error) {
 	audit.MachineID, audit.Reason = "", ""
@@ -522,7 +523,7 @@ func validateOperatorVerifierRevocationReceipt(receipt operatorVerifierRevocatio
 	return nil
 }
 
-func validateOperatorVerifierRevocationRejectionEvidence(tx *sql.Tx, cached operatorCachedRequest,
+func validateOperatorVerifierRevocationRejectionEvidence(tx dbTx, cached operatorCachedRequest,
 	req OperatorVerifierRevocationRequest,
 ) (bool, error) {
 	var count int
@@ -539,7 +540,7 @@ func validateOperatorVerifierRevocationRejectionEvidence(tx *sql.Tx, cached oper
 	return count == 1, nil
 }
 
-func validateOperatorVerifierRevocationSuccessEvidence(tx *sql.Tx,
+func validateOperatorVerifierRevocationSuccessEvidence(tx dbTx,
 	receipt operatorVerifierRevocationReceipt, req OperatorVerifierRevocationRequest,
 ) (bool, error) {
 	var kind, displayName, failureDomain string

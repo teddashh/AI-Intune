@@ -364,7 +364,15 @@ type Change struct {
 // ---------------------------------------------------------------- Store
 
 type Store struct {
-	db *sql.DB
+	// db is the single writer connection. rdb is the query-only reader pool,
+	// opened on the same file after migrations. Reads that do not need to see
+	// the caller's uncommitted writes go to rdb: with MaxOpenConns(1), a read
+	// on db while this goroutine holds a write transaction deadlocks.
+	db  *sql.DB
+	rdb *sql.DB
+	// gate bounds and times writer acquisition. The wait budget is not the
+	// transaction lifetime.
+	gate writerGate
 	// nowFn 讓測試可以固定時間。正式路徑一律 time.Now().UTC()。
 	nowFn func() time.Time
 	// changeReadSlots prevents a few broad operator reports from occupying all
@@ -408,7 +416,7 @@ func (s *Store) PublishExpectationsPolicy(now time.Time) error {
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "publish_expectations_policy")
 	if err != nil {
 		return fmt.Errorf("store: begin publish active workload policy: %w", err)
 	}
@@ -491,7 +499,7 @@ func workloadPolicyToken(fingerprint string, generation int64, displayName strin
 // CurrentWorkloadPolicyToken 回傳這個 Store 記憶體中真正載入的 policy token。
 // Hub service 用它下發；Observation ingest 也用同一算法驗回傳值。
 func (s *Store) CurrentWorkloadPolicyToken(displayName string) (string, error) {
-	policy, matches, err := s.matchingActiveWorkloadPolicy(s.db)
+	policy, matches, err := s.matchingActiveWorkloadPolicy(s.rdb)
 	if err != nil {
 		return "", err
 	}
@@ -539,9 +547,15 @@ func Open(path string) (*Store, error) {
 	// clawctl-hub 同時建立的新 canary 只能排在它前面或後面，不能插在判決與開單之間。
 	u := &url.URL{Scheme: "file", Path: path}
 	q := u.Query()
+	// busy_timeout is the backstop for other processes (Litestream, a direct
+	// CLI while the Hub is stopped, upgrade scripts). In-process writers queue
+	// on the single connection instead of racing the busy handler.
+	// synchronous=NORMAL with WAL cannot corrupt the file. A power loss may
+	// drop the last commits that had not been checkpointed.
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "foreign_keys(ON)")
-	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "busy_timeout(10000)")
+	q.Add("_pragma", "synchronous(NORMAL)")
 	q.Set("_txlock", "immediate")
 	u.RawQuery = q.Encode()
 	dsn := u.String()
@@ -605,10 +619,46 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("store: migrate: %w", err)
 	}
-	return &Store{
-		db: db, nowFn: func() time.Time { return time.Now().UTC() },
+	// The writer pool is one connection for the life of the process. Set this
+	// only after migrations, which run on this same *sql.DB before any reader
+	// exists. Lifetime 0 keeps that connection (and its pragmas) until Close.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+
+	rdb, err := openReader(path)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	st := &Store{
+		db: db, rdb: rdb, nowFn: func() time.Time { return time.Now().UTC() },
 		changeReadSlots: make(chan struct{}, maxConcurrentChangeReads),
-	}, nil
+	}
+	st.gate.stats.init()
+	return st, nil
+}
+
+// openReader opens the query-only pool on a file the writer has already migrated.
+// journal_mode is a property of the file; setting it here would be a write.
+func openReader(path string) (*sql.DB, error) {
+	u := &url.URL{Scheme: "file", Path: path}
+	q := u.Query()
+	q.Add("_pragma", "query_only(1)")
+	q.Add("_pragma", "foreign_keys(ON)")
+	q.Add("_pragma", "busy_timeout(10000)")
+	q.Add("_pragma", "synchronous(NORMAL)")
+	u.RawQuery = q.Encode()
+	rdb, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		return nil, fmt.Errorf("store: open reader: %w", err)
+	}
+	rdb.SetMaxOpenConns(8)
+	if err := rdb.Ping(); err != nil {
+		rdb.Close()
+		return nil, fmt.Errorf("store: ping reader: %w", err)
+	}
+	return rdb, nil
 }
 
 const desiredStateResourceRevisionIndex = "ux_desired_state_resource_revision"
@@ -943,7 +993,16 @@ func columnSet(q columnQueryer, table string) (map[string]bool, error) {
 	return out, rows.Err()
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	var err error
+	if s.rdb != nil {
+		err = s.rdb.Close()
+	}
+	if s.db != nil {
+		err = errors.Join(err, s.db.Close())
+	}
+	return err
+}
 
 // DB 讓其他 package（例如備份、還原演練）拿到底層連線。讀多於寫時很有用。
 func (s *Store) DB() *sql.DB { return s.db }
@@ -1104,7 +1163,7 @@ func (s *Store) CreateEnrollTokenFor(displayName string, ttl time.Duration) (str
 	now := s.now()
 	machineID := newID()
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "create_enroll_token_for")
 	if err != nil {
 		return "", "", fmt.Errorf("store: begin: %w", err)
 	}
@@ -1136,7 +1195,7 @@ VALUES (?,?,?,?,?)`,
 // 然後你就有兩台機器共用一張票而且不知道。
 func (s *Store) RedeemEnrollToken(tok string, req model.EnrollRequest, now time.Time) (string, string, error) {
 	now = now.UTC()
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "redeem_enroll_token")
 	if err != nil {
 		return "", "", fmt.Errorf("store: begin: %w", err)
 	}
@@ -1237,7 +1296,7 @@ WHERE machine_id = ?`,
 //     讓它繼續寫會讓一台已經處理掉的機器重新出現在畫面上。
 func (s *Store) AuthenticateAgent(bearer string) (string, error) {
 	want := []byte(hashToken(bearer))
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT machine_id, agent_token_hash FROM machine_registry
  WHERE agent_token_hash IS NOT NULL AND agent_token_hash <> '' AND retired_at IS NULL`)
 	if err != nil {
@@ -1318,7 +1377,7 @@ func (s *Store) UpsertMachine(m Machine) error {
 		linger = boolToInt(*m.LingerEnabled)
 	}
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "upsert_machine")
 	if err != nil {
 		return fmt.Errorf("store: begin upsert machine: %w", err)
 	}
@@ -1429,7 +1488,7 @@ VALUES(?,?,?)`, m.MachineID, lifecycleEvent, fmtTime(lifecycleAt)); err != nil {
 // ListMachines 回傳名冊上每一台，包含已 retire 的。過濾是呼叫端的事 ——
 // ⚠ 這個函式不會因為一台機器「看起來沒用了」就把它藏起來。
 func (s *Store) ListMachines() ([]Machine, error) {
-	rows, err := s.db.Query(`SELECT ` + machineCols + ` FROM machine_registry ORDER BY display_name, machine_id`)
+	rows, err := s.rdb.Query(`SELECT ` + machineCols + ` FROM machine_registry ORDER BY display_name, machine_id`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list machines: %w", err)
 	}
@@ -1446,7 +1505,7 @@ func (s *Store) ListMachines() ([]Machine, error) {
 }
 
 func (s *Store) GetMachine(id string) (Machine, error) {
-	m, err := scanMachine(s.db.QueryRow(`SELECT `+machineCols+` FROM machine_registry WHERE machine_id = ?`, id))
+	m, err := scanMachine(s.rdb.QueryRow(`SELECT `+machineCols+` FROM machine_registry WHERE machine_id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Machine{}, ErrNotFound
 	}
@@ -1515,7 +1574,7 @@ func (s *Store) RecordCheckin(machineID string, c model.Checkin, receivedAt time
 	if c.JobsEnabled != nil {
 		jobsEnabled = *c.JobsEnabled
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "record_checkin")
 	if err != nil {
 		return fmt.Errorf("store: begin checkin: %w", err)
 	}
@@ -1592,7 +1651,7 @@ func isForeignKeyErr(err error) bool {
 //     「當時用的是哪張票」的那些。缺口要留著，不要用猜的補平。
 //  3. **process_alive 永遠寫 0。** 「有個 process 活著」不是占用的證據。
 //     用它假裝占用，帳本會在每一台開著 OpenClaw 的機器上都顯示滿載。
-func recordOccupancy(tx *sql.Tx, machineID string, d *model.OpenClawDB, receivedAt string) error {
+func recordOccupancy(tx dbTx, machineID string, d *model.OpenClawDB, receivedAt string) error {
 	if d == nil || len(d.Occupancy) == 0 {
 		return nil
 	}
@@ -1641,7 +1700,7 @@ func nullInt(n int) any {
 }
 
 func (s *Store) RecordObservation(machineID string, b model.ObservationBatch, receivedAt time.Time) error {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "record_observation")
 	if err != nil {
 		return fmt.Errorf("store: begin: %w", err)
 	}
@@ -2134,7 +2193,7 @@ func normalizedObservationEvidenceAt(measuredAt, receivedAt time.Time, clockSkew
 	return evidenceAt, true
 }
 
-func workloadEvidenceWatermarkTx(tx *sql.Tx, machineID string) (time.Time, error) {
+func workloadEvidenceWatermarkTx(tx dbTx, machineID string) (time.Time, error) {
 	var raw string
 	err := tx.QueryRow(`SELECT evidence_at FROM workload_observation_witness WHERE machine_id=?`, machineID).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -2146,7 +2205,7 @@ func workloadEvidenceWatermarkTx(tx *sql.Tx, machineID string) (time.Time, error
 	return parseTime(raw), nil
 }
 
-func evidenceAfterOpenFailuresTx(tx *sql.Tx, machineID string, evidenceAt time.Time) (bool, error) {
+func evidenceAfterOpenFailuresTx(tx dbTx, machineID string, evidenceAt time.Time) (bool, error) {
 	var latest sql.NullString
 	if err := tx.QueryRow(`SELECT MAX(last_seen_at) FROM canary_silent_failures
 	 WHERE machine_id=? AND open=1`, machineID).Scan(&latest); err != nil {
@@ -2158,7 +2217,7 @@ func evidenceAfterOpenFailuresTx(tx *sql.Tx, machineID string, evidenceAt time.T
 	return evidenceAt.After(parseTime(latest.String)), nil
 }
 
-func recordWorkloadObservationWitnessTx(tx *sql.Tx, machineID, verdict string, receivedAt time.Time,
+func recordWorkloadObservationWitnessTx(tx dbTx, machineID, verdict string, receivedAt time.Time,
 	evidenceAt time.Time, openClawPresent bool, runningVersion, policyToken string, policyValid bool,
 ) error {
 	if machineID == "" || (verdict != workloadWitnessHealthy && verdict != workloadWitnessFailure && verdict != workloadWitnessUnknown) {
@@ -2192,7 +2251,7 @@ func recordWorkloadObservationWitnessTx(tx *sql.Tx, machineID, verdict string, r
 // recordWorkloadObservationEvidenceTx 留下每一批 workload verdict。latest witness
 // 只能回答「現在」，這張 ledger 才能證明 canary 完成後沒有 Hub outage、unknown
 // batch、policy 切換或短暫版本漂移。它與 raw observation / failure span 同一筆 commit。
-func recordWorkloadObservationEvidenceTx(tx *sql.Tx, machineID, verdict string, receivedAt time.Time,
+func recordWorkloadObservationEvidenceTx(tx dbTx, machineID, verdict string, receivedAt time.Time,
 	evidenceAt time.Time, openClawPresent bool, runningVersion, policyToken string, policyValid bool,
 ) error {
 	if machineID == "" || (verdict != workloadWitnessHealthy && verdict != workloadWitnessFailure && verdict != workloadWitnessUnknown) {
@@ -2213,7 +2272,7 @@ func recordWorkloadObservationEvidenceTx(tx *sql.Tx, machineID, verdict string, 
 
 // latestTrustedCheckinTx 取 ingest 當下已存在、仍新鮮且時鐘可信的最新心跳。
 // Observation 的 measured_at 只有配上這個 skew 才能正規化成 Hub 時間。
-func latestTrustedCheckinTx(tx *sql.Tx, machineID string, now time.Time) (time.Duration, bool, error) {
+func latestTrustedCheckinTx(tx dbTx, machineID string, now time.Time) (time.Duration, bool, error) {
 	now = now.UTC().Truncate(time.Second)
 	var receivedAt sql.NullString
 	var clockSkew sql.NullInt64
@@ -2240,7 +2299,7 @@ func latestTrustedCheckinTx(tx *sql.Tx, machineID string, now time.Time) (time.D
 // observationRecoveryEligibleTx 擋住 workload 以外不能被 healthy batch
 // 洗掉的三種早退狀態：已退役、身分衝突、沒有新鮮心跳。必須在
 // RecordObservation 的 transaction 裡查，否則看不到剛寫入的 identity。
-func observationRecoveryEligibleTx(tx *sql.Tx, machineID string, now time.Time) (bool, error) {
+func observationRecoveryEligibleTx(tx dbTx, machineID string, now time.Time) (bool, error) {
 	now = now.UTC().Truncate(time.Second)
 	var registryHint, retiredAt sql.NullString
 	err := tx.QueryRow(`SELECT machine_id_hint,retired_at FROM machine_registry WHERE machine_id=?`, machineID).
@@ -2267,7 +2326,7 @@ func observationRecoveryEligibleTx(tx *sql.Tx, machineID string, now time.Time) 
 	return trusted, err
 }
 
-func identityConflictTx(tx *sql.Tx, machineID, registryHint string) (bool, error) {
+func identityConflictTx(tx dbTx, machineID, registryHint string) (bool, error) {
 	return identityConflictFrom(tx, machineID, registryHint)
 }
 
@@ -2287,7 +2346,7 @@ type observation struct {
 func (s *Store) latestObservation(machineID, kind, subject string) (observation, bool, error) {
 	var o observation
 	var measured, recv string
-	err := s.db.QueryRow(`
+	err := s.rdb.QueryRow(`
 SELECT subject, payload, measured_at, received_at FROM observed_state
  WHERE machine_id = ? AND kind = ? AND subject = ?
  ORDER BY received_at DESC, measured_at DESC, rowid DESC LIMIT 1`,
@@ -2309,7 +2368,7 @@ SELECT subject, payload, measured_at, received_at FROM observed_state
 func (s *Store) latestObservationReceivedBy(machineID, kind, subject string, evaluatedAt time.Time) (observation, bool, error) {
 	var o observation
 	var measured, recv string
-	err := s.db.QueryRow(`
+	err := s.rdb.QueryRow(`
 SELECT subject, payload, measured_at, received_at FROM observed_state
  WHERE machine_id = ? AND kind = ? AND subject = ? AND received_at <= ?
  ORDER BY received_at DESC, measured_at DESC, rowid DESC LIMIT 1`,
@@ -2459,7 +2518,7 @@ type credRefreshFleet map[string]map[string]credRefresh
 // 保存期 30 天（retention.go），所以 FirstSeen 最遠只到 30 天前，
 // 這也是 WatchedFor 的天花板。
 func (s *Store) credRefreshHistory(evaluatedAt time.Time) (credRefreshFleet, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT o.machine_id,
        COALESCE(NULLIF(m.display_name, ''), o.machine_id),
        o.subject,
@@ -2568,7 +2627,7 @@ func (s *Store) latestBySubject(machineID, kind string, evaluatedAt time.Time) (
 	// the production-sized ledger that made one credential read take ~2.8s and
 	// one Overview ~11s. This window shape visits the machine/kind history once
 	// while preserving the received_at -> measured_at -> rowid tie-break.
-	rows, err := s.db.Query(latestBySubjectAtSQL, machineID, kind, fmtTime(evaluatedAt))
+	rows, err := s.rdb.Query(latestBySubjectAtSQL, machineID, kind, fmtTime(evaluatedAt))
 	if err != nil {
 		return nil, fmt.Errorf("store: latest by subject %s: %w", kind, err)
 	}
@@ -2608,11 +2667,11 @@ func unmarshalInto[T any](payload string) (T, bool) {
 // 超過一個就是衝突。合併、挑一個、或刪掉舊的，都會讓一台機器的狀態在兩台
 // 真實機器之間跳動，而且沒有人查得出為什麼。
 func (s *Store) identityHints(machineID, registryHint string) ([]IdentityHint, error) {
-	return identityHintsFrom(s.db, machineID, registryHint)
+	return identityHintsFrom(s.rdb, machineID, registryHint)
 }
 
 func (s *Store) identityHintsAt(machineID, registryHint string, evaluatedAt time.Time) ([]IdentityHint, error) {
-	return identityHintsFromAt(s.db, machineID, registryHint, evaluatedAt)
+	return identityHintsFromAt(s.rdb, machineID, registryHint, evaluatedAt)
 }
 
 // ---------------------------------------------------------------- Facts
@@ -2649,7 +2708,7 @@ func (s *Store) facts(machineID string, now time.Time, refresh credRefreshFleet)
 	var sentAt, recvAt, agentVer sql.NullString
 	var skew sql.NullInt64
 	var diskFree, diskTotal sql.NullInt64
-	err = s.db.QueryRow(`
+	err = s.rdb.QueryRow(`
 SELECT sent_at, received_at, clock_skew_seconds, disk_free_bytes, disk_total_bytes, agent_version
   FROM machine_checkins WHERE machine_id = ? AND received_at <= ?
  ORDER BY received_at DESC, rowid DESC LIMIT 1`, machineID, fmtTime(now)).
@@ -2681,7 +2740,7 @@ SELECT sent_at, received_at, clock_skew_seconds, disk_free_bytes, disk_total_byt
 	// --- 機器重開機：一小時內看到幾個不同的 boot_id。
 	// ⚠ 用 received_at 圈窗，因為時鐘歪掉的機器 sent_at 可能全部落在窗外。
 	var bootIDRows int
-	if err := s.db.QueryRow(`
+	if err := s.rdb.QueryRow(`
 SELECT COUNT(DISTINCT boot_id), COUNT(boot_id) FROM machine_checkins
  WHERE machine_id = ? AND received_at >= ? AND received_at <= ? AND boot_id IS NOT NULL AND boot_id <> ''`,
 		machineID, fmtTime(now.Add(-state.CrashLoopWindow)), fmtTime(now)).Scan(&f.BootIDChanges1h, &bootIDRows); err != nil {
@@ -2696,7 +2755,7 @@ SELECT COUNT(DISTINCT boot_id), COUNT(boot_id) FROM machine_checkins
 	// 舊版 agent 不送這個欄位，數出來會是 0 —— 那是「不知道」，不是「沒重啟」。
 	// 這裡刻意不把 0 說成健康：真正的判決在 state，這裡只負責數。
 	var agentStartedRows int
-	if err := s.db.QueryRow(`
+	if err := s.rdb.QueryRow(`
 SELECT COUNT(DISTINCT agent_started_at), COUNT(agent_started_at) FROM machine_checkins
  WHERE machine_id = ? AND received_at >= ? AND received_at <= ?
    AND agent_started_at IS NOT NULL AND agent_started_at <> ''`,
@@ -2708,7 +2767,7 @@ SELECT COUNT(DISTINCT agent_started_at), COUNT(agent_started_at) FROM machine_ch
 
 	// --- 完整觀測最後一次收到的時間。
 	var lastObs sql.NullString
-	if err := s.db.QueryRow(
+	if err := s.rdb.QueryRow(
 		`SELECT MAX(received_at) FROM observed_state WHERE machine_id = ? AND received_at <= ?`, machineID, fmtTime(now)).
 		Scan(&lastObs); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return state.Facts{}, fmt.Errorf("store: last observation: %w", err)
@@ -2830,7 +2889,7 @@ SELECT COUNT(DISTINCT agent_started_at), COUNT(agent_started_at) FROM machine_ch
 // openStateSpan 取目前還沒結束的那一段狀態（left_at IS NULL）。
 func (s *Store) openStateSpan(machineID string) (StateSpan, bool, error) {
 	var st, reason, entered string
-	err := s.db.QueryRow(`
+	err := s.rdb.QueryRow(`
 SELECT state, reason, entered_at FROM machine_state_history
  WHERE machine_id = ? AND left_at IS NULL
  ORDER BY entered_at DESC LIMIT 1`, machineID).Scan(&st, &reason, &entered)
@@ -2848,7 +2907,7 @@ SELECT state, reason, entered_at FROM machine_state_history
 // request began must not leak into a response labelled with the earlier time.
 func (s *Store) openStateSpanAt(machineID string, evaluatedAt time.Time) (StateSpan, bool, error) {
 	var st, reason, entered string
-	err := s.db.QueryRow(`
+	err := s.rdb.QueryRow(`
 SELECT state, reason, entered_at FROM machine_state_history
  WHERE machine_id = ? AND entered_at <= ? AND (left_at IS NULL OR left_at > ?)
  ORDER BY entered_at DESC LIMIT 1`, machineID, fmtTime(evaluatedAt), fmtTime(evaluatedAt)).
@@ -2870,7 +2929,7 @@ SELECT state, reason, entered_at FROM machine_state_history
 // ⚠ 也不會回頭改已經開著那一段的 reason。entered_at 當下的理由是歷史；
 // UI 上顯示的「現在為什麼」永遠是即時重算的（Overview/Detail 會呼叫 state.Derive）。
 func (s *Store) RecordStateTransition(machineID string, st state.State, reason string, now time.Time) error {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "record_state_transition")
 	if err != nil {
 		return fmt.Errorf("store: begin: %w", err)
 	}
@@ -2884,7 +2943,7 @@ func (s *Store) RecordStateTransition(machineID string, st state.State, reason s
 	return nil
 }
 
-func recordStateTransitionTx(tx *sql.Tx, machineID string, st state.State, reason string, now time.Time) error {
+func recordStateTransitionTx(tx dbTx, machineID string, st state.State, reason string, now time.Time) error {
 	now = now.UTC()
 	var openState, openEntered string
 	err := tx.QueryRow(`
@@ -2924,7 +2983,7 @@ func (s *Store) stateHistory(machineID string, limit int) ([]StateSpan, error) {
 }
 
 func (s *Store) stateHistoryAt(machineID string, limit int, evaluatedAt time.Time) ([]StateSpan, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT state, reason, entered_at,
        CASE WHEN left_at IS NULL OR left_at > ? THEN NULL ELSE left_at END
   FROM machine_state_history
@@ -3108,7 +3167,7 @@ func (s *Store) Detail(machineID string, now time.Time) (Detail, error) {
 
 // checkinPoints 取最近的心跳，由舊到新回傳（sparkline 從左往右畫）。
 func (s *Store) checkinPoints(machineID string, now time.Time) ([]CheckinPoint, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT sent_at, received_at, agent_version, boot_id, agent_seq, uptime_seconds,
        disk_free_bytes, disk_total_bytes, observation_age_seconds, clock_skew_seconds
   FROM machine_checkins
@@ -3299,7 +3358,7 @@ func toEventCounts(in []model.EventSummary) []state.EventCount {
 // DisplayName 回機器的顯示名稱。查不到回空字串。
 func (s *Store) DisplayName(machineID string) string {
 	var n string
-	if err := s.db.QueryRow(
+	if err := s.rdb.QueryRow(
 		`SELECT display_name FROM machine_registry WHERE machine_id = ?`, machineID).Scan(&n); err != nil {
 		return ""
 	}
@@ -3335,7 +3394,7 @@ func (s *Store) ChangesSince(since, now time.Time) ([]Change, error) {
 	var out []Change
 
 	// --- 1. 狀態轉移。⚠ Severity 直接取 state 判過的嚴重度。
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT h.machine_id, h.state, h.entered_at,
        (SELECT p.state FROM machine_state_history p
          WHERE p.machine_id = h.machine_id AND p.entered_at < h.entered_at
@@ -3443,7 +3502,7 @@ func (s *Store) snapshotAt(cutoff time.Time) (map[subjectKey]subjectSnapshot, er
 	}
 	args = append(args, fmtTime(cutoff))
 
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT o.machine_id, o.kind, o.subject, o.payload, o.measured_at
   FROM observed_state o
  WHERE o.measured_at <= ? AND o.kind IN (`+placeholders+`)
@@ -3555,7 +3614,7 @@ func summarizeObservation(kind, payload string) string {
 // ⚠ 送失敗也要記。「今天沒收到早報」必須能區分成「Hub 死了」跟
 // 「Hub 活著但 Telegram 掛了」—— 沒有這一列就分不出來。
 func (s *Store) RecordNotification(kind, channel, body string, delivered bool, errMsg string, now time.Time) error {
-	_, err := s.db.Exec(`
+	_, err := s.execWrite(context.Background(), "record_notification", `
 INSERT INTO notifications (notification_id, kind, channel, sent_at, body, delivered, error)
 VALUES (?,?,?,?,?,?,?)`,
 		newID(), kind, channel, fmtTime(now), body, boolToInt(delivered), nullStr(errMsg))
@@ -3571,7 +3630,7 @@ VALUES (?,?,?,?,?,?,?)`,
 // 呼叫端據此決定「今天的早報還要不要送」，把失敗當成功會讓一整天靜悄悄。
 func (s *Store) LastNotification(kind string) (time.Time, bool, error) {
 	var sentAt sql.NullString
-	err := s.db.QueryRow(
+	err := s.rdb.QueryRow(
 		`SELECT MAX(sent_at) FROM notifications WHERE kind = ? AND delivered = 1`, kind).Scan(&sentAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, false, nil
@@ -3584,6 +3643,57 @@ func (s *Store) LastNotification(kind string) (time.Time, bool, error) {
 		return time.Time{}, false, nil
 	}
 	return t, true, nil
+}
+
+// NotificationAttemptsSince counts notification rows for kind at or after since.
+// failures is the undelivered count and lastFailed is the newest of those.
+// The daily report derives its backoff from this so a restart does not forget
+// how many attempts already failed today.
+func (s *Store) NotificationAttemptsSince(kind string, since time.Time) (rows, failures int, lastFailed time.Time, err error) {
+	var raw sql.NullString
+	err = s.rdb.QueryRow(`
+SELECT COUNT(*),
+       COALESCE(SUM(CASE WHEN delivered = 0 THEN 1 ELSE 0 END), 0),
+       MAX(CASE WHEN delivered = 0 THEN sent_at END)
+  FROM notifications
+ WHERE kind = ? AND sent_at >= ?`, kind, fmtTime(since)).Scan(&rows, &failures, &raw)
+	if err != nil {
+		return 0, 0, time.Time{}, fmt.Errorf("store: notification attempts: %w", err)
+	}
+	return rows, failures, parseTimeNull(raw), nil
+}
+
+// NotifyKindStats is the /metrics view of one notification kind.
+type NotifyKindStats struct {
+	LastSuccess         time.Time
+	HasSuccess          bool
+	LastAttempt         time.Time
+	HasAttempt          bool
+	ConsecutiveFailures int64
+}
+
+// NotifyKindStats reads delivery timestamps for kind. ConsecutiveFailures is
+// the number of undelivered rows newer than the latest delivered row.
+func (s *Store) NotifyKindStats(kind string) (NotifyKindStats, error) {
+	var success, attempt sql.NullString
+	var fails int64
+	err := s.rdb.QueryRow(`
+SELECT
+  (SELECT MAX(sent_at) FROM notifications WHERE kind = ? AND delivered = 1),
+  (SELECT MAX(sent_at) FROM notifications WHERE kind = ?),
+  (SELECT COUNT(*) FROM notifications
+    WHERE kind = ? AND delivered = 0
+      AND rowid > COALESCE((SELECT MAX(rowid) FROM notifications WHERE kind = ? AND delivered = 1), 0))`,
+		kind, kind, kind, kind).Scan(&success, &attempt, &fails)
+	if err != nil {
+		return NotifyKindStats{}, fmt.Errorf("store: notify stats: %w", err)
+	}
+	out := NotifyKindStats{ConsecutiveFailures: fails}
+	out.LastSuccess = parseTimeNull(success)
+	out.HasSuccess = !out.LastSuccess.IsZero()
+	out.LastAttempt = parseTimeNull(attempt)
+	out.HasAttempt = !out.LastAttempt.IsZero()
+	return out, nil
 }
 
 // ConnectInfo 是詳細頁最底下那一段所需要的一切。

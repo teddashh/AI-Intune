@@ -258,6 +258,8 @@ func (h *hub) operatorRoutes(mux *http.ServeMux) []string {
 	mux.HandleFunc(patterns[90], h.handleGetOperatorDailyReport)
 	mux.HandleFunc(patterns[91], h.handlePreviewOperatorDeploymentSkipFailedBatch)
 	mux.HandleFunc(patterns[92], h.handleSkipFailedBatchOperatorDeployment)
+	patterns = append(patterns, "GET /metrics")
+	mux.HandleFunc("GET /metrics", h.handleMetrics)
 	return patterns
 }
 

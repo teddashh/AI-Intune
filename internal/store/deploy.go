@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -103,7 +104,7 @@ type DesiredState struct {
 func (s *Store) DesiredState(desiredID string) (DesiredState, error) {
 	var d DesiredState
 	var createdAt sql.NullString
-	err := s.db.QueryRow(`
+	err := s.rdb.QueryRow(`
 SELECT desired_id, scope_type, scope_id, resource_kind, resource_id, revision, spec, created_at, created_by
   FROM desired_state WHERE desired_id = ?`, desiredID).Scan(
 		&d.DesiredID, &d.ScopeType, &d.ScopeID, &d.ResourceKind, &d.ResourceID,
@@ -208,7 +209,7 @@ type ReapableJob struct {
 
 // AllocateRevision 替同一個資源範圍配發下一個單調遞增的 revision。
 func (s *Store) AllocateRevision(scope string) (deploy.Revision, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "allocate_revision")
 	if err != nil {
 		return 0, fmt.Errorf("store: begin allocating revision: %w", err)
 	}
@@ -227,7 +228,7 @@ func (s *Store) AllocateRevision(scope string) (deploy.Revision, error) {
 // allocateRevision 用一個 SQL 敘述同時建立或遞增計數器並取回號碼。
 //
 // ⚠ 這擋的是兩個併發呼叫先讀到同一個舊值，再各自寫回同一個 revision。
-func allocateRevision(tx *sql.Tx, scope string) (deploy.Revision, error) {
+func allocateRevision(tx dbTx, scope string) (deploy.Revision, error) {
 	var rev deploy.Revision
 	if err := tx.QueryRow(`
 INSERT INTO revision_counters (resource_scope, current_revision)
@@ -250,7 +251,7 @@ func (s *Store) CreateDesiredState(scopeType, scopeID, resourceKind, resourceID,
 		return "", 0, ErrManagedCatalogDeploymentRequired
 	}
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "create_desired_state")
 	if err != nil {
 		return "", 0, fmt.Errorf("store: begin desired state: %w", err)
 	}
@@ -266,7 +267,7 @@ func (s *Store) CreateDesiredState(scopeType, scopeID, resourceKind, resourceID,
 	return desiredID, rev, nil
 }
 
-func createDesiredStateTx(tx *sql.Tx, scopeType, scopeID, resourceKind, resourceID, spec, createdBy string, now time.Time) (string, deploy.Revision, error) {
+func createDesiredStateTx(tx dbTx, scopeType, scopeID, resourceKind, resourceID, spec, createdBy string, now time.Time) (string, deploy.Revision, error) {
 	if scopeType != "machine" && scopeType != "channel" {
 		return "", 0, ErrBadScope
 	}
@@ -320,7 +321,7 @@ type NewJob struct {
 
 // CreateJob 替一台未退役的機器建立尚未開始的工作單。
 func (s *Store) CreateJob(machineID, desiredID string, revision deploy.Revision, n NewJob) (jobID string, err error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "create_job")
 	if err != nil {
 		return "", fmt.Errorf("store: begin job: %w", err)
 	}
@@ -335,7 +336,7 @@ func (s *Store) CreateJob(machineID, desiredID string, revision deploy.Revision,
 	return jobID, nil
 }
 
-func createJobTx(tx *sql.Tx, machineID, desiredID string, revision deploy.Revision, n NewJob, now time.Time) (string, error) {
+func createJobTx(tx dbTx, machineID, desiredID string, revision deploy.Revision, n NewJob, now time.Time) (string, error) {
 	return createJobTxWithPolicy(tx, machineID, desiredID, revision, n, now, false)
 }
 
@@ -343,11 +344,11 @@ func createJobTx(tx *sql.Tx, machineID, desiredID string, revision deploy.Revisi
 // an executable typed adapter and exact artifact material into their own
 // atomic receipt. Public/direct job creation continues to reject managed
 // catalog executors.
-func createManagedJobTx(tx *sql.Tx, machineID, desiredID string, revision deploy.Revision, n NewJob, now time.Time) (string, error) {
+func createManagedJobTx(tx dbTx, machineID, desiredID string, revision deploy.Revision, n NewJob, now time.Time) (string, error) {
 	return createJobTxWithPolicy(tx, machineID, desiredID, revision, n, now, true)
 }
 
-func createJobTxWithPolicy(tx *sql.Tx, machineID, desiredID string, revision deploy.Revision,
+func createJobTxWithPolicy(tx dbTx, machineID, desiredID string, revision deploy.Revision,
 	n NewJob, now time.Time, managedAdapter bool,
 ) (string, error) {
 	if n.ExecutionTimeout <= 0 {
@@ -442,7 +443,7 @@ func directManagedCatalogSpec(raw string) bool {
 // JobForMachine 只回傳同時符合工作單與機器身分的那一列。
 func (s *Store) JobForMachine(jobID, machineID string) (Job, error) {
 	// ⚠ machine_id 直接進 WHERE，擋的是呼叫端漏做事後比對而把別人的工作單交出去。
-	job, err := scanJob(s.db.QueryRow(`
+	job, err := scanJob(s.rdb.QueryRow(`
 SELECT job_id, machine_id, desired_id, revision, state,
        lease_token, lease_expires_at, execution_timeout, artifact_digest,
        irreversible, created_at, terminal_at
@@ -462,7 +463,7 @@ SELECT job_id, machine_id, desired_id, revision, state,
 // Job 依 job_id 讀一張工作單，不做機器歸屬過濾。這條路只給人看的 Hub 頁面使用；
 // agent 的協定路徑仍然只能呼叫 JobForMachine。
 func (s *Store) Job(jobID string) (Job, error) {
-	job, err := scanJob(s.db.QueryRow(`
+	job, err := scanJob(s.rdb.QueryRow(`
 SELECT job_id, machine_id, desired_id, revision, state,
        lease_token, lease_expires_at, execution_timeout, artifact_digest,
        irreversible, created_at, terminal_at
@@ -479,7 +480,7 @@ SELECT job_id, machine_id, desired_id, revision, state,
 
 // JobEvents 依 seq 列出一張工作單的所有事件。
 func (s *Store) JobEvents(jobID string) ([]JobEvent, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT event_id, job_id, seq, phase, occurred_at, received_at, payload,
        producer_kind,producer_id,evidence_role,authority,provenance_recorded
   FROM job_events
@@ -505,7 +506,7 @@ SELECT event_id, job_id, seq, phase, occurred_at, received_at, payload,
 
 // JobPrerequisites returns the graph edges in the resolver's stable order.
 func (s *Store) JobPrerequisites(jobID string) ([]JobPrerequisite, error) {
-	rows, err := s.db.Query(`SELECT job_id,prerequisite_job_id,position
+	rows, err := s.rdb.Query(`SELECT job_id,prerequisite_job_id,position
  FROM job_dependencies WHERE job_id=? ORDER BY position`, jobID)
 	if err != nil {
 		return nil, fmt.Errorf("store: list job prerequisites: %w", err)
@@ -529,7 +530,7 @@ func (s *Store) JobPrerequisites(jobID string) ([]JobPrerequisite, error) {
 // 新列保存 producer/role/Hub received_at；升級前列保留 provenance_recorded=false。
 // Independent rows additionally carry verifier_id and the digest/version actually observed.
 func (s *Store) JobVerifications(jobID string) ([]JobVerification, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT verification_id, job_id, machine_id, rule_id, command, exit_code,
        stdout_excerpt, stderr_excerpt, passed, verified_at,producer_kind,producer_id,
        evidence_role,authority,provenance_recorded,received_at,observed_digest,observed_version,verifier_id
@@ -565,7 +566,7 @@ SELECT verification_id, job_id, machine_id, rule_id, command, exit_code,
 
 // JobCounts 回傳帳本裡每台機器、每個實際出現狀態的列數。
 func (s *Store) JobCounts() ([]JobCount, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT machine_id, state, COUNT(*)
   FROM jobs
  GROUP BY machine_id, state
@@ -587,7 +588,7 @@ SELECT machine_id, state, COUNT(*)
 
 // LastTerminalPerMachine 回傳每台機器、每個終態最近一次的 terminal_at。
 func (s *Store) LastTerminalPerMachine() ([]LastTerminalJob, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT machine_id, state, MAX(terminal_at)
   FROM jobs
  WHERE state IN (?, ?, ?, ?, ?) AND terminal_at IS NOT NULL
@@ -614,7 +615,7 @@ SELECT machine_id, state, MAX(terminal_at)
 // ReapableJobs 回傳所有非終態工作單。started_at 取 start 事件的 received_at；
 // Hub 的逾時判決不可採信 agent 的 occurred_at。
 func (s *Store) ReapableJobs() ([]ReapableJob, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT j.job_id, j.machine_id, j.state, j.irreversible, j.execution_timeout,
        j.lease_expires_at,
        (SELECT e.received_at
@@ -646,7 +647,7 @@ SELECT j.job_id, j.machine_id, j.state, j.irreversible, j.execution_timeout,
 // logJobLookupMiss 把對外相同的查詢失敗，在 Hub log 裡分成不存在與歸屬不符。
 func (s *Store) logJobLookupMiss(jobID, machineID string) {
 	var owner string
-	err := s.db.QueryRow(`SELECT machine_id FROM jobs WHERE job_id = ?`, jobID).Scan(&owner)
+	err := s.rdb.QueryRow(`SELECT machine_id FROM jobs WHERE job_id = ?`, jobID).Scan(&owner)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		log.Printf("找不到工作單 job=%s（查詢機器=%s）", jobID, machineID)
@@ -664,7 +665,7 @@ func (s *Store) ListJobs(machineID string, limit int) ([]Job, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT job_id, machine_id, desired_id, revision, state,
        lease_token, lease_expires_at, execution_timeout, artifact_digest,
        irreversible, created_at, terminal_at
@@ -689,7 +690,7 @@ SELECT job_id, machine_id, desired_id, revision, state,
 
 // LatestSucceededJobForResource 回一台機器最近成功且屬於指定資源的工作單。
 func (s *Store) LatestSucceededJobForResource(machineID, resourceKind, resourceID string) (Job, bool, error) {
-	job, err := scanJob(s.db.QueryRow(`
+	job, err := scanJob(s.rdb.QueryRow(`
 SELECT j.job_id, j.machine_id, j.desired_id, j.revision, j.state,
        j.lease_token, j.lease_expires_at, j.execution_timeout, j.artifact_digest,
        j.irreversible, j.created_at, j.terminal_at
@@ -707,16 +708,75 @@ SELECT j.job_id, j.machine_id, j.desired_id, j.revision, j.state,
 }
 
 func (s *Store) NextJobForMachine(machineID string) (Job, bool, error) {
-	tx, err := s.db.Begin()
+	// The common poll (every agent, every ~30s) only reads. BEGIN IMMEDIATE on
+	// the single writer would reserve it for a SELECT. A read-only snapshot on
+	// the reader pool answers "is there a dependency-blocked child, and what is
+	// the next runnable head" without that reservation. The write transaction
+	// is opened only when a NotStarted child has a prerequisite in
+	// Failed/Rejected/LeaseExpired/ManualIntervention, which is the only case
+	// rejectDependencyBlockedJobsTx mutates.
+	readTx, err := s.rdb.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return Job{}, false, fmt.Errorf("store: begin next job read: %w", err)
+	}
+	blocked, err := dependencyBlockedChildExists(readTx, machineID)
+	if err != nil {
+		readTx.Rollback()
+		return Job{}, false, err
+	}
+	if !blocked {
+		job, ok, err := selectNextRunnableJob(readTx, machineID)
+		readTx.Rollback()
+		if err != nil {
+			return Job{}, false, err
+		}
+		return job, ok, nil
+	}
+	readTx.Rollback()
+
+	tx, err := s.beginWrite(context.Background(), "next_job")
 	if err != nil {
 		return Job{}, false, fmt.Errorf("store: begin next job read: %w", err)
 	}
 	defer tx.Rollback()
-
 	if err := rejectDependencyBlockedJobsTx(tx, machineID, s.now()); err != nil {
 		return Job{}, false, err
 	}
+	job, ok, err := selectNextRunnableJob(tx, machineID)
+	if err != nil {
+		return Job{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		if ok {
+			return Job{}, false, fmt.Errorf("store: finish next job read: %w", err)
+		}
+		return Job{}, false, fmt.Errorf("store: finish empty next job read: %w", err)
+	}
+	return job, ok, nil
+}
 
+func dependencyBlockedChildExists(tx dbTx, machineID string) (bool, error) {
+	var childID string
+	err := tx.QueryRow(`
+SELECT child.job_id
+  FROM job_dependencies edge
+  JOIN jobs child ON child.job_id = edge.job_id
+  JOIN jobs prerequisite ON prerequisite.job_id = edge.prerequisite_job_id
+ WHERE child.machine_id = ?
+   AND child.state = ?
+   AND prerequisite.state IN (?, ?, ?, ?)
+ LIMIT 1`, machineID, deploy.NotStarted, deploy.Failed, deploy.Rejected,
+		deploy.LeaseExpired, deploy.ManualIntervention).Scan(&childID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: find dependency-blocked job: %w", err)
+	}
+	return true, nil
+}
+
+func selectNextRunnableJob(tx dbTx, machineID string) (Job, bool, error) {
 	// Revision only orders jobs for the same resource. Revisions from unrelated
 	// resources are independent counters, so creation rowid chooses among their
 	// runnable heads.
@@ -748,21 +808,15 @@ SELECT j.job_id, j.machine_id, j.desired_id, j.revision, j.state,
 	LIMIT 1`, machineID, deploy.NotStarted, deploy.Succeeded, deploy.Succeeded,
 		deploy.Failed, deploy.Rejected, deploy.LeaseExpired, deploy.ManualIntervention))
 	if errors.Is(err, sql.ErrNoRows) {
-		if err := tx.Commit(); err != nil {
-			return Job{}, false, fmt.Errorf("store: finish empty next job read: %w", err)
-		}
 		return Job{}, false, nil
 	}
 	if err != nil {
 		return Job{}, false, fmt.Errorf("store: get next job for machine: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return Job{}, false, fmt.Errorf("store: finish next job read: %w", err)
-	}
 	return job, true, nil
 }
 
-func rejectDependencyBlockedJobsTx(tx *sql.Tx, machineID string, now time.Time) error {
+func rejectDependencyBlockedJobsTx(tx dbTx, machineID string, now time.Time) error {
 	now = now.UTC()
 	for {
 		var childID, prerequisiteID string
@@ -829,7 +883,7 @@ func (s *Store) ClaimJob(jobID, machineID string, now time.Time, lease time.Dura
 	// 會從 1 重新開始，跟第一次執行的事件發生 replay conflict，兩次執行的
 	// 證據也無法再只靠 seq 分清。過期單由 reaper 收成 lease_expired；
 	// 要重做同一個期望狀態必須另開新 job_id。
-	res, err := s.db.Exec(`
+	res, err := s.execWrite(context.Background(), "claim_job", `
 UPDATE jobs
    SET state = ?, lease_token = ?, lease_expires_at = ?
  WHERE job_id = ?
@@ -860,7 +914,7 @@ UPDATE jobs
 func (s *Store) RenewLease(jobID, machineID, leaseToken string, now time.Time, lease time.Duration) error {
 	now = now.UTC()
 	// ⚠⚠ lease_token 直接放在 WHERE；重新領單一換 token，舊持有者便無法續租。
-	res, err := s.db.Exec(`
+	res, err := s.execWrite(context.Background(), "renew_lease", `
 UPDATE jobs
    SET lease_expires_at = ?
  WHERE job_id = ?
@@ -911,7 +965,7 @@ func (s *Store) AppendJobEventWithReplay(jobID, machineID, leaseToken string, se
 	// 舊持有者卻仍在另一個 SQL 敘述中把事件寫進來。
 	inserted := false
 	if !replayOnly {
-		res, err := s.db.Exec(`
+		res, err := s.execWrite(context.Background(), "append_job_event_with_replay", `
 INSERT INTO job_events (event_id, job_id, seq, phase, occurred_at, received_at, payload,
                         producer_kind,producer_id,evidence_role,authority,provenance_recorded)
 SELECT ?, job_id, ?, ?, ?, ?, ?, ?, machine_id, ?, ?, 1
@@ -942,7 +996,7 @@ ON CONFLICT(job_id, seq) DO NOTHING`, newID(), seq, phase, fmtTime(occurredAt),
 	// 不是 request identity 的一部分。
 	var existingState deploy.JobState
 	var existingToken, existingPhase, existingOccurredAt, existingPayload string
-	err = s.db.QueryRow(`
+	err = s.rdb.QueryRow(`
 SELECT job.state, COALESCE(job.lease_token,''), event.phase, event.occurred_at, event.payload
   FROM jobs AS job
   JOIN job_events AS event ON event.job_id = job.job_id AND event.seq = ?
@@ -1012,7 +1066,7 @@ func (s *Store) RecordVerification(jobID, machineID, leaseToken, ruleID, command
 		return ErrInvalidJobEvidence
 	}
 	// ⚠ command 不做整理或改寫，讓人可以從證據列原樣複製後重跑。
-	res, err := s.db.Exec(`
+	res, err := s.execWrite(context.Background(), "record_verification", `
 INSERT INTO verification_results
   (verification_id, job_id, machine_id, rule_id, command, exit_code,
    stdout_excerpt, stderr_excerpt, passed, verified_at, producer_kind,
@@ -1046,7 +1100,7 @@ SELECT ?, job_id, machine_id, ?, ?, ?, ?, ?, ?, ?, ?, machine_id, ?, ?, 1, ?
 	var existingCommand, existingStdout, existingStderr, existingVerifiedAt string
 	var existingExitCode int
 	var existingPassed bool
-	err = s.db.QueryRow(`
+	err = s.rdb.QueryRow(`
 SELECT command, exit_code, stdout_excerpt, stderr_excerpt, passed, verified_at
   FROM verification_results
  WHERE job_id = ? AND machine_id = ? AND rule_id = ?
@@ -1088,7 +1142,7 @@ func (s *Store) MarkSucceededIfVerified(jobID string, now time.Time) (deploy.Job
 	// 而這裡是**唯一**能寫進 succeeded 的 SQL —— 如果它允許從 claimed 直接
 	// 跳過去，那組測試就只是在測一個沒有人用的函式，
 	// 而一台根本沒開始裝的機器會被判成裝好了。
-	res, err := s.db.Exec(`
+	res, err := s.execWrite(context.Background(), "mark_succeeded_if_verified", `
 UPDATE jobs
    SET state = ?, terminal_at = ?, lease_token = NULL, lease_expires_at = NULL
  WHERE job_id = ?
@@ -1124,7 +1178,7 @@ UPDATE jobs
 
 	var state deploy.JobState
 	var total, failed, trustedExecutor int
-	err = s.db.QueryRow(`
+	err = s.rdb.QueryRow(`
 SELECT jobs.state,
        COALESCE(SUM(CASE WHEN verification_results.evidence_role = ?
          THEN 1 ELSE 0 END), 0),
@@ -1174,7 +1228,7 @@ SELECT jobs.state,
 func (s *Store) darwinNodeRuntimeEvidenceReady(jobID string) (required, ready bool, err error) {
 	var state deploy.JobState
 	var resourceKind, resourceID, rawSpec string
-	err = s.db.QueryRow(`
+	err = s.rdb.QueryRow(`
 SELECT jobs.state,desired_state.resource_kind,desired_state.resource_id,desired_state.spec
   FROM jobs JOIN desired_state ON desired_state.desired_id=jobs.desired_id
  WHERE jobs.job_id=?`, jobID).Scan(&state, &resourceKind, &resourceID, &rawSpec)
@@ -1210,7 +1264,7 @@ SELECT jobs.state,desired_state.resource_kind,desired_state.resource_id,desired_
 		"node-runtime-activate": {},
 		"node-runtime-current":  {},
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT verification_results.rule_id,verification_results.command,
        COALESCE(verification_results.stdout_excerpt,'')
   FROM verification_results JOIN jobs ON jobs.job_id=verification_results.job_id
@@ -1346,7 +1400,7 @@ func (s *Store) AdvanceJobByHub(jobID string, ev deploy.Event, now time.Time, ex
 // 所以「不可逆的失敗不准被說成已回退」在這條路上也成立。
 func (s *Store) advanceJob(jobID, machineID, leaseToken string, requireLease bool, ev deploy.Event, now time.Time, expectedState ...deploy.JobState) (deploy.JobState, error) {
 	now = now.UTC()
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "advance_job")
 	if err != nil {
 		return "", fmt.Errorf("store: begin advancing job: %w", err)
 	}
@@ -1415,7 +1469,7 @@ func (s *Store) FailJob(jobID string, irreversible bool, now time.Time) error {
 	terminalState := deploy.OnFailure(irreversible)
 	// ⚠ 終態一律取自 deploy.OnFailure，而且 caller 帶來的旗標必須和開單時
 	// 保存的 irreversible 相同，擋的是 stale/錯誤 caller 把兩個失敗判決互換。
-	res, err := s.db.Exec(`
+	res, err := s.execWrite(context.Background(), "fail_job", `
 UPDATE jobs
    SET state = ?, terminal_at = ?, lease_token = NULL, lease_expires_at = NULL
  WHERE job_id = ?
@@ -1434,7 +1488,7 @@ UPDATE jobs
 		return nil
 	}
 	var savedIrreversible bool
-	if err := s.db.QueryRow(`SELECT irreversible FROM jobs WHERE job_id = ?`, jobID).Scan(&savedIrreversible); errors.Is(err, sql.ErrNoRows) {
+	if err := s.rdb.QueryRow(`SELECT irreversible FROM jobs WHERE job_id = ?`, jobID).Scan(&savedIrreversible); errors.Is(err, sql.ErrNoRows) {
 		return ErrJobNotFound
 	} else if err != nil {
 		return fmt.Errorf("store: inspect failed job: %w", err)

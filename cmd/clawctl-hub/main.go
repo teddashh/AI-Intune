@@ -30,7 +30,6 @@ import (
 	"github.com/teddashh/AI-Intune/internal/operator"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/operatorendpoint"
-	"github.com/teddashh/AI-Intune/internal/processenv"
 	"github.com/teddashh/AI-Intune/internal/report"
 	"github.com/teddashh/AI-Intune/internal/restoredrill"
 	"github.com/teddashh/AI-Intune/internal/state"
@@ -537,6 +536,7 @@ func serve(argv []string) {
 				"要立即告警請設 CLAWCTL_REPORT_PING_FAIL_URL。")
 		}
 	}
+	h.logNotifyConfigured()
 
 	ui, err := web.New(st, *hubHost)
 	if err != nil {
@@ -689,9 +689,7 @@ func watchdogLoop(ctx context.Context, h *hub) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			var n int
-			if err := h.store.DB().QueryRowContext(ctx,
-				`SELECT COUNT(*) FROM machine_registry`).Scan(&n); err != nil {
+			if err := h.store.PingReader(ctx); err != nil {
 				// ⚠ 不餵。讓 systemd 殺掉重來 —— 一個查不動資料庫的 Hub
 				// 還活著，比它死掉更糟：它會安靜地什麼都不回報。
 				log.Printf("看門狗：資料庫沒有回應，停止餵食：%v", err)
@@ -860,13 +858,13 @@ func (h *hub) reportLoop(ctx context.Context) {
 // ⚠ 判斷依據是 LastNotification（只算 delivered=1），不是「上次嘗試」。
 // 把送失敗當成送過，會讓一整天安靜無聲 —— 而安靜在這個產品裡的意思是
 // 「Hub 死了」。寧可重試到成功，也不要讓一則沒送到的早報吃掉當天的名額。
+//
+// 失敗之後的下一次嘗試在 maybeSendReport，不在 deliver：
+// lastFailed + min(1m * 2^(failuresSinceDue-1), 60m)。次數與上一筆失敗時間
+// 都從 notifications 讀，重啟不會把間隔忘掉。沒有設定推播時一天只記一列。
 func (h *hub) maybeSendReport(now time.Time) {
-	hh, mm, ok := parseHM(h.reportAt)
-	if !ok {
-		return
-	}
-	due := time.Date(now.Year(), now.Month(), now.Day(), hh, mm, 0, 0, now.Location())
-	if now.Before(due) {
+	due, ok := h.reportDue(now)
+	if !ok || now.Before(due) {
 		return
 	}
 	last, found, err := h.store.LastNotification("daily")
@@ -876,6 +874,21 @@ func (h *hub) maybeSendReport(now time.Time) {
 	}
 	if found && !last.Before(due) {
 		return // 今天已經送成功過了
+	}
+	rows, failures, lastFailed, err := h.store.NotificationAttemptsSince("daily", due)
+	if err != nil {
+		log.Printf("查早報嘗試失敗：%v", err)
+		return
+	}
+	if h.notifier() == nil {
+		if rows > 0 {
+			return
+		}
+	} else if failures > 0 && !lastFailed.IsZero() {
+		next := lastFailed.Add(notifyBackoff(failures))
+		if now.Before(next) {
+			return
+		}
 	}
 
 	since := last
@@ -1033,35 +1046,6 @@ func (h *hub) previousState(machineID string) state.State {
 		}
 	}
 	return best.State
-}
-
-// deliver 送出並記錄結果。⚠ 送失敗也要記 —— 「今天沒收到早報」必須能區分成
-// 「Hub 死了」跟「Hub 活著但推播管道掛了」，沒有這一列就分不出來。
-func (h *hub) deliver(kind, body string, now time.Time) {
-	log.Printf("[%s]\n%s", kind, body)
-
-	if h.notifyCmd == "" {
-		// ⚠ 沒設推播就記成「沒送到」，不是「送到了」。
-		// 這樣早報漏送的統計才不會被一個沒設定的環境洗成綠的。
-		_ = h.store.RecordNotification(kind, "stdout", body, false, "沒有設定 notify-cmd", now)
-		h.pingReportWatchdog(kind, false)
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := processenv.CommandContext(ctx, "sh", "-c", h.notifyCmd)
-	cmd.Stdin = strings.NewReader(body)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		log.Printf("推播失敗：%v %s", err, msg)
-		_ = h.store.RecordNotification(kind, "cmd", body, false, err.Error()+" "+msg, now)
-		h.pingReportWatchdog(kind, false)
-		return
-	}
-	_ = h.store.RecordNotification(kind, "cmd", body, true, "", now)
-	h.touchReportStamp(kind, now)
-	h.pingReportWatchdog(kind, true)
 }
 
 // touchReportStamp 蓋章：一則 daily 早報確實離開了這台機器。

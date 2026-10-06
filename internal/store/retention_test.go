@@ -492,7 +492,10 @@ BEGIN SELECT RAISE(ABORT, 'blocked retention evidence'); END`); err != nil {
 		t.Fatal(err)
 	}
 	report, err := s.Prune(now, DefaultRetention(), false)
-	if err == nil || !strings.Contains(err.Error(), "retention log") || report.Total() == 0 {
+	// Scheduled prune deletes in batches; each batch writes its retention_log
+	// row in the same transaction, so a blocked log write rolls that batch back
+	// and the report only lists tables whose batches committed.
+	if err == nil || !strings.Contains(err.Error(), "retention log") || report.Total() != 0 {
 		t.Fatalf("failed retention evidence result: report=%+v err=%v", report, err)
 	}
 	if got := rowsFor(t, s, "observed_state", id); got != beforeObservations {
@@ -520,7 +523,10 @@ func TestEveryPruneJobNamesRealColumns(t *testing.T) {
 	s := newTestStore(t)
 	for _, j := range pruneJobs {
 		cols := append([]string{j.cutCol}, j.newestCols...)
-		cols = append(cols, "machine_id")
+		// notifications 沒有 machine_id：它是 Hub 自己的推播紀錄，不是某台機器的證據。
+		if j.table != "notifications" {
+			cols = append(cols, "machine_id")
+		}
 		for _, c := range cols {
 			if _, err := s.db.Exec(fmt.Sprintf(
 				`SELECT %s FROM %s LIMIT 0`, c, j.table)); err != nil {
@@ -535,7 +541,7 @@ func TestEveryPruneJobNamesRealColumns(t *testing.T) {
 		}
 		// ⚠ cutCol 一律是 Hub 的鐘。canary_silent_failures.last_seen_at 是 reconcile
 		// 當下的 Hub 時鐘，不是機器自報時間。
-		isHubClock := j.cutCol == "received_at" || (j.table == "canary_silent_failures" && j.cutCol == "last_seen_at")
+		isHubClock := j.cutCol == "received_at" || j.cutCol == "sent_at" || (j.table == "canary_silent_failures" && j.cutCol == "last_seen_at")
 		if !isHubClock {
 			t.Errorf("%s 的 cutCol 是 %q —— 圈時間一律用 Hub 的 received_at，"+
 				"用機器自報的時間會把一台時鐘慢的機器的新資料當舊資料刪掉",
@@ -603,6 +609,94 @@ func TestEveryPruneSubqueryIsIndexOnly(t *testing.T) {
 		if !inSub {
 			t.Errorf("%s 的計劃裡沒有相關子查詢 —— "+
 				"那表示「不刪最新一筆」那段條件不見了", j.table)
+		}
+	}
+}
+
+func TestPruneNotificationsKeepsNewestDelivered(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	type row struct {
+		kind      string
+		delivered bool
+		at        time.Time
+	}
+	seed := []row{
+		{"daily", true, now.Add(-50 * 24 * time.Hour)},
+		{"daily", false, now.Add(-40 * 24 * time.Hour)},
+		{"daily", true, now.Add(-10 * 24 * time.Hour)},
+		{"daily", false, now.Add(-24 * time.Hour)},
+		{"weekly", true, now.Add(-60 * 24 * time.Hour)},
+		{"weekly", true, now.Add(-45 * 24 * time.Hour)},
+		{"weekly", false, now.Add(-45 * 24 * time.Hour)},
+		{"weekly", false, now.Add(-48 * time.Hour)},
+		{"orphan", false, now.Add(-40 * 24 * time.Hour)},
+		{"orphan", false, now.Add(-39 * 24 * time.Hour)},
+	}
+	for _, r := range seed {
+		if err := s.RecordNotification(r.kind, "cmd", "body", r.delivered, "", r.at); err != nil {
+			t.Fatalf("record %s: %v", r.kind, err)
+		}
+	}
+	dry, err := s.Prune(now, DefaultRetention(), true)
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if got := countRows(t, s, `SELECT COUNT(*) FROM notifications`); got != len(seed) {
+		t.Fatalf("dry run deleted notification rows: %d left", got)
+	}
+	real, err := s.Prune(now, DefaultRetention(), false)
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	var noteDry, noteReal int64
+	for _, c := range dry.Counts {
+		if c.Table == "notifications" {
+			noteDry = c.Deleted
+		}
+	}
+	var kept int64
+	for _, c := range real.Counts {
+		if c.Table == "notifications" {
+			noteReal = c.Deleted
+			kept = c.Kept
+		}
+	}
+	if noteDry != 6 || noteReal != 6 {
+		t.Fatalf("notifications deleted dry=%d real=%d, want 6", noteDry, noteReal)
+	}
+	if kept != 1 {
+		t.Fatalf("notifications kept past the horizon = %d, want the newest weekly delivery", kept)
+	}
+	remaining := map[string]int{}
+	rows, err := s.rdb.Query(`SELECT kind, delivered, sent_at FROM notifications ORDER BY kind, sent_at`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind, sent string
+		var delivered int
+		if err := rows.Scan(&kind, &delivered, &sent); err != nil {
+			t.Fatal(err)
+		}
+		remaining[fmt.Sprintf("%s/%d/%s", kind, delivered, sent)]++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"daily/1/" + fmtTime(now.Add(-10*24*time.Hour)),
+		"daily/0/" + fmtTime(now.Add(-24*time.Hour)),
+		"weekly/1/" + fmtTime(now.Add(-45*24*time.Hour)),
+		"weekly/0/" + fmtTime(now.Add(-48*time.Hour)),
+	}
+	if len(remaining) != len(want) {
+		t.Fatalf("notifications left = %v, want %v", remaining, want)
+	}
+	for _, key := range want {
+		if remaining[key] != 1 {
+			t.Fatalf("missing %s in %v", key, remaining)
 		}
 	}
 }

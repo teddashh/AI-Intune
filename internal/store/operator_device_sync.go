@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
@@ -131,7 +132,7 @@ func (s *Store) PreviewOperatorDeviceSync(machineID string, timeoutSeconds int) 
 	if !validOperatorDeviceSyncTimeout(timeoutSeconds) {
 		return OperatorDeviceSyncPreviewResult{}, operatorDeviceSyncRejection(OperatorCodeBadDeviceSyncTimeout)
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "preview_operator_device_sync")
 	if err != nil {
 		return OperatorDeviceSyncPreviewResult{}, fmt.Errorf("store: begin operator device sync preview: %w", err)
 	}
@@ -359,7 +360,7 @@ func (s *Store) ApplyOperatorDeviceSync(req OperatorDeviceSyncRequest) (Operator
 	audit := req.Audit
 	audit.Action, audit.MachineID, audit.Subject = AuditDeviceSync, req.MachineID, req.MachineID
 	audit.Reason, audit.IdempotencyKey, audit.RequestDigest = req.Reason, req.IdempotencyKey, req.RequestDigest
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_device_sync")
 	if err != nil {
 		return OperatorDeviceSyncResult{}, fmt.Errorf("store: begin operator device sync: %w", err)
 	}
@@ -504,7 +505,7 @@ func operatorDeviceSyncResult(receipt operatorDeviceSyncReceipt) OperatorDeviceS
 	}
 }
 
-func (s *Store) replayOperatorDeviceSync(tx *sql.Tx, req OperatorDeviceSyncRequest, audit AuditEntry,
+func (s *Store) replayOperatorDeviceSync(tx dbTx, req OperatorDeviceSyncRequest, audit AuditEntry,
 	cached operatorCachedRequest,
 ) (OperatorDeviceSyncResult, error) {
 	if cached.Operation != operatorDeviceSyncOperation(req.MachineID) || cached.Digest != req.RequestDigest {
@@ -666,7 +667,7 @@ func validateOperatorDeviceSyncReceipt(receipt operatorDeviceSyncReceipt, req Op
 	return nil
 }
 
-func validateOperatorDeviceSyncSuccessEvidence(tx *sql.Tx, receipt operatorDeviceSyncReceipt,
+func validateOperatorDeviceSyncSuccessEvidence(tx dbTx, receipt operatorDeviceSyncReceipt,
 	req OperatorDeviceSyncRequest,
 ) (bool, error) {
 	var rows int
@@ -713,7 +714,7 @@ func validateOperatorDeviceSyncSuccessEvidence(tx *sql.Tx, receipt operatorDevic
 		operatorDeviceSyncSuccessAuditDetail(receipt))
 }
 
-func validateOperatorDeviceSyncJobLifecycle(tx *sql.Tx, jobID string, createdAt time.Time) (bool, error) {
+func validateOperatorDeviceSyncJobLifecycle(tx dbTx, jobID string, createdAt time.Time) (bool, error) {
 	var state deploy.JobState
 	var leaseToken, leaseExpiresAt, terminalAt sql.NullString
 	if err := tx.QueryRow(`SELECT state,lease_token,lease_expires_at,terminal_at FROM jobs WHERE job_id=?`, jobID).
@@ -764,7 +765,7 @@ func validateOperatorDeviceSyncJobLifecycle(tx *sql.Tx, jobID string, createdAt 
 	}
 }
 
-func validateOperatorDeviceSyncSucceededVerification(tx *sql.Tx, jobID string,
+func validateOperatorDeviceSyncSucceededVerification(tx dbTx, jobID string,
 	createdAt, terminalAt time.Time,
 ) (bool, error) {
 	var count int
@@ -846,7 +847,7 @@ func validateOperatorDeviceSyncSucceededVerification(tx *sql.Tx, jobID string,
 	return validateOperatorDeviceSyncSucceededEvents(tx, jobID, createdAt, terminalAt, verificationReceivedAt)
 }
 
-func validateOperatorDeviceSyncSucceededEvents(tx *sql.Tx, jobID string,
+func validateOperatorDeviceSyncSucceededEvents(tx dbTx, jobID string,
 	createdAt, terminalAt, verificationReceivedAt time.Time,
 ) (bool, error) {
 	rows, err := tx.Query(`SELECT event.event_id,event.seq,event.phase,event.payload,event.occurred_at,event.received_at,
@@ -901,7 +902,7 @@ func parseCanonicalOperatorDeviceSyncStoredTime(raw string) (time.Time, bool) {
 	return value, err == nil && raw == fmtTime(value) && canonicalOperatorTime(value)
 }
 
-func validateOperatorDeviceSyncAudit(tx *sql.Tx, req OperatorDeviceSyncRequest, createdAt, subject string,
+func validateOperatorDeviceSyncAudit(tx dbTx, req OperatorDeviceSyncRequest, createdAt, subject string,
 	ok bool, detail string,
 ) (bool, error) {
 	sourceAddr := req.Audit.SourceAddr

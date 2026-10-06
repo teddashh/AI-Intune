@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net/http"
 	"time"
 
@@ -33,7 +32,7 @@ func (h *hub) handleNextJob(w http.ResponseWriter, r *http.Request, machineID st
 	// 旗標：它跟判決一樣現算，所以機器一恢復就會自己再領得到。
 	blocked, err := h.store.ComplianceBlocksJobs(machineID)
 	if err != nil {
-		writeJobInternalError(w, "讀取合規性動作", err)
+		h.writeStoreError(w, "讀取合規性動作", machineID, err)
 		return
 	}
 	if blocked {
@@ -42,7 +41,7 @@ func (h *hub) handleNextJob(w http.ResponseWriter, r *http.Request, machineID st
 	}
 	job, ok, err := h.store.NextJobForMachine(machineID)
 	if err != nil {
-		writeJobInternalError(w, "讀取下一張工作單", err)
+		h.writeStoreError(w, "讀取下一張工作單", machineID, err)
 		return
 	}
 	if !ok {
@@ -52,7 +51,7 @@ func (h *hub) handleNextJob(w http.ResponseWriter, r *http.Request, machineID st
 	// ⚠ 工作單指到的期望狀態一定存在（FK 擋著）；讀不到是 Hub 自己的 bug，是 5xx。
 	ds, err := h.store.DesiredState(job.DesiredID)
 	if err != nil {
-		writeJobInternalError(w, "讀取工作單的期望狀態", err)
+		h.writeStoreError(w, "讀取工作單的期望狀態", machineID, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, model.JobResponse{
@@ -103,7 +102,7 @@ func (h *hub) handleClaimJob(w http.ResponseWriter, r *http.Request, machineID s
 			writeJobNotFound(w)
 			return
 		}
-		writeJobInternalError(w, "領取工作單", err)
+		h.writeStoreError(w, "領取工作單", machineID, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, model.JobLeaseResponse{
@@ -122,7 +121,7 @@ func (h *hub) handleRenewJobLease(w http.ResponseWriter, r *http.Request, machin
 			writeLeaseInvalid(w)
 			return
 		}
-		writeJobInternalError(w, "續租工作單", err)
+		h.writeStoreError(w, "續租工作單", machineID, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, model.JobLeaseResponse{
@@ -157,7 +156,7 @@ func (h *hub) handleJobEvent(w http.ResponseWriter, r *http.Request, machineID s
 				"這個 seq 已經對應另一個事件內容；請不要重用事件序號")
 			return
 		}
-		writeJobInternalError(w, "寫入工作單事件", err)
+		h.writeStoreError(w, "寫入工作單事件", machineID, err)
 		return
 	}
 	// ⚠ 有些階段事件同時是狀態轉移。事件先落地（那是 agent 說了什麼），
@@ -169,7 +168,7 @@ func (h *hub) handleJobEvent(w http.ResponseWriter, r *http.Request, machineID s
 		if replayed {
 			job, jerr := h.store.JobForMachine(jobID, machineID)
 			if jerr != nil {
-				writeJobInternalError(w, "讀取回放階段事件的工作單", jerr)
+				h.writeStoreError(w, "讀取回放階段事件的工作單", machineID, jerr)
 				return
 			}
 			// Heal the crash window between the committed event row and its
@@ -228,7 +227,7 @@ func (h *hub) handleJobVerification(w http.ResponseWriter, r *http.Request, mach
 				"這個 rule_id 已經對應另一組驗證證據；請不要重用驗證規則")
 			return
 		}
-		writeJobInternalError(w, "寫入工作單驗證證據", err)
+		h.writeStoreError(w, "寫入工作單驗證證據", machineID, err)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
@@ -277,11 +276,11 @@ func (h *hub) handleCompleteJob(w http.ResponseWriter, r *http.Request, machineI
 			// ⚠ 「沒有證據」跟「證據說失敗」是兩件事：前者停在 verifying（上一個 case）。
 			job, jerr := h.store.JobForMachine(jobID, machineID)
 			if jerr != nil {
-				writeJobInternalError(w, "讀取驗證失敗的工作單", jerr)
+				h.writeStoreError(w, "讀取驗證失敗的工作單", machineID, jerr)
 				return
 			}
 			if ferr := h.store.FailJob(jobID, job.Irreversible, now); ferr != nil {
-				writeJobInternalError(w, "依失敗證據關閉工作單", ferr)
+				h.writeStoreError(w, "依失敗證據關閉工作單", machineID, ferr)
 				return
 			}
 			// ⚠ FailJob 的 UPDATE 排除五個終態，n≠1 時仍可能回 nil（見
@@ -291,7 +290,7 @@ func (h *hub) handleCompleteJob(w http.ResponseWriter, r *http.Request, machineI
 			// internal/deploy/deploy.go:106-110），兩者不准互換。
 			ledgerJob, jerr := h.store.JobForMachine(jobID, machineID)
 			if jerr != nil {
-				writeJobInternalError(w, "讀回依失敗證據關閉的工作單", jerr)
+				h.writeStoreError(w, "讀回依失敗證據關閉的工作單", machineID, jerr)
 				return
 			}
 			h.advanceDeployments(now)
@@ -305,7 +304,7 @@ func (h *hub) handleCompleteJob(w http.ResponseWriter, r *http.Request, machineI
 		case errors.Is(err, store.ErrJobNotFound):
 			writeJobNotFound(w)
 		default:
-			writeJobInternalError(w, "依驗證證據判定工作單", err)
+			h.writeStoreError(w, "依驗證證據判定工作單", machineID, err)
 		}
 		return
 	}
@@ -332,7 +331,7 @@ func (h *hub) handleRejectJob(w http.ResponseWriter, r *http.Request, machineID 
 		Detail:        req.Detail,
 	})
 	if err != nil {
-		writeJobInternalError(w, "編碼拒絕事件", err)
+		h.writeStoreError(w, "編碼拒絕事件", machineID, err)
 		return
 	}
 	now := jobNow()
@@ -359,7 +358,7 @@ func (h *hub) handleRejectJob(w http.ResponseWriter, r *http.Request, machineID 
 			writeLeaseInvalid(w)
 			return
 		}
-		writeJobInternalError(w, "寫入工作單拒絕事件", err)
+		h.writeStoreError(w, "寫入工作單拒絕事件", machineID, err)
 		return
 	}
 	// Exact terminal event replay is the only request that may reuse the old
@@ -503,9 +502,4 @@ func writeJobStateError(w http.ResponseWriter, code, message string, state deplo
 		APIError: model.APIError{Code: code, Message: message},
 		State:    string(state),
 	})
-}
-
-func writeJobInternalError(w http.ResponseWriter, action string, err error) {
-	log.Printf("%s失敗：%v", action, err)
-	writeErr(w, http.StatusInternalServerError, "INTERNAL", action+"失敗")
 }

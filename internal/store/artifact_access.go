@@ -22,7 +22,7 @@ func (s *Store) MachineMayDownloadArtifact(machineID, sha256Hex string) (bool, e
 			return false, nil
 		}
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT d.resource_kind,d.resource_id,d.spec
   FROM jobs j
   JOIN desired_state d ON d.desired_id=j.desired_id

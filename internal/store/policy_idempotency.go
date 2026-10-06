@@ -24,7 +24,7 @@ func digestOf(value string) string {
 
 // policyIdempotency inspects the key. It returns (replayed result, rejection,
 // error); at most one is non-nil, and all-nil means the caller should proceed.
-func (s *Store) policyIdempotency(tx *sql.Tx, key, operation, requestDigest string,
+func (s *Store) policyIdempotency(tx dbTx, key, operation, requestDigest string,
 	audit *AuditEntry, decode func(string) (any, error), replayDetail string) (any, error, error) {
 
 	var cached operatorCachedRequest
@@ -88,7 +88,7 @@ func (s *Store) policyIdempotency(tx *sql.Tx, key, operation, requestDigest stri
 
 // policyReject persists a domain rejection so a retry gets the same verdict
 // instead of re-running once the fleet has changed underneath it.
-func (s *Store) policyReject(tx *sql.Tx, key, operation, requestDigest string,
+func (s *Store) policyReject(tx dbTx, key, operation, requestDigest string,
 	audit *AuditEntry, code, detail string) error {
 	audit.OK, audit.Detail = false, detail
 	if err := s.recordAuditTx(tx, *audit); err != nil {
@@ -108,7 +108,7 @@ func (s *Store) policyReject(tx *sql.Tx, key, operation, requestDigest string,
 	return rejection
 }
 
-func (s *Store) policyCommit(tx *sql.Tx, key, operation, requestDigest string,
+func (s *Store) policyCommit(tx dbTx, key, operation, requestDigest string,
 	audit *AuditEntry, result any) error {
 	raw, err := json.Marshal(result)
 	if err != nil {

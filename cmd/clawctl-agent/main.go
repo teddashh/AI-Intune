@@ -462,6 +462,7 @@ func readinessPending(receipt model.AgentReadinessResponse, machineID, agentVers
 // ---------------------------------------------------------------- run
 
 func runAgent() {
+	applySoftMemoryLimit()
 	cfg, err := loadConfig()
 	if err != nil {
 		log.Fatalf("讀不到設定（跑過 `clawctl-agent enroll` 了嗎？）：%v", err)
@@ -517,6 +518,7 @@ func runAgent() {
 	// --- 心跳 goroutine。
 	go func() {
 		notifyReady()
+		var skewTrack clockSkewTracker
 		for {
 			lastTurn.Store(time.Now().UnixNano())
 			hb, err := probe.Heartbeat(ctx, seq.Add(1))
@@ -529,7 +531,6 @@ func runAgent() {
 			}
 			hb.SchemaVersion = model.SchemaVersion
 			hb.AgentVersion = version
-			hb.SentAt = time.Now().UTC()
 			jobsEnabled := cfg.JobsEnabled
 			hb.JobsEnabled = &jobsEnabled
 			advertiseJobCapabilities(&hb)
@@ -537,10 +538,13 @@ func runAgent() {
 			hb.SettingsDigest = now.digest
 
 			var resp model.CheckinResponse
-			if err := postJSON(ctx, cfg.HubURL+"/v1/checkins", cfg.AgentToken, hb, &resp); err != nil {
-				// ⚠ Hub 掛掉不是這台機器的錯，也不該讓 agent 停。只記錄，繼續。
-				log.Printf("check-in 送不出去（會重試）：%v", err)
-			} else {
+			// SentAt and the RTT sample share one clock reading so the skew
+			// estimate can subtract half the postJSON round trip.
+			callStart := time.Now()
+			hb.SentAt = callStart.UTC()
+			postErr := postJSON(ctx, cfg.HubURL+"/v1/checkins", cfg.AgentToken, hb, &resp)
+			rtt := time.Since(callStart)
+			if postErr == nil {
 				now = adoptSettings(now, resp, &applied, cfg, seq)
 				// ⚠ 期望由 Hub 下發，agent 不自己決定要量什麼。規則與 token
 				// 是同一份證據的身分，必須用同一次 atomic Store 發布。
@@ -549,9 +553,25 @@ func runAgent() {
 					token:        resp.WorkloadPolicyToken,
 				}
 				policy.Store(bundle)
-				// Hub 回送 received_at，讓 agent 自己發現時鐘漂移。
-				if skew := resp.ReceivedAt.Sub(hb.SentAt); abs(skew) > 2*time.Minute {
-					log.Printf("警告：本機時鐘與 Hub 相差 %s", skew.Round(time.Second))
+				if skew, ok := estimateClockSkew(hb.SentAt, resp.ReceivedAt, rtt); ok {
+					var event clockSkewEvent
+					skewTrack, event = skewTrack.observe(time.Now(), skew, rtt)
+					if line := formatClockSkewEvent(event); line != "" {
+						log.Printf("%s", line)
+					}
+				}
+			}
+			wait := jitter(now.checkin)
+			if postErr != nil {
+				if honored, _, busy := hubBusyWait(wait, postErr); busy {
+					// The systemd watchdog treats a heartbeat turn longer than
+					// 3x the check-in interval as a hang, so a long Retry-After
+					// is clamped to 2x the interval here.
+					wait = min(honored, 2*now.checkin)
+					logHubBusy(wait)
+				} else {
+					// ⚠ Hub 掛掉不是這台機器的錯，也不該讓 agent 停。只記錄，繼續。
+					log.Printf("check-in 送不出去（會重試）：%v", postErr)
 				}
 			}
 			saveState(agentState{AgentSeq: seq.Load(), SettingsDigest: now.digest})
@@ -559,7 +579,7 @@ func runAgent() {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(jitter(now.checkin)):
+			case <-time.After(wait):
 			}
 		}
 	}()
@@ -585,14 +605,24 @@ func runAgent() {
 		// 而不是「量過了，沒有東西要量」。Hub 那邊分得出來（見 Detail.Expectations）。
 		applyWorkloadPolicy(&obs, policy.Load())
 
-		if err := postJSON(ctx, cfg.HubURL+"/v1/observations:batch", cfg.AgentToken, obs, nil); err != nil {
-			log.Printf("觀測送不出去（會重試）：%v", err)
-		} else {
+		postErr := postJSON(ctx, cfg.HubURL+"/v1/observations:batch", cfg.AgentToken, obs, nil)
+		if postErr == nil {
 			now := time.Now()
 			lastObs.Store(&now)
 		}
+		wait := jitter(applied.Load().observation)
+		var floor time.Duration
+		if postErr != nil {
+			if honored, serverFloor, busy := hubBusyWait(wait, postErr); busy {
+				wait = honored
+				floor = serverFloor
+				logHubBusy(wait)
+			} else {
+				log.Printf("觀測送不出去（會重試）：%v", postErr)
+			}
+		}
 
-		if waitNextObservation(ctx, applied.Load().observation, observationNudge) == observationCanceled {
+		if waitNextObservation(ctx, wait, floor, observationNudge) == observationCanceled {
 			return
 		}
 	}
@@ -626,14 +656,53 @@ const (
 	observationNudged
 )
 
-// waitNextObservation 等定時週期或工作單終態先到；回到觀測迴圈後會從當下
-// 重新算下一個週期。
+// waitNextObservation waits for the caller-supplied duration or a job nudge.
+// The caller already applied jitter. floor is the server Retry-After from a
+// 503: a nudge may shorten the normal interval, but not this floor, so the next
+// post is not earlier than the hub asked. A zero floor keeps the old race
+// between the timer and a queued nudge.
 //
 // ⚠ nudge 不是把平常觀測調快，而是機器剛被工作單改過後，舊事實不准再掛
 // 10 分鐘。channel 只有一格且送端不阻塞；滿了代表已經有一輪排隊，丟掉也沒關係。
-func waitNextObservation(ctx context.Context, iv time.Duration, nudge <-chan struct{}) observationWakeReason {
-	timer := time.NewTimer(jitter(iv))
+func waitNextObservation(ctx context.Context, wait, floor time.Duration, nudge <-chan struct{}) observationWakeReason {
+	if wait < 0 {
+		wait = 0
+	}
+	if floor < 0 {
+		floor = 0
+	}
+	if floor > wait {
+		floor = wait
+	}
+	timer := time.NewTimer(wait)
 	defer timer.Stop()
+	if floor <= 0 {
+		select {
+		case <-ctx.Done():
+			return observationCanceled
+		case <-timer.C:
+			return observationTimer
+		case <-nudge:
+			return observationNudged
+		}
+	}
+	if floor >= wait {
+		select {
+		case <-ctx.Done():
+			return observationCanceled
+		case <-timer.C:
+			return observationTimer
+		}
+	}
+	floorTimer := time.NewTimer(floor)
+	defer floorTimer.Stop()
+	select {
+	case <-ctx.Done():
+		return observationCanceled
+	case <-timer.C:
+		return observationTimer
+	case <-floorTimer.C:
+	}
 	select {
 	case <-ctx.Done():
 		return observationCanceled
@@ -702,13 +771,6 @@ func dur(seconds int, fallback time.Duration) time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-func abs(d time.Duration) time.Duration {
-	if d < 0 {
-		return -d
-	}
-	return d
-}
-
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
 func postJSON(ctx context.Context, url, token string, body, out any) error {
@@ -769,7 +831,14 @@ func doJSONStatusMode(ctx context.Context, method, url, token string, body, out 
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		var apiErr model.APIError
 		_ = json.Unmarshal(b, &apiErr)
-		return resp.StatusCode, &hubHTTPError{StatusCode: resp.StatusCode, APIError: apiErr, Body: b}
+		httpErr := &hubHTTPError{StatusCode: resp.StatusCode, APIError: apiErr, Body: b}
+		if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusTooManyRequests {
+			if d, ok := parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()); ok {
+				httpErr.RetryAfter = d
+				httpErr.HasRetryAfter = true
+			}
+		}
+		return resp.StatusCode, httpErr
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
 		_, _ = io.Copy(io.Discard, resp.Body)
@@ -797,10 +866,15 @@ func doJSONStatusMode(ctx context.Context, method, url, token string, body, out 
 }
 
 // hubHTTPError 保留協定層需要判斷的 status/code，也維持既有錯誤文字的形狀。
+// RetryAfter is set only for 503 and 429 when Retry-After parsed. The duration
+// is already capped. HasRetryAfter distinguishes a real zero (retry now) from
+// a missing or garbage header.
 type hubHTTPError struct {
-	StatusCode int
-	APIError   model.APIError
-	Body       []byte
+	StatusCode    int
+	APIError      model.APIError
+	Body          []byte
+	RetryAfter    time.Duration
+	HasRetryAfter bool
 }
 
 func (e *hubHTTPError) Error() string {

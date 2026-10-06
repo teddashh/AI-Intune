@@ -238,7 +238,7 @@ func canonicalRetentionResponseTime(value time.Time) bool {
 func validateRetentionCounts(counts []store.PruneCount, evaluatedAt time.Time,
 	policy store.OperatorRetentionPolicy, total, kept int64,
 ) error {
-	if counts == nil || len(counts) != 4 || total < 0 || kept < 0 {
+	if counts == nil || len(counts) != 5 || total < 0 || kept < 0 {
 		return errors.New("operator client: retention counts are incomplete")
 	}
 	want := []struct {
@@ -249,6 +249,7 @@ func validateRetentionCounts(counts []store.PruneCount, evaluatedAt time.Time,
 		{"machine_checkins", policy.CheckinsSeconds},
 		{"ticket_occupancy_observation", policy.OccupancySeconds},
 		{"canary_silent_failures", policy.ObservationsSeconds},
+		{"notifications", policy.ObservationsSeconds},
 	}
 	var gotTotal, gotKept int64
 	for i, item := range counts {

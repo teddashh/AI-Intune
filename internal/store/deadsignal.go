@@ -100,7 +100,7 @@ func (s *Store) DeadSignals(now time.Time) ([]DeadSignal, error) {
 	var out []DeadSignal
 
 	for _, c := range signalChecks {
-		have, err := columnSet(s.db, c.table)
+		have, err := columnSet(s.rdb, c.table)
 		if err != nil {
 			return nil, err
 		}
@@ -114,7 +114,7 @@ func (s *Store) DeadSignals(now time.Time) ([]DeadSignal, error) {
 			return nil, fmt.Errorf("store: dead signal %s 沒有 received_at 欄", c.table)
 		}
 
-		rows, err := s.db.Query(fmt.Sprintf(`
+		rows, err := s.rdb.Query(fmt.Sprintf(`
 SELECT t.machine_id, COALESCE(m.display_name, t.machine_id),
        COUNT(*), COUNT(t.%[1]s), COUNT(DISTINCT t.%[1]s)
   FROM %[2]s t LEFT JOIN machine_registry m ON m.machine_id = t.machine_id
