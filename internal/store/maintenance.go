@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -248,7 +249,7 @@ func (s *Store) PreviewDiskCleanProfile(scopeType, scopeID string, profile maint
 	if err != nil {
 		return DiskCleanProfilePreview{}, diskCleanInvalid(err)
 	}
-	rev, _, _, err := latestDiskCleanDesired(s.db, scopeType, scopeID)
+	rev, _, _, err := latestDiskCleanDesired(s.rdb, scopeType, scopeID)
 	if err != nil {
 		return DiskCleanProfilePreview{}, err
 	}
@@ -351,7 +352,7 @@ func (s *Store) ApplyDiskCleanProfile(req DiskCleanProfileRequest) (DiskCleanPro
 // PreviewDiskCleanDryRun checks the targets and returns a digest. Blockers
 // are reported and are not part of the digest.
 func (s *Store) PreviewDiskCleanDryRun(req DiskCleanTargetRequest) (DiskCleanDryRunPreview, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.rdb.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return DiskCleanDryRunPreview{}, fmt.Errorf("store: begin disk-clean dry-run preview: %w", err)
 	}
@@ -422,7 +423,7 @@ func (s *Store) ApplyDiskCleanDryRun(req DiskCleanTargetRequest) (DiskCleanDryRu
 
 // PreviewDiskCleanCanary checks dry-run evidence and names exactly one canary.
 func (s *Store) PreviewDiskCleanCanary(req DiskCleanTargetRequest) (DiskCleanCanaryPreview, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.rdb.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return DiskCleanCanaryPreview{}, fmt.Errorf("store: begin disk-clean canary preview: %w", err)
 	}
@@ -535,7 +536,7 @@ func (s *Store) previewDiskCleanControl(rolloutID string, continueRollout bool) 
 	if err := s.ReconcileDiskCleanRollouts(s.now()); err != nil {
 		return DiskCleanControlPreview{}, err
 	}
-	row, err := loadDiskCleanRollout(s.db, rolloutID)
+	row, err := loadDiskCleanRollout(s.rdb, rolloutID)
 	if err != nil {
 		return DiskCleanControlPreview{}, err
 	}
@@ -617,7 +618,7 @@ func (s *Store) applyDiskCleanControl(req DiskCleanControlRequest, continueRollo
 	return s.abandonDiskCleanTx(tx, req, row, reject, &audit, operation)
 }
 
-func (s *Store) continueDiskCleanTx(tx *sql.Tx, req DiskCleanControlRequest, row diskCleanRollout,
+func (s *Store) continueDiskCleanTx(tx dbTx, req DiskCleanControlRequest, row diskCleanRollout,
 	reject func(string, string) (DiskCleanRolloutResult, error), audit *AuditEntry, operation string,
 ) (DiskCleanRolloutResult, error) {
 	if row.State != diskCleanStatePaused || row.OpenedBatch != 1 {
@@ -673,7 +674,7 @@ func (s *Store) continueDiskCleanTx(tx *sql.Tx, req DiskCleanControlRequest, row
 	return result, nil
 }
 
-func (s *Store) abandonDiskCleanTx(tx *sql.Tx, req DiskCleanControlRequest, row diskCleanRollout,
+func (s *Store) abandonDiskCleanTx(tx dbTx, req DiskCleanControlRequest, row diskCleanRollout,
 	reject func(string, string) (DiskCleanRolloutResult, error), audit *AuditEntry, operation string,
 ) (DiskCleanRolloutResult, error) {
 	switch row.State {
@@ -714,7 +715,7 @@ func (s *Store) abandonDiskCleanTx(tx *sql.Tx, req DiskCleanControlRequest, row 
 // ReconcileDiskCleanRollouts advances canary to paused or blocked, and
 // expanding to finished or blocked. It never opens the next batch.
 func (s *Store) ReconcileDiskCleanRollouts(now time.Time) error {
-	rows, err := s.db.Query(`SELECT rollout_id FROM maintenance_rollouts WHERE state IN (?, ?)`,
+	rows, err := s.rdb.Query(`SELECT rollout_id FROM maintenance_rollouts WHERE state IN (?, ?)`,
 		diskCleanStateCanary, diskCleanStateExpanding)
 	if err != nil {
 		return fmt.Errorf("store: list open disk-clean rollouts: %w", err)
@@ -732,7 +733,7 @@ func (s *Store) ReconcileDiskCleanRollouts(now time.Time) error {
 		return err
 	}
 	for _, id := range ids {
-		tx, err := s.db.Begin()
+		tx, err := s.beginWrite(context.Background(), "disk_clean_reconcile")
 		if err != nil {
 			return fmt.Errorf("store: begin disk-clean reconcile: %w", err)
 		}
@@ -748,7 +749,7 @@ func (s *Store) ReconcileDiskCleanRollouts(now time.Time) error {
 	return nil
 }
 
-func (s *Store) reconcileDiskCleanTx(tx *sql.Tx, rolloutID string, now time.Time) error {
+func (s *Store) reconcileDiskCleanTx(tx dbTx, rolloutID string, now time.Time) error {
 	row, err := loadDiskCleanRollout(tx, rolloutID)
 	if err != nil {
 		if op, ok := asOperator(err); ok && op.Code == OperatorCodeMaintenanceNotFound {
@@ -778,7 +779,7 @@ func (s *Store) reconcileDiskCleanTx(tx *sql.Tx, rolloutID string, now time.Time
 // ListDiskCleanSummaries returns assigned machines and machines that already
 // have a summary. An empty fleet is an empty list.
 func (s *Store) ListDiskCleanSummaries(now time.Time) ([]DiskCleanSummaryView, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT m.machine_id, m.display_name, COALESCE(m.channel, '')
   FROM machine_registry m
  WHERE m.retired_at IS NULL
@@ -828,7 +829,7 @@ func (s *Store) DiskCleanSummary(machineID string, now time.Time) (DiskCleanSumm
 // SweepDiskCleanAlerts returns conditions that should be notified. Delivery is
 // recorded by MarkDiskCleanAlertDelivered only after notify succeeds.
 func (s *Store) SweepDiskCleanAlerts(now time.Time) ([]DiskCleanAlertSend, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT a.machine_id, m.display_name, COALESCE(m.channel, '')
   FROM maintenance_assignments a
   JOIN machine_registry m ON m.machine_id=a.machine_id
@@ -854,17 +855,25 @@ SELECT a.machine_id, m.display_name, COALESCE(m.channel, '')
 	if err != nil {
 		return nil, err
 	}
-	tx, err := s.db.Begin()
+	// Every verdict is computed on the reader pool before the writer is
+	// taken. diskCleanSummaryView reads several tables per machine; doing that
+	// while holding the single writer would stall check-ins for the whole sweep.
+	views := make([]DiskCleanSummaryView, len(machines))
+	for i, m := range machines {
+		view, err := s.diskCleanSummaryView(m.id, m.name, m.channel, now, assignments)
+		if err != nil {
+			return nil, err
+		}
+		views[i] = view
+	}
+	tx, err := s.beginWrite(context.Background(), "disk_clean_alerts")
 	if err != nil {
 		return nil, fmt.Errorf("store: begin disk-clean alerts: %w", err)
 	}
 	defer tx.Rollback()
 	var sends []DiskCleanAlertSend
-	for _, m := range machines {
-		view, err := s.diskCleanSummaryView(m.id, m.name, m.channel, now, assignments)
-		if err != nil {
-			return nil, err
-		}
+	for i, m := range machines {
+		view := views[i]
 		verdict := maintenance.Verdict{
 			Outcome: view.Verdict, Stale: view.Stale, Attention: view.Attention,
 			Mode: view.Mode, Disk: view.Disk, Reasons: view.Reasons,
@@ -875,6 +884,7 @@ SELECT a.machine_id, m.display_name, COALESCE(m.channel, '')
 			var active, delivered int
 			err := tx.QueryRow(`SELECT fingerprint, active, delivered FROM maintenance_alert_state
 			 WHERE machine_id=? AND condition=?`, m.id, alert.Condition).Scan(&fingerprint, &active, &delivered)
+			found := err == nil
 			if errors.Is(err, sql.ErrNoRows) {
 				err = nil
 			}
@@ -893,7 +903,11 @@ SELECT a.machine_id, m.display_name, COALESCE(m.channel, '')
 			if !send && prev.Delivered && prev.Fingerprint == alert.Fingerprint && alert.Active {
 				deliveredBit = 1
 			}
-			if _, err := tx.Exec(`INSERT INTO maintenance_alert_state
+			unchanged := found && fingerprint == alert.Fingerprint && active == activeBit && delivered == deliveredBit
+			if unchanged {
+				// Nothing to record. Skipping the upsert keeps the minute sweep
+				// from rewriting every alert row on the single writer.
+			} else if _, err := tx.Exec(`INSERT INTO maintenance_alert_state
 			 (machine_id, condition, fingerprint, active, delivered, updated_at)
 			 VALUES (?,?,?,?,?,?)
 			 ON CONFLICT(machine_id, condition) DO UPDATE SET
@@ -928,7 +942,7 @@ SELECT a.machine_id, m.display_name, COALESCE(m.channel, '')
 // MarkDiskCleanAlertDelivered records a successful notify for the fingerprint
 // that was sent. A changed fingerprint is left for the next sweep.
 func (s *Store) MarkDiskCleanAlertDelivered(machineID, condition, fingerprint string) error {
-	if _, err := s.db.Exec(`UPDATE maintenance_alert_state SET delivered=1, updated_at=?
+	if _, err := s.execWrite(context.Background(), "disk_clean_alert_mark", `UPDATE maintenance_alert_state SET delivered=1, updated_at=?
 	 WHERE machine_id=? AND condition=? AND fingerprint=? AND active=1`,
 		fmtTime(s.now()), machineID, condition, fingerprint); err != nil {
 		return fmt.Errorf("store: mark disk-clean alert delivered: %w", err)
@@ -941,7 +955,7 @@ func (s *Store) MarkDiskCleanAlertDelivered(machineID, condition, fingerprint st
 func (s *Store) projectMaintenanceSummary(jobID, machineID, stdoutExcerpt string, receivedAt time.Time) error {
 	var kind, resourceID string
 	var revision int64
-	err := s.db.QueryRow(`
+	err := s.rdb.QueryRow(`
 SELECT d.resource_kind, d.resource_id, j.revision
   FROM jobs j
   JOIN desired_state d ON d.desired_id = j.desired_id
@@ -960,7 +974,7 @@ SELECT d.resource_kind, d.resource_id, j.revision
 	if err != nil {
 		return nil
 	}
-	if _, err := s.db.Exec(`INSERT OR IGNORE INTO maintenance_summaries
+	if _, err := s.execWrite(context.Background(), "disk_clean_summary", `INSERT OR IGNORE INTO maintenance_summaries
 	 (summary_id, machine_id, job_id, received_at, revision, config_digest, mode, summary_json)
 	 VALUES (?,?,?,?,?,?,?,?)`,
 		newID(), machineID, jobID, fmtTime(receivedAt), revision, summary.ConfigDigest, summary.Mode, line); err != nil {
@@ -1014,7 +1028,7 @@ type diskCleanRollout struct {
 	ConfigDigest    string
 }
 
-func (s *Store) prepareDiskCleanTargets(tx *sql.Tx, req DiskCleanTargetRequest, canary bool) (diskCleanPlan, error) {
+func (s *Store) prepareDiskCleanTargets(tx dbTx, req DiskCleanTargetRequest, canary bool) (diskCleanPlan, error) {
 	var plan diskCleanPlan
 	plan.ScopeType = req.ScopeType
 	plan.ScopeID = req.ScopeID
@@ -1069,7 +1083,7 @@ func (s *Store) prepareDiskCleanTargets(tx *sql.Tx, req DiskCleanTargetRequest, 
 	return plan, nil
 }
 
-func (s *Store) machineBlockerTx(tx *sql.Tx, machineID, scopeType, scopeID string) (*DiskCleanBlocker, error) {
+func (s *Store) machineBlockerTx(tx dbTx, machineID, scopeType, scopeID string) (*DiskCleanBlocker, error) {
 	gate, err := diskCleanGateTx(tx, machineID)
 	if err != nil {
 		return nil, err
@@ -1112,7 +1126,7 @@ type diskCleanGate struct {
 	ActiveJobs  int
 }
 
-func diskCleanGateTx(tx *sql.Tx, machineID string) (diskCleanGate, error) {
+func diskCleanGateTx(tx dbTx, machineID string) (diskCleanGate, error) {
 	var gate diskCleanGate
 	var channel, retired sql.NullString
 	var jobs, capable sql.NullBool
@@ -1150,7 +1164,7 @@ SELECT m.channel, m.retired_at, c.jobs_enabled, cap.supported,
 	return gate, nil
 }
 
-func dryRunEvidenceTx(tx *sql.Tx, machineID, desiredID, digest string) error {
+func dryRunEvidenceTx(tx dbTx, machineID, desiredID, digest string) error {
 	var stdout string
 	err := tx.QueryRow(`
 SELECT v.stdout_excerpt
@@ -1176,7 +1190,7 @@ SELECT v.stdout_excerpt
 	return nil
 }
 
-func createDiskCleanJobTx(tx *sql.Tx, machineID, desiredID string, revision int64, digest string, irreversible bool, now time.Time) (string, error) {
+func createDiskCleanJobTx(tx dbTx, machineID, desiredID string, revision int64, digest string, irreversible bool, now time.Time) (string, error) {
 	jobID, err := createJobTx(tx, machineID, desiredID, deploy.Revision(revision), NewJob{
 		ArtifactDigest:   digest,
 		Irreversible:     irreversible,
@@ -1188,7 +1202,7 @@ func createDiskCleanJobTx(tx *sql.Tx, machineID, desiredID string, revision int6
 	return jobID, nil
 }
 
-func assignDiskCleanTx(tx *sql.Tx, machineID, desiredID string, revision int64, digest string, now time.Time) error {
+func assignDiskCleanTx(tx dbTx, machineID, desiredID string, revision int64, digest string, now time.Time) error {
 	if _, err := tx.Exec(`INSERT INTO maintenance_assignments
 	 (machine_id, desired_id, revision, config_digest, assigned_at)
 	 VALUES (?,?,?,?,?)
@@ -1257,7 +1271,7 @@ func loadDiskCleanRollout(q queryRower, rolloutID string) (diskCleanRollout, err
 	return row, nil
 }
 
-func openDiskCleanRolloutTx(tx *sql.Tx, desiredID string) (string, error) {
+func openDiskCleanRolloutTx(tx dbTx, desiredID string) (string, error) {
 	var id string
 	err := tx.QueryRow(`SELECT rollout_id FROM maintenance_rollouts
 	 WHERE desired_id=? AND state NOT IN (?, ?) LIMIT 1`,
@@ -1271,7 +1285,7 @@ func openDiskCleanRolloutTx(tx *sql.Tx, desiredID string) (string, error) {
 	return id, nil
 }
 
-func diskCleanBatchMachines(tx *sql.Tx, rolloutID string, batch int) ([]string, error) {
+func diskCleanBatchMachines(tx dbTx, rolloutID string, batch int) ([]string, error) {
 	rows, err := tx.Query(`SELECT machine_id FROM maintenance_rollout_targets
 	 WHERE rollout_id=? AND batch_no=? ORDER BY machine_id`, rolloutID, batch)
 	if err != nil {
@@ -1289,7 +1303,7 @@ func diskCleanBatchMachines(tx *sql.Tx, rolloutID string, batch int) ([]string, 
 	return ids, rows.Err()
 }
 
-func diskCleanBatchVerdict(tx *sql.Tx, rolloutID string, batch int) (string, error) {
+func diskCleanBatchVerdict(tx dbTx, rolloutID string, batch int) (string, error) {
 	var state sql.NullString
 	err := tx.QueryRow(`
 SELECT j.state FROM maintenance_rollout_targets t
@@ -1310,7 +1324,7 @@ SELECT j.state FROM maintenance_rollout_targets t
 	return diskCleanStateBlocked, nil
 }
 
-func diskCleanExpandingVerdict(tx *sql.Tx, rolloutID string) (string, error) {
+func diskCleanExpandingVerdict(tx dbTx, rolloutID string) (string, error) {
 	rows, err := tx.Query(`
 SELECT j.state FROM maintenance_rollout_targets t
  LEFT JOIN jobs j ON j.job_id=t.job_id
@@ -1339,7 +1353,7 @@ SELECT j.state FROM maintenance_rollout_targets t
 	return diskCleanStateFinished, nil
 }
 
-func diskCleanNonterminalCount(tx *sql.Tx, rolloutID string) (int, error) {
+func diskCleanNonterminalCount(tx dbTx, rolloutID string) (int, error) {
 	var n int
 	err := tx.QueryRow(`
 SELECT COUNT(*) FROM maintenance_rollout_targets t
@@ -1356,7 +1370,7 @@ func (s *Store) diskCleanSummaryView(machineID, displayName, channel string, now
 	view := DiskCleanSummaryView{MachineID: machineID, DisplayName: displayName, Disk: maintenance.DiskEvaluation{Outcome: maintenance.OutcomeUnmeasured}}
 	var assignedRevision int64
 	var expected string
-	err := s.db.QueryRow(`SELECT revision, config_digest FROM maintenance_assignments WHERE machine_id=?`, machineID).Scan(&assignedRevision, &expected)
+	err := s.rdb.QueryRow(`SELECT revision, config_digest FROM maintenance_assignments WHERE machine_id=?`, machineID).Scan(&assignedRevision, &expected)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return view, fmt.Errorf("store: read disk-clean assignment: %w", err)
 	}
@@ -1413,7 +1427,7 @@ func (s *Store) diskCleanSummaryView(machineID, displayName, channel string, now
 func (s *Store) latestDiskCleanSummary(machineID string) (*maintenance.Summary, time.Time, int64, bool, error) {
 	var raw, at string
 	var revision int64
-	err := s.db.QueryRow(`SELECT summary_json, received_at, revision FROM maintenance_summaries
+	err := s.rdb.QueryRow(`SELECT summary_json, received_at, revision FROM maintenance_summaries
 	 WHERE machine_id=? ORDER BY received_at DESC, summary_id DESC LIMIT 1`, machineID).Scan(&raw, &at, &revision)
 	if err == nil {
 		summary, perr := maintenance.ParseSummary([]byte(raw))
@@ -1425,7 +1439,7 @@ func (s *Store) latestDiskCleanSummary(machineID string) (*maintenance.Summary, 
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, time.Time{}, 0, false, fmt.Errorf("store: read disk-clean summary: %w", err)
 	}
-	err = s.db.QueryRow(`
+	err = s.rdb.QueryRow(`
 SELECT v.stdout_excerpt, v.received_at, j.revision
   FROM verification_results v
   JOIN jobs j ON j.job_id=v.job_id
@@ -1474,14 +1488,14 @@ func diskRuleFor(assignments []compliance.Assignment, machineID, channel string)
 	return nil
 }
 
-func (s *Store) beginDiskClean(key, operation, requestDigest string, audit *AuditEntry, decode func(string) (any, error), replayDetail string) (*sql.Tx, any, error) {
+func (s *Store) beginDiskClean(key, operation, requestDigest string, audit *AuditEntry, decode func(string) (any, error), replayDetail string) (*writeTx, any, error) {
 	if strings.TrimSpace(key) == "" || len(key) > 200 {
 		return nil, nil, operatorError(OperatorCodeIdempotencyKeyRequired, "Idempotency-Key is required and at most 200 bytes")
 	}
 	if !validArtifactFetchDigest(requestDigest) {
 		return nil, nil, operatorError(OperatorCodeRequestDigestRequired, "request digest must be sha256 and 64 lowercase hex characters")
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "disk_clean_"+strings.SplitN(operation, ":", 2)[0])
 	if err != nil {
 		return nil, nil, fmt.Errorf("store: begin disk-clean: %w", err)
 	}
@@ -1518,7 +1532,7 @@ func (s *Store) requireDiskCleanScope(scopeType, scopeID string) error {
 	return nil
 }
 
-func requireDiskCleanScopeTx(tx *sql.Tx, scopeType, scopeID string) error {
+func requireDiskCleanScopeTx(tx dbTx, scopeType, scopeID string) error {
 	if scopeType != "machine" && scopeType != "channel" {
 		return operatorError(OperatorCodeMaintenanceProfileInvalid, "scope_type must be machine or channel")
 	}

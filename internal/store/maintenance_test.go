@@ -14,6 +14,7 @@ import (
 
 func TestDiskCleanProfileRevisionIsPerScopeAndIdempotent(t *testing.T) {
 	s := newTestStore(t)
+	shortWriterWait(s)
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	s.nowFn = func() time.Time { return now }
 	machine := readyDiskMachine(t, s, "host-a", "", now)
@@ -78,6 +79,7 @@ func TestDiskCleanProfileRevisionIsPerScopeAndIdempotent(t *testing.T) {
 
 func TestDiskCleanCanaryPausesUntilContinue(t *testing.T) {
 	s := newTestStore(t)
+	shortWriterWait(s)
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	s.nowFn = func() time.Time { return now }
 	hostA := readyDiskMachine(t, s, "host-a", "stable", now)
@@ -179,6 +181,7 @@ func TestDiskCleanCanaryPausesUntilContinue(t *testing.T) {
 
 func TestDiskCleanAbandonRefusesRunningJob(t *testing.T) {
 	s := newTestStore(t)
+	shortWriterWait(s)
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	s.nowFn = func() time.Time { return now }
 	hostA := readyDiskMachine(t, s, "host-a", "stable", now)
@@ -227,6 +230,7 @@ func TestDiskCleanAbandonRefusesRunningJob(t *testing.T) {
 
 func TestDiskCleanAlertsDedupeAndDiskIsIndependent(t *testing.T) {
 	s := newTestStore(t)
+	shortWriterWait(s)
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	s.nowFn = func() time.Time { return now }
 	machine := readyDiskMachine(t, s, "host-a", "", now)
@@ -303,6 +307,7 @@ func TestDiskCleanAlertsDedupeAndDiskIsIndependent(t *testing.T) {
 
 func TestDiskCleanSummaryVerdictAndDigestMismatch(t *testing.T) {
 	s := newTestStore(t)
+	shortWriterWait(s)
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	s.nowFn = func() time.Time { return now }
 	if views, err := s.ListDiskCleanSummaries(now); err != nil || len(views) != 0 {
@@ -591,3 +596,9 @@ func operatorCode(err error) string {
 	}
 	return ""
 }
+
+// shortWriterWait makes a nested writer (a beginWrite, execWrite, or s.db call
+// made while this goroutine already holds the single writer) fail in 250ms with
+// ErrWriterBusy instead of hanging, so every disk-clean flow test doubles as a
+// deadlock check.
+func shortWriterWait(s *Store) { s.SetWriterWait(250 * time.Millisecond) }

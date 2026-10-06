@@ -152,15 +152,26 @@ beyond the rule above, and it does not delete anything.
 
 ## Alerts
 
-The existing notify command is the only transport (`RecordNotification` after
-the command succeeds). The minute loop reconciles rollouts, then sweeps
-disk-clean, then runs the daily report. The daily stamp is not touched.
+The Hub's notifier (`deliver`, the same path as the daily report) is the only
+transport. Every attempt is recorded in `notifications`. The minute loop
+reconciles rollouts, then sweeps disk-clean, then runs the daily report. The
+daily stamp and the daily watchdog are not touched.
+
+A failed send is not retried every minute. Each alert kind backs off on the
+daily report's schedule: the next attempt is at the last failure plus
+1m, 2m, 4m, 8m, 16m, 32m, then 60m, counting failures since that kind's last
+delivery. One kind's backoff does not hold back another machine's alert. With
+no notify command configured, each kind records one undelivered row per day and
+logs one warning.
+
+Verdicts are computed on the read pool. The sweep holds the single writer only
+to update `maintenance_alert_state`, and only for rows that changed.
 
 A machine that has this profile assigned alerts when attention is non-empty,
 when its latest summary is stale, or when an apply/mixed run left disk under
 the assigned threshold. A dry-run does not raise the disk alert. The same
-fingerprint is not sent again until it clears or the notify command failed to
-record delivery. A change of fingerprint alerts again. Kinds look like
+fingerprint is not sent again until it clears; an undelivered one is retried on
+the backoff above. A change of fingerprint alerts again. Kinds look like
 `disk-clean:<machine id>:<condition>`.
 
 ## Operator surface
