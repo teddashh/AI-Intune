@@ -287,6 +287,8 @@ func discoverNode(ctx context.Context, i *model.OpenClawInstall, deps installDep
 	}
 	// ⚠ 必須執行 ExecStart 的 argv[0] 絕對路徑；agent PATH 上的 node 在
 	// sampleagent3 是另一個執行環境，量它會得到與 gateway 無關的答案。
+	// Production deps.run is probe.run, so this --version shares the
+	// process-lifetime version cache. A failed probe is not cached.
 	out, stderr, err := deps.run(ctx, cmdTimeout, i.NodePath, "--version")
 	if err != nil {
 		i.NodeVersionReason = commandFailure(i.NodePath+" --version", out, stderr, err)
@@ -314,6 +316,7 @@ func discoverNPM(ctx context.Context, i *model.OpenClawInstall, deps installDeps
 
 	var failures []string
 	for _, candidate := range candidates {
+		// Same version cache as discoverNode when deps.run is probe.run.
 		out, stderr, err := deps.run(ctx, cmdTimeout, candidate, "--version")
 		if err != nil {
 			failures = append(failures, commandFailure(candidate+" --version", out, stderr, err))

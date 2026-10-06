@@ -1959,6 +1959,9 @@ func run(ctx context.Context, timeout time.Duration, name string, args ...string
 }
 
 // runIn 跟 run 一樣，但把子行程的 PATH 換成 dirs。dirs 是空的就用自己的 PATH。
+// A single "--version" argument is served from the process-lifetime cache in
+// version_cache.go when the executable identity is unchanged. A miss still
+// follows the PATH rules below.
 //
 // ⚠⚠ 這是 2026-09-03 那個 bug 的**第三層**，也是最容易被漏掉的一層：
 // 解對了檔案還不夠 —— 在錯的環境裡跑那個檔案，答案一樣是錯的。
@@ -1978,6 +1981,12 @@ func run(ctx context.Context, timeout time.Duration, name string, args ...string
 // 這些工具的憑證跟設定都住在 $HOME，把它清掉會得到一台「什麼都沒裝」的假機器
 // （ops/ansible/bootstrap.yml 那句 `become: false` 的註解講的是同一件事）。
 func runIn(ctx context.Context, timeout time.Duration, dirs []string, name string, args ...string) (string, string, error) {
+	cacheKey, cacheable := versionProbeKey(name, dirs, args)
+	if cacheable {
+		if cachedOut, cachedErr, ok := versionProbeLoad(cacheKey); ok {
+			return cachedOut, cachedErr, nil
+		}
+	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := processenv.CommandContext(cctx, name, args...)
@@ -1999,7 +2008,14 @@ func runIn(ctx context.Context, timeout time.Duration, dirs []string, name strin
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
-	return strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()), err
+	outText := strings.TrimSpace(stdout.String())
+	errText := strings.TrimSpace(stderr.String())
+	if cacheable && err == nil && outText != "" {
+		if again, ok := versionProbeKey(name, dirs, args); ok && again == cacheKey {
+			versionProbeStore(cacheKey, outText, errText)
+		}
+	}
+	return outText, errText, err
 }
 
 func readTrimmed(path string) string {
