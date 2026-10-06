@@ -9,8 +9,7 @@ operator auth model.
 
 Related: [`ops/docker/README.md`](../ops/docker/README.md), [`ops/install-hub.sh`](../ops/install-hub.sh),
 [DEPLOY-FLY.md](DEPLOY-FLY.md),
-operator auth contract (Tailscale app capabilities — see `ops/clawctl-hub.service` comments and install-hub.sh).
-Full OPERATOR-AUTH.md / PRODUCT.md live in the complete documentation set.
+operator auth contract: [OPERATOR-AUTH.md](OPERATOR-AUTH.md) (Tailscale app capabilities).
 
 ---
 
@@ -69,7 +68,7 @@ The **site/** static pages (if any) can live on Pages/Vercel; the Hub cannot.
 | **R2 or S3 (optional)** | Large artifacts / evidence blobs when configured; otherwise local files |
 | **GitHub** | Source code only — never enroll tokens or `hub.env` secrets |
 
-**Do not** run Hub on a machine it also manages as an enrolled agent if you can avoid it (see unit comments / PRODUCT). **Do not** run Hub on the Grok Bot build box.
+**Do not** run Hub on a machine it also manages as an enrolled agent if you can avoid it (see unit comments / PRODUCT).
 
 ---
 
@@ -104,7 +103,7 @@ container UID, fix socket permissions or use `ops/install-hub.sh` on the host
 instead of Docker for the Hub process.
 
 Join a free Tailscale tailnet: install Tailscale on the VPS and on your
-operator devices, then edit ACL grants as in OPERATOR-AUTH.md (replace the
+operator devices, then edit ACL grants as in [OPERATOR-AUTH.md](OPERATOR-AUTH.md) (replace the
 example `dst` IP with your VPS Tailscale IP).
 
 ---
@@ -184,7 +183,6 @@ version string leaves the already seeded release in place.
 ```bash
 # Backup (Hub stopped or briefly quiet — prefer stop for consistency)
 docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env stop hub
-docker run --rm -v clawctl-data:/data -v "$PWD:/backup" distroless 2>/dev/null || true
 docker run --rm -v clawctl-data:/data -v "$PWD:/backup" busybox \
   tar czf /backup/clawctl-data-$(date -u +%Y%m%dT%H%M%SZ).tar.gz -C /data .
 docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env start hub

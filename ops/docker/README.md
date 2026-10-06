@@ -1,7 +1,7 @@
 # clawctl-hub Docker 部署 / Docker deploy
 
 > **任何小型 Linux VPS / Docker host 皆可**——不是 Oracle Cloud 專屬。  
-> **Grok Bot box 不准當 Hub 主機**（這台是建置／代理環境，不是 fleet console）。
+> **不要把 Hub 放在建置／CI 機器上**（那是建置環境，不是 fleet console）。
 
 ---
 
@@ -73,7 +73,7 @@ Hub **不信任** `X-Forwarded-*`／`Forwarded` 做 operator 身分。
 - Optional **Cloudflare Tunnel** for experimental agent ingress only — Hub does **not** trust `X-Forwarded-*` for operator identity; operator UI stays on the Tailscale IP.
 - Storage split: SQLite = state and digests; optional R2/S3 = large blobs when configured; GitHub = code only.
 - **Not Oracle-only.** Any small Linux VM / Docker host works.
-- **Do not host the Hub on the Grok Bot box.**
+- **Do not host the Hub on a build/CI machine.**
 
 ### Hard constraint
 
