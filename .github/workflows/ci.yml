@@ -1,0 +1,92 @@
+name: Go CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: gofmt, vet, test, ops tests, cross-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Tools
+        run: |
+          command -v make >/dev/null || { sudo apt-get update && sudo apt-get install -y make; }
+          make --version | head -1
+          go version
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -count=1 ./...
+
+      - name: ops tests
+        run: bash ops/test-ops.sh
+
+      # The public tree does not build the agent for windows yet
+      # (internal/probe uses unix-only syscalls), so only darwin is checked.
+      - name: Cross-build agent (darwin)
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          for target in darwin/amd64 darwin/arm64; do
+            GOOS="${target%/*}" GOARCH="${target#*/}" go build -o /dev/null ./cmd/clawctl-agent
+          done
+
+  race:
+    name: race (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    # The store package alone takes about 12 minutes under -race on a
+    # developer box, which is past go test's default 10m timeout. Each group
+    # runs in its own job with an explicit -timeout.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: store
+            packages: ./internal/store/
+          - name: hub
+            packages: ./cmd/clawctl-hub/
+          - name: agent
+            packages: ./cmd/clawctl-agent/ ./internal/probe/
+          - name: links
+            packages: ./internal/agenthub/ ./internal/operatorclient/
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Tools
+        run: command -v make >/dev/null || { sudo apt-get update && sudo apt-get install -y make; }
+
+      - name: go test -race
+        run: go test -race -count=1 -timeout 45m ${{ matrix.packages }}
