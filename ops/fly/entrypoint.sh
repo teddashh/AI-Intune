@@ -257,7 +257,16 @@ if [ "$any_replica" -eq 1 ] || [ "$litestream_required" -eq 1 ]; then
   use_litestream=1
 fi
 
-hub_cmd="exec /usr/local/bin/clawctl-hub --db ${CLAWCTL_DB} --report-stamp ${CLAWCTL_REPORT_STAMP}"
+# Litestream splits -exec with shellwords and starts the program directly
+# (no shell), so this must not begin with "exec". It forwards SIGTERM to the
+# child and exits when the child exits. The paths contain no spaces.
+case "${CLAWCTL_DB}${CLAWCTL_REPORT_STAMP}" in
+  *[[:space:]\'\"]*)
+    echo "clawctl-fly: CLAWCTL_DB and CLAWCTL_REPORT_STAMP must not contain whitespace or quotes" >&2
+    exit 1
+    ;;
+esac
+hub_cmd="/usr/local/bin/clawctl-hub --db ${CLAWCTL_DB} --report-stamp ${CLAWCTL_REPORT_STAMP}"
 drop="setpriv --reuid=65532 --regid=65532 --clear-groups --inh-caps=-all"
 
 if [ "$use_litestream" -eq 1 ]; then
