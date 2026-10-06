@@ -196,6 +196,15 @@ func oneOperatorArtifactFetchQueryValue(values url.Values, key string, maxBytes 
 }
 
 func writeOperatorArtifactFetchPreviewError(w http.ResponseWriter, err error) {
+	var upstream *artifact.UpstreamVersionError
+	if errors.As(err, &upstream) {
+		if sentence := upstream.OperatorSentence(); sentence != "" {
+			writeErr(w, http.StatusConflict, "UPSTREAM_VERSION_UNAVAILABLE", sentence)
+			return
+		}
+		writeErr(w, http.StatusBadGateway, "REGISTRY_RESPONSE_REJECTED", "registry metadata 未通過 intake policy")
+		return
+	}
 	switch {
 	case errors.Is(err, operator.ErrInvalidArtifactFetchPreview), errors.Is(err, artifact.ErrInvalidFetchRequest):
 		writeErr(w, http.StatusBadRequest, "BAD_ARTIFACT_FETCH_REQUEST", "artifact name 或 exact version 不合法")

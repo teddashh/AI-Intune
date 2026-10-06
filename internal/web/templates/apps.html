@@ -209,8 +209,8 @@
   {{if $.Access.CanAdmin}}
   <form method="post" action="/apps/artifact-fetches/preview">
     <div class="action-form">
-	  <label><span class="field-label">Package</span><select name="name" required><option value="openclaw">OpenClaw</option><option value="hermes-agent">Hermes Agent</option><option value="node-runtime">Node runtime</option></select></label>
-	  <label><span class="field-label">Exact version</span><input name="version" autocomplete="off" required placeholder="例如 2026.9.8 或 24.21.0"></label>
+	  <label><span class="field-label">Package</span><select name="name" required><option value="openclaw">OpenClaw</option><option value="hermes-agent">Hermes Agent</option><option value="node-runtime">Node runtime</option><option value="claude-code">Claude Code</option><option value="codex">Codex</option><option value="grok">Grok</option><option value="bat-server">BAT Server</option><option value="antigravity">Antigravity</option></select></label>
+	  <label><span class="field-label">Exact version</span><input name="version" autocomplete="off" required placeholder="例如 2026.9.8、24.21.0、0.155.1、1.0.40 或 3.2.10"></label>
       <label><span class="field-label">變更理由</span><input name="reason" maxlength="500" autocomplete="off" required></label>
       <button type="submit">Preview fetch</button>
     </div>

@@ -479,6 +479,36 @@ func validateArtifactFetchPreviewForWeb(result operator.ArtifactFetchPreviewResu
 			result.MaxBytes != artifact.DefaultHermesImageBundleMaxBytes {
 			return errors.New("incoherent Hermes artifact fetch source")
 		}
+	case artifact.ArtifactSourceClaudeCode:
+		if name != "claude-code" || result.RegistryOrigin != artifact.ProductionClaudeCodeOrigin ||
+			result.PolicyVersion != artifact.ClaudeCodeFetchPolicyVersion || result.EnginesNode != nil ||
+			result.MaxBytes != artifact.DefaultClaudeCodeBundleMaxBytes {
+			return errors.New("incoherent Claude Code artifact fetch source")
+		}
+	case artifact.ArtifactSourceCodex:
+		if name != "codex" || result.RegistryOrigin != artifact.ProductionCodexOrigin ||
+			result.PolicyVersion != artifact.CodexFetchPolicyVersion || result.EnginesNode != nil ||
+			result.MaxBytes != artifact.DefaultCodexBundleMaxBytes {
+			return errors.New("incoherent Codex artifact fetch source")
+		}
+	case artifact.ArtifactSourceGrok:
+		if name != "grok" || result.RegistryOrigin != artifact.ProductionRegistryOrigin ||
+			result.PolicyVersion != artifact.GrokFetchPolicyVersion || result.EnginesNode != nil ||
+			result.MaxBytes != artifact.DefaultGrokBundleMaxBytes {
+			return errors.New("incoherent Grok artifact fetch source")
+		}
+	case artifact.ArtifactSourceBATServer:
+		if name != "bat-server" || result.RegistryOrigin != artifact.ProductionBATServerOrigin ||
+			result.PolicyVersion != artifact.BATServerFetchPolicyVersion || result.EnginesNode != nil ||
+			result.MaxBytes != artifact.DefaultBATServerBundleMaxBytes {
+			return errors.New("incoherent bat-server artifact fetch source")
+		}
+	case artifact.ArtifactSourceAntigravity:
+		if name != "antigravity" || result.RegistryOrigin != artifact.ProductionAntigravityManifestOrigin ||
+			result.PolicyVersion != artifact.AntigravityFetchPolicyVersion || result.EnginesNode != nil ||
+			result.MaxBytes != artifact.DefaultAntigravityBundleMaxBytes {
+			return errors.New("incoherent Antigravity artifact fetch source")
+		}
 	default:
 		return errors.New("unknown artifact fetch source")
 	}
@@ -550,6 +580,16 @@ func validArtifactFetchWebTarget(name, version string) bool {
 		return artifact.ValidNodeRuntimeVersion(version)
 	case "hermes-agent":
 		return artifact.ValidHermesVersion(version)
+	case "claude-code":
+		return artifact.ValidClaudeCodeVersion(version)
+	case "codex":
+		return artifact.ValidCodexVersion(version)
+	case "grok":
+		return artifact.ValidGrokVersion(version)
+	case "bat-server":
+		return artifact.ValidBATServerVersion(version)
+	case "antigravity":
+		return artifact.ValidAntigravityVersion(version)
 	default:
 		return false
 	}
@@ -596,6 +636,13 @@ func parseArtifactFetchWebForm(w http.ResponseWriter, r *http.Request, allowed m
 }
 
 func artifactFetchWebError(err error, preview bool) (int, string) {
+	var upstream *artifact.UpstreamVersionError
+	if preview && errors.As(err, &upstream) {
+		if sentence := upstream.OperatorSentence(); sentence != "" {
+			return http.StatusConflict, sentence
+		}
+		return http.StatusBadGateway, "Registry metadata 未通過 intake policy；沒有建立 operation。"
+	}
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		return http.StatusGatewayTimeout, "讀取 registry metadata 逾時；沒有建立 operation。"

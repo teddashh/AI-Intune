@@ -119,7 +119,7 @@ func (s *Server) catalogStoreSurface(now time.Time) (*catalogStoreView, error) {
 	}
 	for _, item := range artifacts.Items {
 		if item.Name == nil || item.Version == nil ||
-			(*item.Name != "openclaw" && *item.Name != "hermes-agent" && *item.Name != "node-runtime") ||
+			(*item.Name != "openclaw" && *item.Name != "hermes-agent" && *item.Name != "node-runtime" && *item.Name != "claude-code" && *item.Name != "codex" && *item.Name != "grok" && *item.Name != "bat-server" && *item.Name != "antigravity") ||
 			!artifact.ValidSHA256Hex(item.ArtifactID) {
 			continue
 		}

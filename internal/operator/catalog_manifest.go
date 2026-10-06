@@ -86,12 +86,35 @@ func (s *Service) publishCatalogManifest(ctx context.Context, request CatalogMan
 			record.Size != request.Manifest.Artifact.Size {
 			return catalogManifestRejection(store.OperatorCodeCatalogArtifactMismatch)
 		}
-		if record.Name == "node-runtime" {
+		if record.Name == "bat-server" {
 			targets := make([]artifact.NodeRuntimeTarget, 0, len(request.Manifest.Platforms))
 			for _, platform := range request.Manifest.Platforms {
 				targets = append(targets, artifact.NodeRuntimeTarget{OS: platform.OS, Arch: platform.Arch})
 			}
-			if err := artifact.ValidateNodeRuntimeBundleTargetsContext(ctx, s.artifactsDir, *record, targets...); err != nil {
+			if err := artifact.ValidateBATServerBundleTargetsContext(ctx, s.artifactsDir, *record, targets...); err != nil {
+				return catalogManifestRejection(store.OperatorCodeCatalogArtifactMismatch)
+			}
+		} else if record.Name == "node-runtime" || record.Name == "claude-code" || record.Name == "codex" || record.Name == "grok" || record.Name == "antigravity" {
+			targets := make([]artifact.NodeRuntimeTarget, 0, len(request.Manifest.Platforms))
+			for _, platform := range request.Manifest.Platforms {
+				targets = append(targets, artifact.NodeRuntimeTarget{OS: platform.OS, Arch: platform.Arch})
+			}
+			var validateErr error
+			switch record.Name {
+			case "node-runtime":
+				validateErr = artifact.ValidateNodeRuntimeBundleTargetsContext(ctx, s.artifactsDir, *record, targets...)
+			case "claude-code":
+				validateErr = artifact.ValidateClaudeCodeBundleTargetsContext(ctx, s.artifactsDir, *record, targets...)
+			case "codex":
+				validateErr = artifact.ValidateCodexBundleTargetsContext(ctx, s.artifactsDir, *record, targets...)
+			case "grok":
+				validateErr = artifact.ValidateGrokBundleTargetsContext(ctx, s.artifactsDir, *record, targets...)
+			case "antigravity":
+				validateErr = artifact.ValidateAntigravityBundleTargetsContext(ctx, s.artifactsDir, *record, targets...)
+			default:
+				return catalogManifestRejection(store.OperatorCodeCatalogArtifactMismatch)
+			}
+			if validateErr != nil {
 				return catalogManifestRejection(store.OperatorCodeCatalogArtifactMismatch)
 			}
 		}

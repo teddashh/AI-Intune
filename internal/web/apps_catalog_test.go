@@ -368,6 +368,51 @@ func TestAMachineWearingTwoRevisionsIsRefusedRatherThanShownOnce(t *testing.T) {
 	}
 }
 
+func TestCatalogStoreListsBATServerArtifact(t *testing.T) {
+	s, _ := newServer(t)
+	dir := t.TempDir()
+	writeCatalogWebArtifact(t, dir, "bat-server", "3.2.10", "")
+	s.SetArtifactsDir(dir)
+	names, err := operatorauth.NamesForPrefix("example.com/cap/clawctl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := renderWithCapabilities(t, s, "/apps?view=store", names)
+	if !strings.Contains(page, "bat-server@3.2.10") {
+		t.Fatal("Store package menu omitted bat-server")
+	}
+}
+
+func TestCatalogStoreListsGrokArtifact(t *testing.T) {
+	s, _ := newServer(t)
+	dir := t.TempDir()
+	writeCatalogWebArtifact(t, dir, "grok", "1.0.40", "")
+	s.SetArtifactsDir(dir)
+	names, err := operatorauth.NamesForPrefix("example.com/cap/clawctl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := renderWithCapabilities(t, s, "/apps?view=store", names)
+	if !strings.Contains(page, "grok@1.0.40") {
+		t.Fatal("Store package menu omitted grok")
+	}
+}
+
+func TestCatalogStoreListsAntigravityArtifact(t *testing.T) {
+	s, _ := newServer(t)
+	dir := t.TempDir()
+	writeCatalogWebArtifact(t, dir, "antigravity", "1.2.14", "")
+	s.SetArtifactsDir(dir)
+	names, err := operatorauth.NamesForPrefix("example.com/cap/clawctl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := renderWithCapabilities(t, s, "/apps?view=store", names)
+	if !strings.Contains(page, "antigravity@1.2.14") {
+		t.Fatal("Store package menu omitted antigravity")
+	}
+}
+
 func TestCatalogWebHidesAdminFormsFromViewOnlyOperator(t *testing.T) {
 	s, _ := newServer(t)
 	names, err := operatorauth.NamesForPrefix("example.com/cap/clawctl")

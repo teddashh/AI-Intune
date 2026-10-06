@@ -150,9 +150,125 @@ func TestArtifactFetchClientAcceptsHermesImageSourceDTOs(t *testing.T) {
 	if err := validateArtifactFetchTarget("hermes-agent", "2026.9.7"); err != nil {
 		t.Fatal(err)
 	}
+	if err := validateArtifactFetchTarget("claude-code", "2.1.278"); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateArtifactFetchTarget("claude-code", "latest"); err == nil {
+		t.Fatal("accepted claude-code latest")
+	}
+	if err := validateArtifactFetchTarget("codex", "0.155.1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateArtifactFetchTarget("codex", "latest"); err == nil {
+		t.Fatal("accepted codex latest")
+	}
+	preview.Name = "grok"
+	preview.Version = "1.0.40"
+	preview.SourceKind = artifact.ArtifactSourceGrok
+	preview.RegistryOrigin = artifact.ProductionRegistryOrigin
+	preview.PolicyVersion = artifact.GrokFetchPolicyVersion
+	preview.EnginesNode = nil
+	preview.MaxBytes = artifact.DefaultGrokBundleMaxBytes
+	if err := validateArtifactFetchPreviewResult(preview, operator.ArtifactFetchPreviewRequest{
+		Name: "grok", Version: "1.0.40",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	operation.Name = "grok"
+	operation.Version = "1.0.40"
+	operation.SourceKind = artifact.ArtifactSourceGrok
+	operation.RegistryOrigin = artifact.ProductionRegistryOrigin
+	operation.EnginesNode = ""
+	operation.MaxBytes = artifact.DefaultGrokBundleMaxBytes
+	if err := validateArtifactFetchOperation(operation); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateArtifactFetchTarget("grok", "1.0.40"); err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"latest", "1.0", "1.0.40-alpha.1", "1.0.40-beta.1"} {
+		if err := validateArtifactFetchTarget("grok", version); err == nil {
+			t.Fatalf("accepted grok version %q", version)
+		}
+	}
+	preview.Name = "bat-server"
+	preview.Version = "3.2.10"
+	preview.SourceKind = artifact.ArtifactSourceBATServer
+	preview.RegistryOrigin = artifact.ProductionBATServerOrigin
+	preview.PolicyVersion = artifact.BATServerFetchPolicyVersion
+	preview.EnginesNode = nil
+	preview.MaxBytes = artifact.DefaultBATServerBundleMaxBytes
+	if err := validateArtifactFetchPreviewResult(preview, operator.ArtifactFetchPreviewRequest{
+		Name: "bat-server", Version: "3.2.10",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	operation.Name = "bat-server"
+	operation.Version = "3.2.10"
+	operation.SourceKind = artifact.ArtifactSourceBATServer
+	operation.RegistryOrigin = artifact.ProductionBATServerOrigin
+	operation.EnginesNode = ""
+	operation.MaxBytes = artifact.DefaultBATServerBundleMaxBytes
+	if err := validateArtifactFetchOperation(operation); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateArtifactFetchTarget("bat-server", "3.2.10"); err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"latest", "3.2", "v3.2.10", "3.2.11-pre.4"} {
+		if err := validateArtifactFetchTarget("bat-server", version); err == nil {
+			t.Fatalf("accepted bat-server version %q", version)
+		}
+	}
 	for _, version := range []string{"v2026.9.7", "latest", "2026.9"} {
 		if err := validateArtifactFetchTarget("hermes-agent", version); err == nil {
 			t.Fatalf("accepted Hermes version %q", version)
+		}
+	}
+}
+
+func TestArtifactFetchClientAcceptsAntigravitySourceDTOs(t *testing.T) {
+	preview := artifactFetchClientPreview()
+	preview.Name = "antigravity"
+	preview.Version = "1.2.14"
+	preview.SourceKind = artifact.ArtifactSourceAntigravity
+	preview.RegistryOrigin = artifact.ProductionAntigravityManifestOrigin
+	preview.PolicyVersion = artifact.AntigravityFetchPolicyVersion
+	preview.EnginesNode = nil
+	preview.MaxBytes = artifact.DefaultAntigravityBundleMaxBytes
+	if err := validateArtifactFetchPreviewResult(preview, operator.ArtifactFetchPreviewRequest{
+		Name: "antigravity", Version: "1.2.14",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	operation := artifactFetchClientOperation(store.ArtifactFetchQueued)
+	operation.Name = "antigravity"
+	operation.Version = "1.2.14"
+	operation.SourceKind = artifact.ArtifactSourceAntigravity
+	operation.RegistryOrigin = artifact.ProductionAntigravityManifestOrigin
+	operation.EnginesNode = ""
+	operation.MaxBytes = artifact.DefaultAntigravityBundleMaxBytes
+	if err := validateArtifactFetchOperation(operation); err != nil {
+		t.Fatal(err)
+	}
+	foreignPreview := preview
+	foreignPreview.RegistryOrigin = artifact.ProductionRegistryOrigin
+	if err := validateArtifactFetchPreviewResult(foreignPreview, operator.ArtifactFetchPreviewRequest{
+		Name: "antigravity", Version: "1.2.14",
+	}); err == nil {
+		t.Fatal("accepted an Antigravity preview from the npm registry origin")
+	}
+	foreignOperation := operation
+	foreignOperation.RegistryOrigin = artifact.ProductionRegistryOrigin
+	if err := validateArtifactFetchOperation(foreignOperation); err == nil {
+		t.Fatal("accepted an Antigravity operation from the npm registry origin")
+	}
+	if err := validateArtifactFetchTarget("antigravity", "1.2.14"); err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"latest", "1.2", "v1.2.14", "1.2.14-4571742832820224"} {
+		if err := validateArtifactFetchTarget("antigravity", version); err == nil {
+			t.Fatalf("accepted antigravity version %q", version)
 		}
 	}
 }

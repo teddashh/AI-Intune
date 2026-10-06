@@ -64,6 +64,15 @@ func newKindExecutor(noop, deviceSync, openclaw, nodeRuntime, hermes executor) k
 	}}
 }
 
+func (e kindExecutor) withKind(kind string, exec executor) kindExecutor {
+	next := make(map[string]executor, len(e.executors)+1)
+	for key, value := range e.executors {
+		next[key] = value
+	}
+	next[kind] = exec
+	return kindExecutor{executors: next}
+}
+
 func (e kindExecutor) Run(ctx context.Context, job model.JobResponse) ([]model.JobVerificationRequest, error) {
 	if err := validateUniqueJSONFields(job.Spec); err != nil {
 		return nil, &rejectError{Code: deploy.PreconditionFailed, Detail: "工作單 spec 欄位不可重複：" + err.Error()}

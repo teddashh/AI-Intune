@@ -191,6 +191,16 @@ type OpenClawSpec struct {
 
 const NodeRuntimeBundleLayoutV1 = "node-runtime-bundle:v1"
 
+const ClaudeCodeBundleLayoutV1 = "claude-code-bundle:v1"
+
+const CodexBundleLayoutV1 = "codex-bundle:v1"
+
+const GrokBundleLayoutV1 = "grok-bundle:v1"
+
+const BATServerBundleLayoutV1 = "bat-server-bundle:v1"
+
+const AntigravityBundleLayoutV1 = "antigravity-bundle:v1"
+
 // AI-Intune runs its own bat-server under its own user unit and loopback
 // port, apart from any BAT server the machine's user runs as
 // bat-server.service. The executor, the terminal link, the probe, and the
@@ -213,6 +223,19 @@ func BATServerTokenFile(home string) string {
 	return filepath.Join(BATServerRoot(home), "credentials", "token")
 }
 
+// BATServerInstalledBinary is the upstream archive path of the executable.
+// The directory spelling is the upstream arch name, not the Go arch name.
+func BATServerInstalledBinary(targetArch string) (string, bool) {
+	switch targetArch {
+	case "amd64":
+		return "bat-server-linux-x86_64/bat-server", true
+	case "arm64":
+		return "bat-server-linux-aarch64/bat-server", true
+	default:
+		return "", false
+	}
+}
+
 const HermesOCIBundleLayoutV1 = "hermes-oci-bundle:v1"
 
 // NodeRuntimeSpec selects one platform subtree from an immutable AI-Intune
@@ -224,6 +247,67 @@ type NodeRuntimeSpec struct {
 	TargetOS     string       `json:"target_os"`
 	TargetArch   string       `json:"target_arch"`
 	BundleLayout string       `json:"bundle_layout"`
+	Artifact     *ArtifactRef `json:"artifact,omitempty"`
+}
+
+// ClaudeCodeSpec selects one platform binary from an immutable official Claude
+// Code bundle. The agent proves its compiled OS/architecture matches before
+// extracting or activating any bytes.
+type ClaudeCodeSpec struct {
+	Kind         string       `json:"kind"`
+	Version      string       `json:"version"`
+	TargetOS     string       `json:"target_os"`
+	TargetArch   string       `json:"target_arch"`
+	BundleLayout string       `json:"bundle_layout"`
+	Artifact     *ArtifactRef `json:"artifact,omitempty"`
+}
+
+// CodexSpec selects one platform package from an immutable official Codex
+// bundle. The agent proves its compiled OS/architecture matches before
+// extracting or activating any bytes.
+type CodexSpec struct {
+	Kind         string       `json:"kind"`
+	Version      string       `json:"version"`
+	TargetOS     string       `json:"target_os"`
+	TargetArch   string       `json:"target_arch"`
+	BundleLayout string       `json:"bundle_layout"`
+	Artifact     *ArtifactRef `json:"artifact,omitempty"`
+}
+
+// GrokSpec selects one platform executable from an immutable official Grok
+// bundle. The agent proves its compiled OS/architecture matches before
+// extracting or activating any bytes.
+type GrokSpec struct {
+	Kind         string       `json:"kind"`
+	Version      string       `json:"version"`
+	TargetOS     string       `json:"target_os"`
+	TargetArch   string       `json:"target_arch"`
+	BundleLayout string       `json:"bundle_layout"`
+	Artifact     *ArtifactRef `json:"artifact,omitempty"`
+}
+
+// AntigravitySpec selects one platform executable from an immutable official
+// Antigravity bundle. The agent proves its compiled OS/architecture matches
+// before extracting or activating any bytes.
+type AntigravitySpec struct {
+	Kind         string       `json:"kind"`
+	Version      string       `json:"version"`
+	TargetOS     string       `json:"target_os"`
+	TargetArch   string       `json:"target_arch"`
+	BundleLayout string       `json:"bundle_layout"`
+	Artifact     *ArtifactRef `json:"artifact,omitempty"`
+}
+
+// BATServerSpec selects one Linux tree from an immutable bat-server bundle.
+// The agent proves its compiled OS/architecture matches before extracting or
+// activating any bytes, and proves the installed binary by hash.
+type BATServerSpec struct {
+	Kind         string       `json:"kind"`
+	Version      string       `json:"version"`
+	TargetOS     string       `json:"target_os"`
+	TargetArch   string       `json:"target_arch"`
+	BundleLayout string       `json:"bundle_layout"`
+	BinarySHA256 string       `json:"binary_sha256"`
 	Artifact     *ArtifactRef `json:"artifact,omitempty"`
 }
 

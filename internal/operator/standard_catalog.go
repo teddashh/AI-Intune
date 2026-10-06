@@ -48,13 +48,35 @@ func (s *Service) PreviewStandardCatalogManifest(ctx context.Context,
 	if err != nil {
 		return StandardCatalogManifestPreviewResult{}, err
 	}
-	if entry.Record.Name == "node-runtime" {
+	if entry.Record.Name == "bat-server" {
+		err = artifact.ValidateBATServerBundleTargetsContext(ctx, s.artifactsDir, *entry.Record,
+			artifact.NodeRuntimeTarget{OS: "linux", Arch: "amd64"},
+			artifact.NodeRuntimeTarget{OS: "linux", Arch: "arm64"})
+		if err != nil {
+			return StandardCatalogManifestPreviewResult{}, catalogManifestRejection(store.OperatorCodeCatalogArtifactMismatch)
+		}
+	} else if entry.Record.Name == "node-runtime" || entry.Record.Name == "claude-code" || entry.Record.Name == "codex" || entry.Record.Name == "grok" || entry.Record.Name == "antigravity" {
 		targets := []artifact.NodeRuntimeTarget{
 			{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"},
 			{OS: "darwin", Arch: "amd64"}, {OS: "darwin", Arch: "arm64"},
 			{OS: "windows", Arch: "amd64"}, {OS: "windows", Arch: "arm64"},
 		}
-		if err := artifact.ValidateNodeRuntimeBundleTargetsContext(ctx, s.artifactsDir, *entry.Record, targets...); err != nil {
+		var err error
+		switch entry.Record.Name {
+		case "node-runtime":
+			err = artifact.ValidateNodeRuntimeBundleTargetsContext(ctx, s.artifactsDir, *entry.Record, targets...)
+		case "claude-code":
+			err = artifact.ValidateClaudeCodeBundleTargetsContext(ctx, s.artifactsDir, *entry.Record, targets...)
+		case "codex":
+			err = artifact.ValidateCodexBundleTargetsContext(ctx, s.artifactsDir, *entry.Record, targets...)
+		case "grok":
+			err = artifact.ValidateGrokBundleTargetsContext(ctx, s.artifactsDir, *entry.Record, targets...)
+		case "antigravity":
+			err = artifact.ValidateAntigravityBundleTargetsContext(ctx, s.artifactsDir, *entry.Record, targets...)
+		default:
+			return StandardCatalogManifestPreviewResult{}, catalogManifestRejection(store.OperatorCodeCatalogArtifactMismatch)
+		}
+		if err != nil {
 			return StandardCatalogManifestPreviewResult{}, catalogManifestRejection(store.OperatorCodeCatalogArtifactMismatch)
 		}
 	}
@@ -136,6 +158,85 @@ func (s *Service) standardManifestFromRecord(record artifact.Sidecar,
 			Revision: "v" + record.Version, License: "MIT",
 		}
 		manifest.Provides = []string{"runtime.node"}
+	case "claude-code":
+		if nodeRuntimeVersion != "" || !artifact.ValidClaudeCodeVersion(record.Version) || record.EnginesNode != "" {
+			return appcatalog.Manifest{}, ErrInvalidStandardCatalogPreview
+		}
+		manifest.Platforms = append(manifest.Platforms,
+			appcatalog.Platform{OS: "darwin", Arch: "amd64"},
+			appcatalog.Platform{OS: "darwin", Arch: "arm64"},
+			appcatalog.Platform{OS: "windows", Arch: "amd64"},
+			appcatalog.Platform{OS: "windows", Arch: "arm64"},
+		)
+		manifest.Kind, manifest.Title = appcatalog.KindApp, "Claude Code"
+		manifest.Source = appcatalog.Source{
+			Catalog:     "downloads.claude.ai",
+			UpstreamURL: "https://downloads.claude.ai/claude-code-releases/" + record.Version + "/manifest.json",
+			Revision:    "v" + record.Version, License: "proprietary",
+		}
+		manifest.Provides = []string{"cli.claude"}
+	case "codex":
+		if nodeRuntimeVersion != "" || !artifact.ValidCodexVersion(record.Version) || record.EnginesNode != "" {
+			return appcatalog.Manifest{}, ErrInvalidStandardCatalogPreview
+		}
+		manifest.Platforms = append(manifest.Platforms,
+			appcatalog.Platform{OS: "darwin", Arch: "amd64"},
+			appcatalog.Platform{OS: "darwin", Arch: "arm64"},
+			appcatalog.Platform{OS: "windows", Arch: "amd64"},
+			appcatalog.Platform{OS: "windows", Arch: "arm64"},
+		)
+		manifest.Kind, manifest.Title = appcatalog.KindApp, "Codex"
+		manifest.Source = appcatalog.Source{
+			Catalog:     "releases.openai.com",
+			UpstreamURL: "https://releases.openai.com/codex/releases/" + record.Version + "/release.json",
+			Revision:    "rust-v" + record.Version, License: "proprietary",
+		}
+		manifest.Provides = []string{"cli.codex"}
+	case "grok":
+		if nodeRuntimeVersion != "" || !artifact.ValidGrokVersion(record.Version) || record.EnginesNode != "" {
+			return appcatalog.Manifest{}, ErrInvalidStandardCatalogPreview
+		}
+		manifest.Platforms = append(manifest.Platforms,
+			appcatalog.Platform{OS: "darwin", Arch: "amd64"},
+			appcatalog.Platform{OS: "darwin", Arch: "arm64"},
+			appcatalog.Platform{OS: "windows", Arch: "amd64"},
+			appcatalog.Platform{OS: "windows", Arch: "arm64"},
+		)
+		manifest.Kind, manifest.Title = appcatalog.KindApp, "Grok"
+		manifest.Source = appcatalog.Source{
+			Catalog:     "registry.npmjs.org",
+			UpstreamURL: "https://registry.npmjs.org/@xai-official/grok/" + record.Version,
+			Revision:    record.Version, License: "Apache-2.0",
+		}
+		manifest.Provides = []string{"cli.grok"}
+	case "antigravity":
+		if nodeRuntimeVersion != "" || !artifact.ValidAntigravityVersion(record.Version) || record.EnginesNode != "" ||
+			!artifact.ValidAntigravityReleaseDirectory(record.Version, record.TarballURL) {
+			return appcatalog.Manifest{}, ErrInvalidStandardCatalogPreview
+		}
+		manifest.Platforms = append(manifest.Platforms,
+			appcatalog.Platform{OS: "darwin", Arch: "amd64"},
+			appcatalog.Platform{OS: "darwin", Arch: "arm64"},
+			appcatalog.Platform{OS: "windows", Arch: "amd64"},
+			appcatalog.Platform{OS: "windows", Arch: "arm64"},
+		)
+		manifest.Kind, manifest.Title = appcatalog.KindApp, "Antigravity"
+		manifest.Source = appcatalog.Source{
+			Catalog: "storage.googleapis.com", UpstreamURL: record.TarballURL,
+			Revision: record.Version, License: "proprietary",
+		}
+		manifest.Provides = []string{"cli.agy"}
+	case "bat-server":
+		if nodeRuntimeVersion != "" || !artifact.ValidBATServerVersion(record.Version) || record.EnginesNode != "" {
+			return appcatalog.Manifest{}, ErrInvalidStandardCatalogPreview
+		}
+		manifest.Kind, manifest.Title = appcatalog.KindApp, "BAT Server"
+		manifest.Source = appcatalog.Source{
+			Catalog:     "github.com/tony1223/better-agent-terminal",
+			UpstreamURL: "https://github.com/tony1223/better-agent-terminal/releases/tag/v" + record.Version,
+			Revision:    record.Version, License: "MIT",
+		}
+		manifest.Provides = []string{"service.bat-server"}
 	case "openclaw":
 		if !artifact.ValidOpenClawVersion(record.Version) || !artifact.ValidNodeRuntimeVersion(nodeRuntimeVersion) ||
 			strings.TrimSpace(record.EnginesNode) == "" {
@@ -217,5 +318,10 @@ func standardCatalogPreviewDigest(manifest appcatalog.Manifest) string {
 func validateStandardManifestURL(value string) bool {
 	return strings.HasPrefix(value, "https://nodejs.org/dist/v") ||
 		strings.HasPrefix(value, "https://www.npmjs.com/package/openclaw/v/") ||
-		strings.HasPrefix(value, "https://github.com/NousResearch/hermes-agent/releases/tag/v")
+		strings.HasPrefix(value, "https://github.com/NousResearch/hermes-agent/releases/tag/v") ||
+		strings.HasPrefix(value, "https://downloads.claude.ai/claude-code-releases/") ||
+		strings.HasPrefix(value, "https://releases.openai.com/codex/releases/") ||
+		strings.HasPrefix(value, "https://registry.npmjs.org/@xai-official/grok/") ||
+		strings.HasPrefix(value, "https://storage.googleapis.com/antigravity-public/antigravity-cli/") ||
+		strings.HasPrefix(value, "https://github.com/tony1223/better-agent-terminal/releases/tag/v")
 }

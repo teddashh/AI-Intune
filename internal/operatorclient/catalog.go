@@ -83,7 +83,7 @@ func (c *Client) PreviewStandardCatalogManifest(ctx context.Context,
 	}
 	validDependencyShape := false
 	switch result.Manifest.ID {
-	case "node-runtime", "hermes-agent":
+	case "node-runtime", "hermes-agent", "claude-code", "codex", "grok", "bat-server", "antigravity":
 		validDependencyShape = request.NodeRuntimeVersion == "" && result.EnginesNode == nil &&
 			len(result.Manifest.Dependencies) == 0
 	case "openclaw":

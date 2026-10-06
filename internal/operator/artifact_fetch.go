@@ -130,6 +130,51 @@ func validateArtifactFetchPlan(plan artifact.PreviewPlan, request ArtifactFetchP
 			plan.MaxBytes != artifact.DefaultHermesImageBundleMaxBytes {
 			return fmt.Errorf("%w: fetch backend returned an incoherent Hermes image plan", ErrInvalidArtifactFetchPreview)
 		}
+	case artifact.ArtifactSourceClaudeCode:
+		if plan.PolicyVersion != artifact.ClaudeCodeFetchPolicyVersion ||
+			plan.RegistryOrigin != artifact.ProductionClaudeCodeOrigin || plan.Name != "claude-code" ||
+			!artifact.ValidClaudeCodeVersion(plan.Version) || plan.EnginesNode != "" ||
+			len(plan.SourcePlan) == 0 || len(plan.SourcePlan) > artifact.MaxArtifactSourcePlanBytes ||
+			!artifact.ValidClaudeCodeSourcePlan(plan.SourcePlan) ||
+			plan.MaxBytes != artifact.DefaultClaudeCodeBundleMaxBytes {
+			return fmt.Errorf("%w: fetch backend returned an incoherent Claude Code plan", ErrInvalidArtifactFetchPreview)
+		}
+	case artifact.ArtifactSourceCodex:
+		if plan.PolicyVersion != artifact.CodexFetchPolicyVersion ||
+			plan.RegistryOrigin != artifact.ProductionCodexOrigin || plan.Name != "codex" ||
+			!artifact.ValidCodexVersion(plan.Version) || plan.EnginesNode != "" ||
+			len(plan.SourcePlan) == 0 || len(plan.SourcePlan) > artifact.MaxArtifactSourcePlanBytes ||
+			!artifact.ValidCodexSourcePlan(plan.SourcePlan) ||
+			plan.MaxBytes != artifact.DefaultCodexBundleMaxBytes {
+			return fmt.Errorf("%w: fetch backend returned an incoherent Codex plan", ErrInvalidArtifactFetchPreview)
+		}
+	case artifact.ArtifactSourceGrok:
+		if plan.PolicyVersion != artifact.GrokFetchPolicyVersion ||
+			plan.RegistryOrigin != artifact.ProductionRegistryOrigin || plan.Name != "grok" ||
+			!artifact.ValidGrokVersion(plan.Version) || plan.EnginesNode != "" ||
+			len(plan.SourcePlan) == 0 || len(plan.SourcePlan) > artifact.MaxArtifactSourcePlanBytes ||
+			!artifact.ValidGrokSourcePlan(plan.SourcePlan) ||
+			plan.MaxBytes != artifact.DefaultGrokBundleMaxBytes {
+			return fmt.Errorf("%w: fetch backend returned an incoherent Grok plan", ErrInvalidArtifactFetchPreview)
+		}
+	case artifact.ArtifactSourceBATServer:
+		if plan.PolicyVersion != artifact.BATServerFetchPolicyVersion ||
+			plan.RegistryOrigin != artifact.ProductionBATServerOrigin || plan.Name != "bat-server" ||
+			!artifact.ValidBATServerVersion(plan.Version) || plan.EnginesNode != "" ||
+			len(plan.SourcePlan) == 0 || len(plan.SourcePlan) > artifact.MaxArtifactSourcePlanBytes ||
+			!artifact.ValidBATServerSourcePlan(plan.SourcePlan) ||
+			plan.MaxBytes != artifact.DefaultBATServerBundleMaxBytes {
+			return fmt.Errorf("%w: fetch backend returned an incoherent bat-server plan", ErrInvalidArtifactFetchPreview)
+		}
+	case artifact.ArtifactSourceAntigravity:
+		if plan.PolicyVersion != artifact.AntigravityFetchPolicyVersion ||
+			plan.RegistryOrigin != artifact.ProductionAntigravityManifestOrigin || plan.Name != "antigravity" ||
+			!artifact.ValidAntigravityVersion(plan.Version) || plan.EnginesNode != "" ||
+			len(plan.SourcePlan) == 0 || len(plan.SourcePlan) > artifact.MaxArtifactSourcePlanBytes ||
+			!artifact.ValidAntigravitySourcePlan(plan.SourcePlan) ||
+			plan.MaxBytes != artifact.DefaultAntigravityBundleMaxBytes {
+			return fmt.Errorf("%w: fetch backend returned an incoherent Antigravity plan", ErrInvalidArtifactFetchPreview)
+		}
 	default:
 		return fmt.Errorf("%w: fetch backend returned an unknown source kind", ErrInvalidArtifactFetchPreview)
 	}
@@ -144,6 +189,16 @@ func validArtifactFetchTarget(name, version string) bool {
 		return artifact.ValidNodeRuntimeVersion(version)
 	case "hermes-agent":
 		return artifact.ValidHermesVersion(version)
+	case "claude-code":
+		return artifact.ValidClaudeCodeVersion(version)
+	case "codex":
+		return artifact.ValidCodexVersion(version)
+	case "grok":
+		return artifact.ValidGrokVersion(version)
+	case "bat-server":
+		return artifact.ValidBATServerVersion(version)
+	case "antigravity":
+		return artifact.ValidAntigravityVersion(version)
 	default:
 		return false
 	}
@@ -194,6 +249,11 @@ func (s *Service) ApplyArtifactFetch(ctx context.Context, request ArtifactFetchA
 			if errors.Is(prepareErr, artifact.ErrInvalidFetchRequest) {
 				return store.ArtifactFetchPrepared{}, &store.OperatorRequestError{
 					Code: store.OperatorCodeArtifactFetchInvalid, Detail: store.OperatorCodeArtifactFetchInvalid,
+				}
+			}
+			if errors.Is(prepareErr, artifact.ErrUpstreamVersionUnavailable) {
+				return store.ArtifactFetchPrepared{}, &store.OperatorRequestError{
+					Code: store.OperatorCodeArtifactFetchPreviewStale, Detail: store.OperatorCodeArtifactFetchPreviewStale,
 				}
 			}
 			return store.ArtifactFetchPrepared{}, prepareErr

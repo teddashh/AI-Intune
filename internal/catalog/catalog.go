@@ -488,7 +488,7 @@ func (c *Catalog) Resolve(profile MachineProfile, target Platform) (Plan, error)
 func errSource(source Source) error {
 	parsed, err := url.Parse(source.UpstreamURL)
 	switch {
-	case !validIdentifier(source.Catalog):
+	case !validSourceCatalog(source.Catalog):
 		return errors.New("source catalog is invalid")
 	case !validExactText(source.Revision, maxIdentifierBytes):
 		return errors.New("source revision is invalid")
@@ -579,6 +579,22 @@ func packageIdentity(id, version string) string {
 
 func validPlatform(platform Platform) bool {
 	return validIdentifier(platform.OS) && validIdentifier(platform.Arch)
+}
+
+func validSourceCatalog(value string) bool {
+	if validIdentifier(value) {
+		return true
+	}
+	parts := strings.Split(value, "/")
+	if len(parts) < 2 || len(value) > maxIdentifierBytes {
+		return false
+	}
+	for _, part := range parts {
+		if !validIdentifier(part) {
+			return false
+		}
+	}
+	return true
 }
 
 func validIdentifier(value string) bool {
