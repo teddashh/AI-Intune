@@ -184,6 +184,87 @@ func (s *Service) prepareMachineProfileAssignment(ctx context.Context, machineID
 				}
 			}
 			candidate.Spec = material.Spec
+		case agentadapter.ExecutorKindCodex:
+			material, resolveErr := artifact.ResolveCodexMaterialContext(ctx, s.artifactsDir,
+				manifest.Version, manifest.Artifact.SHA256, target.OS, target.Arch)
+			if resolveErr != nil {
+				return store.OperatorMachineProfileAssignmentPrepared{}, &store.OperatorRequestError{
+					Code: store.OperatorCodeCatalogArtifactUnavailable, Detail: "profile artifact bytes 不可用",
+				}
+			}
+			if material.Artifact.Name != manifest.ID || material.Version != manifest.Version ||
+				material.Artifact.Size != manifest.Artifact.Size || material.Digest != candidate.ArtifactDigest ||
+				material.TargetOS != target.OS || material.TargetArch != target.Arch {
+				return store.OperatorMachineProfileAssignmentPrepared{}, &store.OperatorRequestError{
+					Code: store.OperatorCodeCatalogArtifactMismatch, Detail: "profile artifact 與 manifest identity 不一致",
+				}
+			}
+			candidate.Spec = material.Spec
+		case agentadapter.ExecutorKindGrok:
+			material, resolveErr := artifact.ResolveGrokMaterialContext(ctx, s.artifactsDir,
+				manifest.Version, manifest.Artifact.SHA256, target.OS, target.Arch)
+			if resolveErr != nil {
+				return store.OperatorMachineProfileAssignmentPrepared{}, &store.OperatorRequestError{
+					Code: store.OperatorCodeCatalogArtifactUnavailable, Detail: "profile artifact bytes 不可用",
+				}
+			}
+			if material.Artifact.Name != manifest.ID || material.Version != manifest.Version ||
+				material.Artifact.Size != manifest.Artifact.Size || material.Digest != candidate.ArtifactDigest ||
+				material.TargetOS != target.OS || material.TargetArch != target.Arch {
+				return store.OperatorMachineProfileAssignmentPrepared{}, &store.OperatorRequestError{
+					Code: store.OperatorCodeCatalogArtifactMismatch, Detail: "profile artifact 與 manifest identity 不一致",
+				}
+			}
+			candidate.Spec = material.Spec
+		case agentadapter.ExecutorKindAntigravity:
+			material, resolveErr := artifact.ResolveAntigravityMaterialContext(ctx, s.artifactsDir,
+				manifest.Version, manifest.Artifact.SHA256, target.OS, target.Arch)
+			if resolveErr != nil {
+				return store.OperatorMachineProfileAssignmentPrepared{}, &store.OperatorRequestError{
+					Code: store.OperatorCodeCatalogArtifactUnavailable, Detail: "profile artifact bytes 不可用",
+				}
+			}
+			if material.Artifact.Name != manifest.ID || material.Version != manifest.Version ||
+				material.Artifact.Size != manifest.Artifact.Size || material.Digest != candidate.ArtifactDigest ||
+				material.TargetOS != target.OS || material.TargetArch != target.Arch {
+				return store.OperatorMachineProfileAssignmentPrepared{}, &store.OperatorRequestError{
+					Code: store.OperatorCodeCatalogArtifactMismatch, Detail: "profile artifact 與 manifest identity 不一致",
+				}
+			}
+			candidate.Spec = material.Spec
+		case agentadapter.ExecutorKindBATServer:
+			material, resolveErr := artifact.ResolveBATServerMaterialContext(ctx, s.artifactsDir,
+				manifest.Version, manifest.Artifact.SHA256, target.OS, target.Arch)
+			if resolveErr != nil {
+				return store.OperatorMachineProfileAssignmentPrepared{}, &store.OperatorRequestError{
+					Code: store.OperatorCodeCatalogArtifactUnavailable, Detail: "profile artifact bytes 不可用",
+				}
+			}
+			if material.Artifact.Name != manifest.ID || material.Version != manifest.Version ||
+				material.Artifact.Size != manifest.Artifact.Size || material.Digest != candidate.ArtifactDigest ||
+				material.TargetOS != target.OS || material.TargetArch != target.Arch ||
+				material.BinarySHA256 == "" {
+				return store.OperatorMachineProfileAssignmentPrepared{}, &store.OperatorRequestError{
+					Code: store.OperatorCodeCatalogArtifactMismatch, Detail: "profile artifact 與 manifest identity 不一致",
+				}
+			}
+			candidate.Spec = material.Spec
+		case agentadapter.ExecutorKindClaudeCode:
+			material, resolveErr := artifact.ResolveClaudeCodeMaterialContext(ctx, s.artifactsDir,
+				manifest.Version, manifest.Artifact.SHA256, target.OS, target.Arch)
+			if resolveErr != nil {
+				return store.OperatorMachineProfileAssignmentPrepared{}, &store.OperatorRequestError{
+					Code: store.OperatorCodeCatalogArtifactUnavailable, Detail: "profile artifact bytes 不可用",
+				}
+			}
+			if material.Artifact.Name != manifest.ID || material.Version != manifest.Version ||
+				material.Artifact.Size != manifest.Artifact.Size || material.Digest != candidate.ArtifactDigest ||
+				material.TargetOS != target.OS || material.TargetArch != target.Arch {
+				return store.OperatorMachineProfileAssignmentPrepared{}, &store.OperatorRequestError{
+					Code: store.OperatorCodeCatalogArtifactMismatch, Detail: "profile artifact 與 manifest identity 不一致",
+				}
+			}
+			candidate.Spec = material.Spec
 		case agentadapter.ExecutorKindHermes:
 			material, resolveErr := artifact.ResolveHermesMaterialContext(ctx, s.artifactsDir,
 				manifest.Version, manifest.Artifact.SHA256, target.OS, target.Arch)

@@ -4,10 +4,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#111d19">
-    <meta name="description" content="AI-Intune is an evidence-first control plane for Linux machines running AI agents and coding tools.">
+    <meta name="description" content="AI-Intune is an evidence-first control plane for AI machines running on Linux, macOS, and Windows.">
     <meta property="og:type" content="website">
     <meta property="og:title" content="AI-Intune · Control every AI machine from one place">
-    <meta property="og:description" content="Enroll, deploy, verify, and audit a Linux AI fleet from one control plane.">
+    <meta property="og:description" content="Enroll, observe, deploy, and verify AI machines from one control plane.">
     <meta property="og:url" content="https://teddashh.github.io/AI-Intune/">
     <meta name="twitter:card" content="summary">
     <link rel="canonical" href="https://teddashh.github.io/AI-Intune/">
@@ -23,8 +23,8 @@
         "codeRepository": "https://github.com/teddashh/AI-Intune",
         "license": "https://www.apache.org/licenses/LICENSE-2.0",
         "programmingLanguage": "Go",
-        "runtimePlatform": "Linux",
-        "description": "An evidence-first control plane for Linux machines running AI agents and coding tools."
+        "runtimePlatform": ["Linux", "macOS", "Windows"],
+        "description": "An evidence-first control plane for AI machines running AI agents and coding tools."
       }
     </script>
   </head>
@@ -86,8 +86,8 @@
           </div>
           <h1 class="lang-en">Know what every AI machine is <em>actually</em> doing.</h1>
           <h1 class="lang-zh">真正掌握每一台 AI 機器的<em>實際狀態</em>。</h1>
-          <p class="lang-en">AI-Intune enrolls, deploys, verifies, and audits Linux machines running AI agents and coding tools, through one focused control plane.</p>
-          <p class="lang-zh">AI-Intune 透過單一控制平臺，註冊、部署、驗證並稽核每一台執行 AI agent 與 coding tools 的 Linux 機器。</p>
+          <p class="lang-en">AI-Intune tracks Linux, macOS, and Windows machines running AI agents and coding tools. Enroll a machine, assign an exact version, and inspect the evidence in one place.</p>
+          <p class="lang-zh">AI-Intune 管理執行 AI agent 與 coding tools 的 Linux、macOS、Windows 機器。註冊端點、指派精確版號，再從同一處檢查證據。</p>
           <div class="button-row">
             <a class="button button-primary" href="https://github.com/teddashh/AI-Intune">
               <span class="lang-en">View on GitHub →</span>
@@ -99,7 +99,7 @@
             </a>
           </div>
           <div class="hero-notes" aria-label="Project attributes">
-            <span>Linux-first</span>
+            <span>Linux · macOS · Windows</span>
             <span class="lang-en">Outbound-only agents</span>
             <span class="lang-zh">Agent 僅主動連出</span>
             <span class="lang-en">Apache 2.0</span>
@@ -186,8 +186,8 @@
             <h2 id="workflow-title" class="lang-en">From a fresh machine to verified state.</h2>
             <h2 id="workflow-title-zh" class="lang-zh">從新機器一路到完成驗證。</h2>
           </div>
-          <p class="lang-en">Install the Hub once. Every new endpoint follows the same repeatable enrollment and profile-assignment workflow.</p>
-          <p class="lang-zh">主控端只需安裝一次。之後每一台新端點都走相同、可重複的註冊與 profile 指派流程。</p>
+          <p class="lang-en">Install the Hub once. Enroll each endpoint with its platform bundle, then assign a profile that names exact supported packages.</p>
+          <p class="lang-zh">主控端只需安裝一次。每台端點以對應平台的 bundle 註冊，再指派含精確版號且支援該平台的 profile。</p>
         </div>
 
         <div class="flow-grid">
@@ -202,15 +202,15 @@
             <div class="flow-number">02</div>
             <h3 class="lang-en">Enroll one machine</h3>
             <h3 class="lang-zh">註冊一台機器</h3>
-            <p class="lang-en">A one-time token and self-contained bundle install Tailscale, the Agent, rootless Podman, fixed app services, identity, and the job channel.</p>
-            <p class="lang-zh">一次性 token 與自含 bundle 會安裝 Tailscale、Agent、rootless Podman、固定 app services、機器身分與工作通道。</p>
+            <p class="lang-en">A one-time token and the matching Agent bundle establish machine identity, check-ins, and a job channel.</p>
+            <p class="lang-zh">一次性 token 與對應平台的 Agent bundle 建立機器身分、check-in 與工作通道。</p>
           </article>
           <article class="flow-card">
             <div class="flow-number">03</div>
             <h3 class="lang-en">Assign a profile</h3>
             <h3 class="lang-zh">指派機器 Profile</h3>
-            <p class="lang-en">Select OpenClaw or Hermes. The resolver adds exact dependencies and can replace the machine's current primary runtime.</p>
-            <p class="lang-zh">選擇 OpenClaw 或 Hermes；resolver 會補齊精確依賴，也能取代機器目前的 primary runtime。</p>
+            <p class="lang-en">Select pinned software for the target platform. The resolver checks dependencies, conflicts, and execution order.</p>
+            <p class="lang-zh">選擇目標平台可用的釘版軟體。系統檢查依賴、衝突與執行順序。</p>
           </article>
           <article class="flow-card">
             <div class="flow-number">04</div>
@@ -406,8 +406,8 @@
             </div>
             <h2 id="store-title" class="lang-en">Choose the app. Resolve the machine.</h2>
             <h2 id="store-title-zh" class="lang-zh">選好應用，系統補齊整台機器。</h2>
-            <p class="lang-en">The built-in catalog deploys Node runtime, OpenClaw, and Hermes on Linux amd64 and arm64. OpenClaw resolves its exact Node dependency; Hermes resolves its exact official OCI image. Switching profiles stops and disables the old runtime, verifies the new one, and restores the prior runtime if verification fails.</p>
-            <p class="lang-zh">內建 catalog 可在 Linux amd64 與 arm64 部署 Node runtime、OpenClaw 與 Hermes。OpenClaw 會解析精確 Node 依賴；Hermes 會解析精確官方 OCI image。切換 profile 時會停止並停用舊 runtime、驗證新 runtime；驗證失敗則恢復原本的 runtime。</p>
+            <p class="lang-en">Pin exact Node, Claude Code, Codex, Grok, and Antigravity versions for Linux, macOS, or Windows. On Linux, OpenClaw, Hermes, and BAT Server also have managed package paths. Each assignment keeps its artifact digest and verification evidence.</p>
+            <p class="lang-zh">可為 Linux、macOS、Windows 釘選精確的 Node、Claude Code、Codex、Grok 與 Antigravity 版號。Linux 另有 OpenClaw、Hermes 與 BAT Server 的受管套件路徑。每次指派都保留 artifact digest 與驗證證據。</p>
           </div>
           <div class="package-stack" aria-label="Example resolved profile">
             <div class="package-card">
@@ -459,8 +459,8 @@
         <div class="fd-story" id="runtime-choice">
           <h3 class="lang-en">Exactly one runtime</h3>
           <h3 class="lang-zh">只能留一個 runtime</h3>
-          <p class="lang-en">A profile picks the runtime for one machine. The plan then fills in what that runtime needs.</p>
-          <p class="lang-zh">一份設定為一台機器挑 runtime。計畫再補上那個 runtime 自己要的東西。</p>
+          <p class="lang-en">A profile holds at most one agent runtime. The plan then fills in what that runtime needs.</p>
+          <p class="lang-zh">一份設定最多只放一個 agent runtime。計畫再補上那個 runtime 自己要的東西。</p>
 <figure class="fd lang-en" data-fd="{&quot;columns&quot;:[[0],[1]],&quot;core&quot;:1,&quot;lanes&quot;:[&quot;OpenClaw&quot;,&quot;Hermes&quot;],&quot;selectedLane&quot;:0}"><ol class="fd-legend"><li class="fd-node" data-step="0" data-tone="neutral" data-icon="user"><span class="fd-head"><span class="fd-chip"></span><span class="fd-step" aria-hidden="true">01</span></span><p class="fd-title">Choose profile</p><p class="fd-note">That profile is what you assign to the machine.</p><span class="fd-link" aria-hidden="true"></span></li><li class="fd-node" data-step="1" data-tone="accent" data-icon="route"><span class="fd-head"><span class="fd-chip"></span><span class="fd-step" aria-hidden="true">02</span></span><p class="fd-title">Resolve plan</p><p class="fd-note">primary-agent-runtime keeps OpenClaw or Hermes, and only one of them.</p></li></ol><ul class="fd-ticks"><li>one runtime selected</li><li>node-runtime comes along</li></ul><figcaption>Picking OpenClaw also pulls in node-runtime. Picking Hermes uses its verified official image.</figcaption></figure>
 <figure class="fd lang-zh" lang="zh-Hant" data-fd="{&quot;columns&quot;:[[0],[1]],&quot;core&quot;:1,&quot;lanes&quot;:[&quot;OpenClaw&quot;,&quot;Hermes&quot;],&quot;selectedLane&quot;:0}"><ol class="fd-legend"><li class="fd-node" data-step="0" data-tone="neutral" data-icon="user"><span class="fd-head"><span class="fd-chip"></span><span class="fd-step" aria-hidden="true">01</span></span><p class="fd-title">選擇設定</p><p class="fd-note">這份設定會指派到那台機器上。</p><span class="fd-link" aria-hidden="true"></span></li><li class="fd-node" data-step="1" data-tone="accent" data-icon="route"><span class="fd-head"><span class="fd-chip"></span><span class="fd-step" aria-hidden="true">02</span></span><p class="fd-title">解析計畫</p><p class="fd-note">primary-agent-runtime 只留 OpenClaw 或 Hermes，兩個不能一起。</p></li></ol><ul class="fd-ticks"><li>只留一個 runtime</li><li>node-runtime 跟著來</li></ul><figcaption>選 OpenClaw 時，計畫會一起帶上 node-runtime。選 Hermes 時，用的是驗證過的官方映像。</figcaption></figure>
         </div>
@@ -476,16 +476,16 @@
             </div>
             <h2 id="start-title" class="lang-en">Bring up your control plane.</h2>
             <h2 id="start-title-zh" class="lang-zh">建立你的控制平臺。</h2>
-            <p class="lang-en">The repository includes tested installers for the Hub and Agent, architecture-specific bootstrap bundles, and systemd units.</p>
-            <p class="lang-zh">Repository 已包含經測試的 Hub 與 Agent 安裝器、分架構 bootstrap bundle 與 systemd unit。</p>
+            <p class="lang-en">The repository includes the Linux Hub installer, platform-specific Agent bundles, service definitions, and operator documentation. The steps shown here start with a Linux endpoint.</p>
+            <p class="lang-zh">Repository 包含 Linux Hub 安裝器、分平台 Agent bundle、服務設定與 operator 文件。下列步驟以 Linux 端點為例。</p>
             <div class="button-row">
-              <a class="button button-primary" href="https://github.com/teddashh/AI-Intune#build-and-test">
+              <a class="button button-primary" href="https://github.com/teddashh/AI-Intune#quick-start">
                 <span class="lang-en">Open quick start →</span>
                 <span class="lang-zh">開啟快速開始 →</span>
               </a>
-              <a class="button button-secondary" href="https://github.com/teddashh/AI-Intune#operating-model">
+              <a class="button button-secondary" href="https://github.com/teddashh/AI-Intune/tree/main/docs">
                 <span class="lang-en">Read the docs</span>
-                <span class="lang-zh">閱讀文件</span>
+                <span class="lang-zh">閱讀完整文件</span>
               </a>
             </div>
           </div>
@@ -523,12 +523,12 @@
             <img src="logo.svg" alt="">
             <span>AI-Intune</span>
           </div>
-          <p class="lang-en">Evidence-first control for Linux AI fleets. © <span data-year></span> AI-Intune contributors.</p>
-          <p class="lang-zh">以證據為核心的 Linux AI 機隊管理。© <span data-year></span> AI-Intune contributors.</p>
+          <p class="lang-en">Evidence-first control for AI machines. © <span data-year></span> AI-Intune contributors.</p>
+          <p class="lang-zh">以證據為核心的 AI 機隊管理。© <span data-year></span> AI-Intune contributors.</p>
         </div>
         <div class="footer-links">
           <a href="https://github.com/teddashh/AI-Intune">GitHub</a>
-          <a href="https://github.com/teddashh/AI-Intune#operating-model">
+          <a href="https://github.com/teddashh/AI-Intune/tree/main/docs">
             <span class="lang-en">Documentation</span>
             <span class="lang-zh">文件</span>
           </a>

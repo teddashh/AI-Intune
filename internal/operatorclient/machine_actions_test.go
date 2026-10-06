@@ -36,6 +36,62 @@ func machineActionCatalogue(now time.Time) operator.MachineActionCatalogue {
 	}
 }
 
+func openTerminalBlocked(blocker operator.MachineActionBlocker, situation string) operator.MachineAction {
+	return operator.MachineAction{
+		Kind: operator.MachineActionOpenTerminal, Label: "開啟終端",
+		Effect:     "在這台機器上開一個終端，由你直接輸入。關閉或重新整理終端頁、或連線中斷，都會結束終端裡正在執行的工作。",
+		Capability: operator.MachineActionCapabilityOperate,
+		Surface:    operator.MachineActionSurfaceWeb,
+		Confirm:    operator.MachineActionConfirmNone,
+		Available:  false, Blocker: blocker, Situation: situation,
+		NextStep: operator.MachineActionBlockerNextStep(blocker),
+	}
+}
+
+func TestMachineActionsClientAcceptsOpenTerminalBlockedByEachNewBlocker(t *testing.T) {
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	for blocker, situation := range map[operator.MachineActionBlocker]string{
+		operator.MachineActionBlockerTerminalNotLinked:    "這台的終端連線目前沒有接上 Hub。",
+		operator.MachineActionBlockerTerminalLimitReached: "這台已有 4 個開啟中的終端，已達上限。",
+	} {
+		t.Run(string(blocker), func(t *testing.T) {
+			body := machineActionCatalogue(now)
+			body.Actions = []operator.MachineAction{
+				body.Actions[0],
+				openTerminalBlocked(blocker, situation),
+				body.Actions[1],
+			}
+			body.Blocked = 2
+			catalogue, err := complianceClientServer(t, body).MachineActions(t.Context(), "m1")
+			if err != nil {
+				t.Fatalf("%s 被拒絕：%v", blocker, err)
+			}
+			if len(catalogue.Actions) != 3 || catalogue.Actions[1].Blocker != blocker {
+				t.Fatalf("catalogue=%+v", catalogue)
+			}
+		})
+	}
+}
+
+func TestMachineActionsClientRefusesOpenTerminalWhoseNextStepDoesNotMatch(t *testing.T) {
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	for _, blocker := range []operator.MachineActionBlocker{
+		operator.MachineActionBlockerTerminalNotLinked,
+		operator.MachineActionBlockerTerminalLimitReached,
+	} {
+		t.Run(string(blocker), func(t *testing.T) {
+			body := machineActionCatalogue(now)
+			action := openTerminalBlocked(blocker, "這台的終端連線目前沒有接上 Hub。")
+			action.NextStep = operator.MachineActionBlockerNextStep(operator.MachineActionBlockerRetired)
+			body.Actions = []operator.MachineAction{body.Actions[0], action, body.Actions[1]}
+			body.Blocked = 2
+			if _, err := complianceClientServer(t, body).MachineActions(t.Context(), "m1"); err == nil {
+				t.Fatalf("%s 的下一步跟 blocker 不符，卻被接受", blocker)
+			}
+		})
+	}
+}
+
 func TestMachineActionsClientAcceptsACoherentCatalogue(t *testing.T) {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	catalogue, err := complianceClientServer(t, machineActionCatalogue(now)).

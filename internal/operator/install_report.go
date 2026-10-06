@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/agentadapter"
 	"github.com/teddashh/AI-Intune/internal/model"
 	"github.com/teddashh/AI-Intune/internal/store"
 )
@@ -385,7 +386,12 @@ func (s *Service) InstallReport(evaluatedAt time.Time) (InstallReport, error) {
 		if observations[row.MachineID] == nil {
 			observations[row.MachineID] = map[string]installObservation{}
 		}
-		observations[row.MachineID][row.Name] = installObservation{
+		// 登錄表有宣告的探針名稱改記在套件 ID 上。沒有宣告的名稱維持原樣，不猜。
+		name := row.Name
+		if packageID, ok := agentadapter.PackageForProbeTool(row.Name); ok {
+			name = packageID
+		}
+		observations[row.MachineID][name] = installObservation{
 			tool:       row.CLITool,
 			measuredAt: row.MeasuredAt,
 			observedAt: row.ReceivedAt,

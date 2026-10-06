@@ -626,7 +626,12 @@ func TestOpenClawFreshMachineFailureRestoresHermesAndQuarantinesNewState(t *test
 		t.Fatal(err)
 	}
 	f.prepareProc()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	// Parent ctx must cancel during the health poll (2s sleep), not during the
+	// staged --version check. 20ms was enough on a quiet machine but under
+	// -race on CI the stage check lost the race and the test saw a single
+	// stage failure instead of the Hermes rollback. 1500ms clears stage and
+	// still loses to the 2s health sleep.
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
 	job := f.job()
 	job.ExecutionTimeout = 1

@@ -15,7 +15,7 @@ make agent-bundles-windows
 `install-agent-windows.ps1`。版本值由 Makefile 的 `VERSION` 決定；需要指定時使用
 `make agent-bundles-windows VERSION='<已選定版本>'`。
 
-這是目前使用者的 scheduled task，對應 Linux 的 systemd user unit（加 linger）與 macOS 的
+這是目前使用者的 scheduled task，對應 Linux 以明確 `User=` 執行的 systemd system unit 與 macOS 的
 LaunchAgent。沒有 LocalSystem service，也沒有 linger：工作階段在使用者登入時啟動。
 
 ## Hub 發布與下載

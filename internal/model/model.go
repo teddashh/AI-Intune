@@ -208,6 +208,8 @@ const AntigravityBundleLayoutV1 = "antigravity-bundle:v1"
 const (
 	BATServerUnit = "clawctl-bat-server.service"
 	BATServerPort = 19876
+	// BATServerEndpointCommand names the authentication handshake check in job evidence.
+	BATServerEndpointCommand = "bat-remote auth 127.0.0.1:19876"
 )
 
 // BATServerRoot holds AI-Intune's bat-server releases, token, data, and unit file.
@@ -221,6 +223,10 @@ func BATServerDataDir(home string) string {
 
 func BATServerTokenFile(home string) string {
 	return filepath.Join(BATServerRoot(home), "credentials", "token")
+}
+
+func BATServerUnitFile(home string) string {
+	return filepath.Join(BATServerRoot(home), BATServerUnit)
 }
 
 // BATServerInstalledBinary is the upstream archive path of the executable.
