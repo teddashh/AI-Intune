@@ -506,8 +506,9 @@ type page struct {
 	// EnrollmentName is an optional convenience value from a machine-page CTA.
 	// It is never a confirmation value: the preview service still validates the
 	// submitted display name and the create step freezes its own digest/key.
-	EnrollmentName string
-	AgentBundles   []agentBundleView
+	EnrollmentName  string
+	AgentBundles    []agentBundleView
+	AgentInstallers []agentInstallerView
 }
 
 type machinePageMachine struct {
@@ -1435,6 +1436,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 	if s.agentBundles != nil {
 		data.AgentBundles = append([]agentBundleView(nil), s.agentBundles.views...)
 	}
+	data.AgentInstallers = agentInstallerCommands(s.agentBundles, s.hubBase)
 	if len(data.SubNav.Items) == 0 {
 		data.SubNav = subNavigationFor(data)
 	}

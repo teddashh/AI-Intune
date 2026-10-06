@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -163,13 +164,13 @@ func cliTimePtr(t time.Time) *time.Time { return &t }
 
 func TestEnrollSecretFileRequiresPrivateRegularFile(t *testing.T) {
 	path := t.TempDir() + "/token"
-	if err := os.WriteFile(path, []byte("enroll-token\n"), 0o600); err != nil {
+	if err := writePrivateFile(path, []byte("enroll-token\n")); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := readSecretFile(path); err != nil || got != "enroll-token" {
 		t.Fatalf("private token got=%q err=%v", got, err)
 	}
-	if err := os.Chmod(path, 0o644); err != nil {
+	if err := exposePrivateCredential(path); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := readSecretFile(path); err == nil {
@@ -284,10 +285,10 @@ func TestAgentConfigStaysPrivateAndDoesNotFollowSymlink(t *testing.T) {
 	if err := saveConfig(valid); err != nil {
 		t.Fatal(err)
 	}
-	if info, err := os.Lstat(p); err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("saved credential config is not private regular file: info=%v err=%v", info, err)
+	if _, err := readPrivateRegularFile(p); err != nil {
+		t.Fatalf("saved credential config is not a private regular file: %v", err)
 	}
-	if err := os.Chmod(p, 0o644); err != nil {
+	if err := exposePrivateCredential(p); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := loadConfig(); err == nil {
@@ -306,6 +307,9 @@ func TestAgentConfigStaysPrivateAndDoesNotFollowSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(target, p); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink unavailable: %v", err)
+		}
 		t.Fatal(err)
 	}
 	if got, err := loadConfig(); err == nil {
@@ -320,8 +324,11 @@ func TestAgentConfigStaysPrivateAndDoesNotFollowSymlink(t *testing.T) {
 	if got, err := os.ReadFile(target); err != nil || string(got) != "do-not-overwrite" {
 		t.Fatalf("save followed credential symlink: target=%q err=%v", got, err)
 	}
-	if info, err := os.Lstat(p); err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("save did not replace symlink with private file: info=%v err=%v", info, err)
+	if info, err := os.Lstat(p); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("save did not replace symlink with a regular file: info=%v err=%v", info, err)
+	}
+	if _, err := readPrivateRegularFile(p); err != nil {
+		t.Fatalf("save did not replace symlink with a private file: %v", err)
 	}
 }
 

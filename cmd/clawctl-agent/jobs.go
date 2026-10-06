@@ -24,7 +24,6 @@ import (
 	"github.com/teddashh/AI-Intune/internal/deploy"
 	"github.com/teddashh/AI-Intune/internal/maintenance"
 	"github.com/teddashh/AI-Intune/internal/model"
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -236,19 +235,7 @@ func validJournalWatermarks(watermarks deploy.Watermarks) bool {
 		watermarks.MaxApplied <= watermarks.MaxSeen
 }
 
-func openJournal(path string) (*os.File, error) {
-	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
-	if err != nil {
-		if errors.Is(err, unix.ENOENT) {
-			return nil, os.ErrNotExist
-		}
-		return nil, err
-	}
-	file := os.NewFile(uintptr(fd), path)
-	if file == nil {
-		_ = unix.Close(fd)
-		return nil, errors.New("無法開啟水位日誌")
-	}
+func finishOpenJournal(file *os.File) (*os.File, error) {
 	info, err := file.Stat()
 	if err != nil {
 		_ = file.Close()

@@ -206,7 +206,7 @@ func runEnroll(args []string) {
 	fs := flag.NewFlagSet("enroll", flag.ExitOnError)
 	hub := fs.String("hub", "", "Hub base URL: http://100.x.y.z:8787 (Tailscale, same address as the operator UI) or https://hostname (experimental Cloudflare Tunnel, agent check-in only)")
 	tok := fs.String("token", "", "one-time enrollment token")
-	tokenFile := fs.String("token-file", "", "0600 file containing the one-time enrollment token")
+	tokenFile := fs.String("token-file", "", "private file containing the one-time enrollment token")
 	_ = fs.Parse(args)
 	if *hub == "" || (*tok == "") == (*tokenFile == "") {
 		log.Fatal("enroll 需要 --hub，並且只指定 --token 或 --token-file 其中一個")
@@ -256,7 +256,7 @@ func runEnroll(args []string) {
 	if err := saveConfig(cfg); err != nil {
 		log.Fatalf("寫入設定失敗：%v", err)
 	}
-	fmt.Printf("已報到。machine_id=%s\n設定寫在 %s（0600）\n", resp.MachineID, configPath())
+	fmt.Print(enrollmentStoredNotice(resp.MachineID, configPath(), runtime.GOOS))
 }
 
 func readSecretFile(path string) (string, error) {
@@ -269,29 +269,6 @@ func readSecretFile(path string) (string, error) {
 		return "", errors.New("secret file 內容格式不符")
 	}
 	return secret, nil
-}
-
-func readPrivateRegularFile(path string) ([]byte, error) {
-	before, err := os.Lstat(path)
-	if err != nil {
-		return nil, err
-	}
-	if !before.Mode().IsRegular() || before.Mode().Perm()&0o077 != 0 {
-		return nil, errors.New("credential file 必須是 private regular file")
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	after, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if !after.Mode().IsRegular() || after.Mode().Perm()&0o077 != 0 || !os.SameFile(before, after) {
-		return nil, errors.New("credential file 在開啟時改變或不再 private")
-	}
-	return io.ReadAll(file)
 }
 
 func enrollmentConfig(hubURL string, resp model.EnrollResponse) (config, error) {
@@ -914,37 +891,12 @@ func saveConfig(c config) error {
 		c.CheckinIntervalSeconds, c.ObservationIntervalSeconds, c.EnrollmentSettingsDigest); err != nil {
 		return fmt.Errorf("設定中的 enrollment receipt 無效：%w", err)
 	}
-	p := configPath()
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return err
-	}
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
-	// ⚠ 0600。這個檔案裡有 agent token。
-	return writePrivateFile(p, append(b, '\n'))
-}
-
-func writePrivateFile(path string, body []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".clawctl-private-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(body); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
+	// 這個檔案裡有 agent token；寫入為目前使用者的 private regular file。
+	return writePrivateFile(configPath(), append(b, '\n'))
 }
 
 type agentState struct {

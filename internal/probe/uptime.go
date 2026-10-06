@@ -3,8 +3,6 @@ package probe
 import (
 	"strconv"
 	"strings"
-
-	"golang.org/x/sys/unix"
 )
 
 // parseUptimeSeconds 解析 /proc/uptime 的第一個欄位。
@@ -19,16 +17,4 @@ func parseUptimeSeconds(text string) *int64 {
 	}
 	seconds := int64(v)
 	return &seconds
-}
-
-func readClockUptimeSeconds(read func(*unix.Timespec) error) *int64 {
-	var ts unix.Timespec
-	if err := read(&ts); err != nil {
-		return nil
-	}
-	if ts.Sec < 0 {
-		return nil
-	}
-	sec := int64(ts.Sec)
-	return &sec
 }

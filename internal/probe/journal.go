@@ -250,14 +250,7 @@ func truncateRunes(s string, max int) string {
 // ⚠ 只讀 Present 的 unit：沒裝的 unit 沒有現在式的 journal 可讀，
 // 而為了它多跑一次 journalctl 是純浪費。
 func unitJournals(ctx context.Context, units []model.Unit) []model.UnitJournal {
-	out := make([]model.UnitJournal, 0, len(units))
-	for _, u := range units {
-		if !u.Present {
-			continue
-		}
-		out = append(out, readJournal(ctx, u.Name))
-	}
-	return out
+	return collectUnitJournals(ctx, units)
 }
 
 func readJournal(ctx context.Context, unit string) model.UnitJournal {

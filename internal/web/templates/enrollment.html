@@ -14,14 +14,15 @@
 <h2 id="agent-bootstrap" class="section-anchor">代理程式安裝套件</h2>
 <div class="panel">
   <table>
-    <thead><tr><th>架構</th><th>版本</th><th>大小</th><th>SHA-256</th><th>下載</th></tr></thead>
+    <thead><tr><th>平台</th><th>架構</th><th>版本</th><th>大小</th><th>SHA-256</th><th>下載</th></tr></thead>
     <tbody>{{range .AgentBundles}}
     <tr>
-      <td class="mono">linux/{{.Arch}}</td>
+      <td class="mono">{{.OS}}</td>
+      <td class="mono">{{.Arch}}</td>
       <td class="mono">{{.Version}}</td>
       <td>{{bytes .SizeBytes}}</td>
       <td class="mono small" style="overflow-wrap:anywhere">{{.SHA256}}</td>
-      <td><a class="button secondary" href="{{.URL}}">下載 {{.Arch}}</a></td>
+      <td><a class="button secondary" href="{{.URL}}">下載 {{.OS}}/{{.Arch}}</a></td>
     </tr>
     {{end}}</tbody>
   </table>

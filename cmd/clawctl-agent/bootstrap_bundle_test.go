@@ -24,7 +24,8 @@ func TestBootstrapBundlesCarryTheTargetInstallerAndService(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"build-agent-bundles.sh", "install-agent.sh", "install-agent-macos.sh",
-		"clawctl-agent.service", "clawctl-hermes.service", "openclaw-gateway.service", "clawctl-agent.plist"} {
+		"install-agent-windows.ps1", "clawctl-agent.service", "clawctl-hermes.service",
+		"openclaw-gateway.service", "clawctl-agent.plist", "clawctl-agent.task.xml"} {
 		if err := os.WriteFile(filepath.Join(root, "ops", name), []byte(readOpsFile(t, name)), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -37,7 +38,7 @@ func TestBootstrapBundlesCarryTheTargetInstallerAndService(t *testing.T) {
 		t.Fatal(err)
 	}
 	const version = "bootstrap-test"
-	for _, target := range []string{"darwin", "linux"} {
+	for _, target := range []string{"darwin", "linux", "windows"} {
 		t.Run(target, func(t *testing.T) {
 			for _, arch := range []string{"amd64", "arm64"} {
 				name := "clawctl-agent-" + target + "-" + arch
@@ -46,7 +47,7 @@ func TestBootstrapBundlesCarryTheTargetInstallerAndService(t *testing.T) {
 				}
 			}
 			args := []string{filepath.Join(root, "ops", "build-agent-bundles.sh"), version}
-			if target == "darwin" {
+			if target != "linux" {
 				args = append(args, target)
 			}
 			run := func() {
@@ -64,10 +65,17 @@ func TestBootstrapBundlesCarryTheTargetInstallerAndService(t *testing.T) {
 					t.Fatal(err)
 				}
 				first[name] = body
-				want := map[string]string{"VERSION": version + "\n", "clawctl-agent": "clawctl-agent-" + target + "-" + arch}
+				agentName := "clawctl-agent"
+				if target == "windows" {
+					agentName = "clawctl-agent.exe"
+				}
+				want := map[string]string{"VERSION": version + "\n", agentName: "clawctl-agent-" + target + "-" + arch}
 				support := []string{"install-agent.sh", "clawctl-agent.service", "clawctl-hermes.service", "openclaw-gateway.service"}
-				if target == "darwin" {
+				switch target {
+				case "darwin":
 					support = []string{"install-agent-macos.sh", "clawctl-agent.plist"}
+				case "windows":
+					support = []string{"install-agent-windows.ps1", "clawctl-agent.task.xml"}
 				}
 				for _, file := range support {
 					want[file] = readOpsFile(t, file)
@@ -88,7 +96,8 @@ func TestBootstrapBundlesCarryTheTargetInstallerAndService(t *testing.T) {
 					}
 					expected, ok := want[header.Name]
 					mode := int64(0o644)
-					if header.Name == "clawctl-agent" || strings.HasPrefix(header.Name, "install-agent") {
+					if header.Name == "clawctl-agent" || header.Name == "clawctl-agent.exe" ||
+						strings.HasPrefix(header.Name, "install-agent") {
 						mode = 0o755
 					}
 					content, err := io.ReadAll(tr)
@@ -120,5 +129,13 @@ func TestBootstrapBundlesCarryTheTargetInstallerAndService(t *testing.T) {
 		!strings.Contains(string(out), "GOOS=darwin GOARCH=arm64") ||
 		!strings.Contains(string(out), `./ops/build-agent-bundles.sh "`+version+`" darwin`) {
 		t.Fatalf("Mac bundle target must build both binaries before packaging: %v\n%s", err, out)
+	}
+	cmd = exec.Command("make", "-n", "agent-bundles-windows", "VERSION="+version, "GO=go")
+	cmd.Dir = root
+	out, err = cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "GOOS=windows GOARCH=amd64") ||
+		!strings.Contains(string(out), "GOOS=windows GOARCH=arm64") ||
+		!strings.Contains(string(out), `./ops/build-agent-bundles.sh "`+version+`" windows`) {
+		t.Fatalf("Windows bundle target must build both binaries before packaging: %v\n%s", err, out)
 	}
 }

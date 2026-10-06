@@ -34,9 +34,10 @@ func ValidateNodeRuntimeBundleTargetsContext(ctx context.Context, dir string, re
 	wanted := make(map[string]NodeRuntimeTarget, len(targets))
 	validPlatforms := map[string]struct{}{
 		"linux-amd64": {}, "linux-arm64": {}, "darwin-amd64": {}, "darwin-arm64": {},
+		"windows-amd64": {}, "windows-arm64": {},
 	}
 	for _, target := range targets {
-		if (target.OS != "linux" && target.OS != "darwin") ||
+		if (target.OS != "linux" && target.OS != "darwin" && target.OS != "windows") ||
 			(target.Arch != "amd64" && target.Arch != "arm64") {
 			return errors.New("artifact: Node runtime target is invalid")
 		}
@@ -125,7 +126,7 @@ func ValidateNodeRuntimeBundleTargetsContext(ctx context.Context, dir string, re
 			continue
 		}
 		switch relative {
-		case "bin/node":
+		case "bin/node", "bin/node.exe":
 			if (header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA) || header.Mode&0o111 == 0 {
 				return fmt.Errorf("%w: Node runtime target has no executable node", ErrMetadataInvalid)
 			}

@@ -1133,7 +1133,8 @@ fi
 # （它對 untracked 的 .go 檔完全不說話 —— 那比 -dirty 更糟）。
 VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
 BUILD_DIRT="$(git status --porcelain -- '*.go' 'go.mod' 'go.sum' '*.html' '*.sql' \
-  'Makefile' 'ops/install-agent.sh' 'ops/clawctl-agent.service' 'ops/clawctl-hermes.service' 'ops/openclaw-gateway.service' \
+  'Makefile' 'ops/install-agent.sh' 'ops/install-agent-macos.sh' 'ops/clawctl-agent.service' 'ops/clawctl-hermes.service' \
+  'ops/openclaw-gateway.service' 'ops/clawctl-agent.plist' \
   'ops/build-agent-bundles.sh' 'ops/publish-agent-bundles.sh' 2>/dev/null)"
 if [[ -n "$BUILD_DIRT" ]]; then
   VERSION="$VERSION-dirty"
@@ -1154,7 +1155,7 @@ echo "→ 建置 $VERSION"
 # ⚠ VERSION 一定要傳給 make。Makefile 自己也會算一個，不傳的話 binary 上
 # 戳的是它算的那個，而下面的比對用的是我算的這個 —— 兩個算法哪天分岔，
 # 這個比對就會在一台好機器上失敗。
-make hub agent-bundles VERSION="$VERSION" >/dev/null
+make hub agent-bundles agent-bundles-darwin agent-bundles-windows VERSION="$VERSION" >/dev/null
 
 # ============================================================ 2. 先驗新 binary，再碰任何東西
 #

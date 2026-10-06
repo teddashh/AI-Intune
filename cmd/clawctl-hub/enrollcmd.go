@@ -277,7 +277,9 @@ func finishEnrollToken(machineID, displayName, token string, secretAvailable, re
 		"\n%s 已加入名冊（machine_id %s）。\n"+
 			"token 在 %s 過期，只能使用一次。\n"+
 			"./install-agent.sh --hub %s\n"+
+			"./install-agent-macos.sh --hub %s\n"+
+			".\\install-agent-windows.ps1 --hub %s\n"+
 			"request key: %s\n",
-		displayName, machineID, expiresAt.UTC().Format(time.RFC3339), base, key)
+		displayName, machineID, expiresAt.UTC().Format(time.RFC3339), base, base, base, key)
 	return err
 }
