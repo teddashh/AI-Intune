@@ -19,11 +19,52 @@ echo "    root=$ROOT"
 export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
 export CGO_ENABLED=0
 
-# Init script is POSIX sh (busybox). Parse it with both shells when present.
+# Init script is POSIX sh (busybox). The Fly entrypoint is POSIX sh too.
 sh -n "$HERE/hub-data-init.sh"
+sh -n "$ROOT/ops/fly/entrypoint.sh"
 if command -v bash >/dev/null 2>&1; then
   bash -n "$HERE/hub-data-init.sh"
+  bash -n "$ROOT/ops/fly/entrypoint.sh"
 fi
+
+echo "==> parsing ops/fly/fly.toml and ops/fly/litestream.yml"
+python3 - <<'PY'
+import tomllib
+from pathlib import Path
+root = Path("ops/fly")
+doc = tomllib.loads((root / "fly.toml").read_text())
+if "http_service" in doc or "services" in doc:
+    raise SystemExit("fly.toml must not publish http_service or services")
+mounts = doc["mounts"]
+if mounts[0]["source"] != "clawctl_data" or mounts[0]["destination"] != "/var/lib/clawctl":
+    raise SystemExit(f"unexpected mounts: {mounts}")
+build = doc["build"]
+if build.get("build-target") != "hub-fly" or build.get("dockerfile") != "../docker/Dockerfile":
+    raise SystemExit(f"unexpected build: {build}")
+dockerfile = (root / build["dockerfile"]).resolve()
+if not dockerfile.is_file():
+    raise SystemExit(f"dockerfile missing: {dockerfile}")
+if doc["env"]["CLAWCTL_PORT"] != "8787":
+    raise SystemExit("CLAWCTL_PORT example missing")
+restart = doc["restart"]
+if not any(item.get("policy") == "always" for item in restart):
+    raise SystemExit(f"restart policy: {restart}")
+text = (root / "litestream.yml").read_text()
+for needle in (
+    "${LITESTREAM_BUCKET}",
+    "${LITESTREAM_PATH}",
+    "${LITESTREAM_ENDPOINT}",
+    "${R2_ACCESS_KEY_ID}",
+    "${R2_SECRET_ACCESS_KEY}",
+    "type: s3",
+    "/var/lib/clawctl/clawctl.sqlite",
+):
+    if needle not in text:
+        raise SystemExit(f"litestream.yml missing {needle}")
+if "latest" in text:
+    raise SystemExit("litestream.yml must pin replicas without the word latest")
+print("    ok fly.toml and litestream.yml")
+PY
 
 have_docker=0
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
@@ -146,12 +187,46 @@ if [[ "$have_docker" -eq 1 ]]; then
       config | grep -q 'dummy-token-for-config'
   echo "    ok tunnel override"
 
+  echo "==> building fly image clawctl-hub-fly:local"
+  docker build \
+    -f ops/docker/Dockerfile \
+    --target hub-fly \
+    --build-arg "CLAWCTL_VERSION=$VERSION" \
+    -t "clawctl-hub-fly:local" \
+    "$ROOT"
+  echo "==> checking fly image binaries and bundles"
+  docker run --rm --entrypoint /usr/local/bin/tailscaled clawctl-hub-fly:local --version
+  docker run --rm --entrypoint /usr/local/bin/tailscale clawctl-hub-fly:local version
+  docker run --rm --entrypoint /usr/local/bin/litestream clawctl-hub-fly:local version
+  docker run --rm --entrypoint /usr/local/bin/clawctl-hub clawctl-hub-fly:local version
+  copy_bundle_tree "clawctl-hub-fly:local" "/usr/local/share/clawctl/agent-bootstrap/${VERSION}"
+  copy_bundle_tree "clawctl-hub-fly:local" "/opt/clawctl-seed/agent-bootstrap/${VERSION}"
+
+  echo "==> fly entrypoint rejects a missing TS_AUTHKEY"
+  fly_err="$(mktemp)"
+  if docker run --rm --entrypoint /bin/sh clawctl-hub-fly:local /usr/local/bin/clawctl-fly-entrypoint >"$fly_err" 2>&1; then
+    echo "FAIL: entrypoint succeeded without TS_AUTHKEY" >&2
+    cat "$fly_err" >&2
+    rm -f "$fly_err"
+    exit 1
+  fi
+  if ! grep -q 'TS_AUTHKEY' "$fly_err"; then
+    echo "FAIL: entrypoint did not name TS_AUTHKEY" >&2
+    cat "$fly_err" >&2
+    rm -f "$fly_err"
+    exit 1
+  fi
+  rm -f "$fly_err"
+  echo "    ok entrypoint without TS_AUTHKEY"
+
   echo
   echo "SUCCESS (docker)"
   echo "  image: clawctl-hub:local"
   echo "  init:  clawctl-hub-init:local"
+  echo "  fly:   clawctl-hub-fly:local"
   echo "  next:  copy ops/docker/hub.env.example → hub.env,"
-  echo "         set CLAWCTL_LISTEN=\$(tailscale ip -4):8787 and capability prefix,"
+  echo "         set CLAWCTL_LISTEN=\$(tailscale ip -4):<port> and capability prefix."
+  echo "         8787 is the conventional example port, not a Hub default."
   echo "         then: docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env up -d"
   echo "  note:  Hub refuses non-Tailscale listen; compose uses network_mode: host."
   echo "         hub-data-init chowns the volume to uid 65532 mode 0700 and seeds bundles."
@@ -192,8 +267,10 @@ echo "  binary: $BIN"
 echo "  version: ${VER_OUT:-<unreported>}"
 echo "  criteria:"
 echo "    - CGO_ENABLED=0 static build produced build/clawctl-hub"
-echo "    - Deploy with ops/install-hub.sh --listen <tailscale-ip>:8787 \\"
+echo "    - Deploy with Docker (primary) or ops/install-hub.sh --listen <tailscale-ip>:<port> \\"
 echo "        --operator-capability-prefix <domain>/cap/clawctl"
+echo "      8787 is the conventional example port, not a Hub default."
 echo "    - Or install Docker and re-run this script for the image path"
-echo "      (image checks: compose config with no tunnel token; bundle files in the image)"
+echo "      (image checks: compose config with no tunnel token; bundle files; hub-fly binaries)"
+echo "    - fly.toml and litestream.yml were parsed. Docker image checks were skipped."
 echo "  reminder: Grok Bot box must NOT host the Hub; use any other Linux VPS."

@@ -13,6 +13,8 @@ import (
 	"github.com/teddashh/AI-Intune/internal/operator"
 	"github.com/teddashh/AI-Intune/internal/operatorclient"
 	"github.com/teddashh/AI-Intune/internal/rollout"
+	"github.com/teddashh/AI-Intune/internal/state"
+	"github.com/teddashh/AI-Intune/internal/store"
 )
 
 const testDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -21,6 +23,7 @@ type fakeHub struct {
 	calls   []string
 	detail  operator.DeploymentDetailResult
 	preview operator.DeploymentCreatePreviewResult
+	err     error
 }
 
 func (f *fakeHub) call(name string) { f.calls = append(f.calls, name) }
@@ -36,6 +39,9 @@ func (f *fakeHub) called(name string) bool {
 
 func (f *fakeHub) ListMachines(context.Context, operator.MachineListRequest) (operator.MachineListResult, error) {
 	f.call("ListMachines")
+	if f.err != nil {
+		return operator.MachineListResult{}, f.err
+	}
 	next := "cursor"
 	return operator.MachineListResult{Total: 2, Active: 2, NextCursor: &next}, nil
 }
@@ -277,12 +283,101 @@ func TestUnknownFieldAndTool(t *testing.T) {
 	f := &fakeHub{}
 	svc := &Service{Hub: f}
 	_, err := svc.Call(context.Background(), "fleet_overview", json.RawMessage(`{"authorization":"nope"}`))
-	if callErr(t, err).Code != "invalid_arguments" || len(f.calls) != 0 {
+	got := callErr(t, err)
+	if got.Code != "invalid_arguments" || !strings.Contains(got.Message, `"authorization"`) || !strings.Contains(got.Message, "(none)") || len(f.calls) != 0 {
 		t.Fatalf("err=%v calls=%v", err, f.calls)
 	}
+	_, err = svc.Call(context.Background(), "machine_get", json.RawMessage(`{"machine_id":"m1","extra":true}`))
+	got = callErr(t, err)
+	if got.Code != "invalid_arguments" || !strings.Contains(got.Message, `"extra"`) || !strings.Contains(got.Message, "machine_id") {
+		t.Fatalf("unknown field = %v", err)
+	}
 	_, err = svc.Call(context.Background(), "sudo", nil)
-	if callErr(t, err).Code != "unknown_tool" {
+	got = callErr(t, err)
+	if got.Code != "invalid_arguments" || !strings.Contains(got.Message, "sudo") {
 		t.Fatal(err)
+	}
+	_, err = svc.Call(context.Background(), "fleet_overview", json.RawMessage(`{`))
+	if callErr(t, err).Code != "invalid_arguments" {
+		t.Fatal(err)
+	}
+	_, err = svc.Call(context.Background(), "machine_get", json.RawMessage(`{}`))
+	if callErr(t, err).Code != "invalid_arguments" || len(f.calls) != 0 {
+		t.Fatalf("missing id err=%v calls=%v", err, f.calls)
+	}
+}
+
+func TestHubAPIErrorCodeIsPreserved(t *testing.T) {
+	f := &fakeHub{err: &operatorclient.APIError{StatusCode: 404, Code: "MACHINE_NOT_FOUND", Message: "missing"}}
+	_, err := (&Service{Hub: f}).Call(context.Background(), "fleet_overview", nil)
+	if callErr(t, err).Code != "MACHINE_NOT_FOUND" || callErr(t, err).Message != "missing" {
+		t.Fatal(err)
+	}
+	plain := &fakeHub{err: errors.New("dial failed")}
+	_, err = (&Service{Hub: plain}).Call(context.Background(), "fleet_overview", nil)
+	if callErr(t, err).Code != "hub_error" || !strings.Contains(callErr(t, err).Message, "dial failed") {
+		t.Fatal(err)
+	}
+}
+
+func TestToolSchemasAndAnnotations(t *testing.T) {
+	byName := map[string]Tool{}
+	for _, tool := range Tools() {
+		if tool.Annotations == nil || tool.Annotations.OpenWorldHint {
+			t.Fatalf("%s annotations = %+v", tool.Name, tool.Annotations)
+		}
+		if tool.InputSchema["additionalProperties"] != false {
+			t.Fatalf("%s additionalProperties", tool.Name)
+		}
+		byName[tool.Name] = tool
+	}
+	overview := byName["fleet_overview"].Annotations
+	if !overview.ReadOnlyHint || overview.DestructiveHint || !overview.IdempotentHint {
+		t.Fatalf("overview annotations %+v", overview)
+	}
+	apply := byName["rollout_apply"].Annotations
+	if apply.ReadOnlyHint || !apply.DestructiveHint || !apply.IdempotentHint {
+		t.Fatalf("apply annotations %+v", apply)
+	}
+	enroll := byName["enroll_ticket_create"].Annotations
+	if enroll.ReadOnlyHint || enroll.DestructiveHint || !enroll.IdempotentHint {
+		t.Fatalf("enroll annotations %+v", enroll)
+	}
+	props := byName["enroll_ticket_preview"].InputSchema["properties"].(map[string]any)
+	ttl := props["ttl_seconds"].(map[string]any)
+	if ttl["minimum"] != int(store.OperatorEnrollTokenMinTTLSeconds) || ttl["maximum"] != int(store.OperatorEnrollTokenMaxTTLSeconds) {
+		t.Fatalf("ttl = %#v", ttl)
+	}
+	digest := byName["rollout_apply"].InputSchema["properties"].(map[string]any)["preview_digest"].(map[string]any)
+	if digest["pattern"] != digestPattern || digest["minLength"] != 71 || digest["maxLength"] != 71 {
+		t.Fatalf("digest = %#v", digest)
+	}
+	batch := byName["deployment_create"].InputSchema["properties"].(map[string]any)["batch_size"].(map[string]any)
+	if batch["maximum"] != store.MaxDeploymentBatchSize || batch["minimum"] != 0 {
+		t.Fatalf("batch = %#v", batch)
+	}
+	rolloutBatch := byName["rollout_apply"].InputSchema["properties"].(map[string]any)["batch_size"].(map[string]any)
+	if rolloutBatch["maximum"] != 1 {
+		t.Fatalf("rollout batch = %#v", rolloutBatch)
+	}
+	states := byName["machines_list"].InputSchema["properties"].(map[string]any)["states"].(map[string]any)
+	if states["uniqueItems"] != true || states["maxItems"] != len(state.AllStates) {
+		t.Fatalf("states = %#v", states)
+	}
+	encoded, err := json.Marshal(byName["fleet_overview"])
+	if err != nil || !bytes.Contains(encoded, []byte(`"openWorldHint":false`)) || !bytes.Contains(encoded, []byte(`"readOnlyHint":true`)) {
+		t.Fatalf("encoded=%s err=%v", encoded, err)
+	}
+}
+
+func TestMCPServerVersionUsesTheBuildVersion(t *testing.T) {
+	var in, out bytes.Buffer
+	in.WriteString(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}` + "\n")
+	if err := Serve(context.Background(), &in, &out, &Service{Hub: &fakeHub{}, Version: "2026.10.6"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"version":"2026.10.6"`) || !strings.Contains(out.String(), `"protocolVersion":"2025-06-18"`) {
+		t.Fatalf("initialize = %s", out.String())
 	}
 }
 
@@ -318,7 +413,7 @@ func TestMCPInitializeListAndRefusedWrite(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("responses = %d\n%s", len(lines), out.String())
 	}
-	if !strings.Contains(lines[0], `"protocolVersion":"2025-03-26"`) || !strings.Contains(lines[0], "WhoIs") {
+	if !strings.Contains(lines[0], `"protocolVersion":"2025-03-26"`) || !strings.Contains(lines[0], "WhoIs") || !strings.Contains(lines[0], `"version":"dev"`) {
 		t.Fatalf("initialize = %s", lines[0])
 	}
 	if !strings.Contains(lines[1], "rollout_expand") || !strings.Contains(lines[1], `"id":2`) {

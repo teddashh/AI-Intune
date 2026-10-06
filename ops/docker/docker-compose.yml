@@ -11,7 +11,9 @@
 #
 # Quick start (on a small VPS that already joined your free Tailscale tailnet):
 #   1. cp ops/docker/hub.env.example ops/docker/hub.env
-#   2. Set CLAWCTL_LISTEN=$(tailscale ip -4):8787 and capability prefix
+#   2. Set CLAWCTL_LISTEN=$(tailscale ip -4):<port> and the capability prefix.
+#      8787 is the conventional example port, not a Hub default. Grant dst,
+#      CLAWCTL_PUBLIC_URL, agent --hub, and any tunnel origin use that same port.
 #   3. docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env up -d --build
 #   4. Open http://<CLAWCTL_LISTEN>/ from an authorized tailnet device
 #
@@ -61,7 +63,7 @@ services:
     # (do not commit hub.env). Values below are injected into the container.
     environment:
       # Compose substitutes from the shell / --env-file passed to `docker compose`.
-      CLAWCTL_LISTEN: ${CLAWCTL_LISTEN:?set CLAWCTL_LISTEN to host Tailscale IP:8787}
+      CLAWCTL_LISTEN: ${CLAWCTL_LISTEN:?set CLAWCTL_LISTEN to this host Tailscale IP:port (8787 is the conventional example, not a Hub default)}
       CLAWCTL_OPERATOR_CAPABILITY_PREFIX: ${CLAWCTL_OPERATOR_CAPABILITY_PREFIX:?set capability prefix}
       CLAWCTL_DB: /var/lib/clawctl/clawctl.sqlite
       CLAWCTL_REPORT_STAMP: /var/lib/clawctl/last-report.stamp

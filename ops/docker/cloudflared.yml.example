@@ -9,6 +9,7 @@
 # comments show the volume mount that replaces the token command.
 #
 # Replace 100.64.0.12:8787 with THIS host's CLAWCTL_LISTEN value.
+# The origin port is that listen port. 8787 here is the conventional example, not a Hub default.
 # Hub only binds that Tailscale IP — do not use 127.0.0.1 or localhost here
 # unless you have also changed Hub to listen there (it currently refuses).
 

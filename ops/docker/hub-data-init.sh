@@ -21,7 +21,11 @@ set -eu
 
 hub_uid=65532
 hub_gid=65532
-data=/var/lib/clawctl
+# CLAWCTL_DATA defaults to the compose volume mount. The Fly entrypoint sets
+# the same default and passes CLAWCTL_CHOWN_EXCLUDE so tailscaled state stays
+# root-owned. Compose does not set either variable.
+data=${CLAWCTL_DATA:-/var/lib/clawctl}
+exclude=${CLAWCTL_CHOWN_EXCLUDE:-}
 version=${CLAWCTL_VERSION:-}
 
 case $version in
@@ -48,13 +52,40 @@ if [ "${#version}" -gt 128 ]; then
   exit 1
 fi
 
+case $data in
+  /*) ;;
+  *)
+    echo "hub-data-init: CLAWCTL_DATA must be an absolute path" >&2
+    exit 1
+    ;;
+esac
+case $data in
+  */)
+    echo "hub-data-init: CLAWCTL_DATA must not end with a slash" >&2
+    exit 1
+    ;;
+esac
+if [ -n "$exclude" ]; then
+  case $exclude in
+    .|..|.*|*/*|*[!A-Za-z0-9._-]*)
+      echo "hub-data-init: CLAWCTL_CHOWN_EXCLUDE must be one path segment" >&2
+      exit 1
+      ;;
+  esac
+fi
+
 if [ -L "$data" ]; then
   echo "hub-data-init: $data is a symlink" >&2
   exit 1
 fi
 mkdir -p "$data"
+if [ -n "$exclude" ] && [ -L "$data/$exclude" ]; then
+  echo "hub-data-init: refusing symlink $data/$exclude" >&2
+  exit 1
+fi
 
-seed=/opt/clawctl-seed/agent-bootstrap/$version
+seed_root=${CLAWCTL_SEED:-/opt/clawctl-seed}
+seed=$seed_root/agent-bootstrap/$version
 dest_root=$data/agent-bootstrap
 dest=$dest_root/$version
 amd64=clawctl-agent-bootstrap-linux-amd64.tar.gz
@@ -108,7 +139,16 @@ fi
 
 # New named volumes are root-owned. Own every real file and directory in the
 # volume, but do not follow symlinks (find does not descend through them).
-find "$data" -xdev \( -type d -o -type f \) -exec chown "$hub_uid:$hub_gid" {} +
+# CLAWCTL_CHOWN_EXCLUDE (one path segment) stays untouched. The Fly image
+# uses that for root-owned tailscaled state. Compose leaves it unset, so
+# this find is the same command as before.
+if [ -n "$exclude" ]; then
+  find "$data" -xdev \
+    \( -path "$data/$exclude" -o -path "$data/$exclude/*" \) -prune \
+    -o \( -type d -o -type f \) -exec chown "$hub_uid:$hub_gid" {} +
+else
+  find "$data" -xdev \( -type d -o -type f \) -exec chown "$hub_uid:$hub_gid" {} +
+fi
 chmod 0700 "$data" "$dest_root" "$dest"
 chmod 0644 "$dest/$amd64" "$dest/$arm64" "$dest/$sums"
 

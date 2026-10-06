@@ -1,0 +1,44 @@
+# clawctl-hub on Fly.io. Edit app and primary_region before the first deploy.
+# There is no [http_service] and no [[services]]. Operators and agents reach
+# Hub only over Tailscale. Do not add a public listener.
+#
+# Deploy from the repository root so the Docker context is the module root:
+#   fly deploy . \
+#     --config ops/fly/fly.toml \
+#     --dockerfile ops/docker/Dockerfile \
+#     --build-target hub-fly \
+#     --build-arg CLAWCTL_VERSION="$(git describe --tags --always --dirty)" \
+#     --ha=false
+# dockerfile below is relative to this file. The context is still the
+# directory you pass to fly deploy (the repo root).
+# Keep a single machine: fly scale count 1, and fly deploy --ha=false.
+# Change size with [[vm]] below or: fly scale vm shared-cpu-1x --memory 1024
+
+app = "clawctl-hub-CHANGE-ME"
+primary_region = "CHANGE-ME"
+
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "../docker/Dockerfile"
+  build-target = "hub-fly"
+
+  [build.args]
+    CLAWCTL_VERSION = "dev"
+
+[env]
+  CLAWCTL_PORT = "8787"
+  CLAWCTL_OPERATOR_CAPABILITY_PREFIX = "example.com/cap/clawctl"
+  TS_HOSTNAME = "clawctl-hub"
+
+[[mounts]]
+  source = "clawctl_data"
+  destination = "/var/lib/clawctl"
+
+[[restart]]
+  policy = "always"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

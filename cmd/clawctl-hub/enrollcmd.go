@@ -271,7 +271,7 @@ func finishEnrollToken(machineID, displayName, token string, secretAvailable, re
 	}
 	base := hubURL
 	if base == "" {
-		base = "http://<Hub 的 literal Tailscale IP>:8787"
+		base = "http://<Hub 的 literal Tailscale IP>:<CLAWCTL_LISTEN 的埠>"
 	}
 	_, err := fmt.Fprintf(errOut,
 		"\n%s 已加入名冊（machine_id %s）。\n"+

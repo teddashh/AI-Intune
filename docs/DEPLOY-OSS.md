@@ -1,10 +1,14 @@
 # Open-source deploy guide — clawctl-hub (OSS / any cloud)
 
-Status: **Milestone 4 — Hub-enforced canary hold**. This document describes how to run Hub on a
-generic Linux host with Docker + Cloudflare Tunnel + Tailscale. It does **not**
-change the operator auth model.
+Status: **Milestone 4 — Hub-enforced canary hold**. The primary way to run Hub is
+**any Linux host with Docker** (`ops/docker`, `docker compose`). A systemd install
+(`ops/install-hub.sh`) is the alternative when the host has no Docker.
+[Fly.io](DEPLOY-FLY.md) is the documented hosted example: one always-on machine,
+Tailscale, and no public HTTP service. This guide does **not** change the
+operator auth model.
 
 Related: [`ops/docker/README.md`](../ops/docker/README.md), [`ops/install-hub.sh`](../ops/install-hub.sh),
+[DEPLOY-FLY.md](DEPLOY-FLY.md),
 operator auth contract (Tailscale app capabilities — see `ops/clawctl-hub.service` comments and install-hub.sh).
 Full OPERATOR-AUTH.md / PRODUCT.md live in the complete documentation set.
 
@@ -40,7 +44,7 @@ The **site/** static pages (if any) can live on Pages/Vercel; the Hub cannot.
                                     │  tailscaled + Docker │
                                     │                      │
                                     │  clawctl-hub         │
-                                    │  listen 100.x.y.z:8787
+                                    │  listen 100.x.y.z:8787 (example port)
                                     │  volume: clawctl-data│
                                     │  LocalAPI socket     │
                                     └──────────┬──────────┘
@@ -56,7 +60,9 @@ The **site/** static pages (if any) can live on Pages/Vercel; the Hub cannot.
 
 | Piece | Role |
 |---|---|
-| **Any Linux + Docker** | Runs Hub; Oracle / AWS / Hetzner / home lab all fine |
+| **Any Linux + Docker** | Primary path. Runs Hub; Oracle / AWS / Hetzner / home lab all fine |
+| **systemd** | Alternative when you do not want Docker (`ops/install-hub.sh`) |
+| **Fly.io** | Hosted example. See [DEPLOY-FLY.md](DEPLOY-FLY.md). Not the primary path |
 | **Tailscale** | Operator identity + reachability; Hub binds its Tailscale IP |
 | **Cloudflare Tunnel** | Optional public ingress for **agent** experiments |
 | **SQLite volume** | Fleet state (machines, jobs, audit, …) |
@@ -71,10 +77,22 @@ The **site/** static pages (if any) can live on Pages/Vercel; the Hub cannot.
 
 Hub still requires:
 
-1. `CLAWCTL_LISTEN=<this-host-tailscale-ipv4>:8787`
+1. `CLAWCTL_LISTEN=<this-host-tailscale-ipv4>:<port>`
 2. `CLAWCTL_OPERATOR_CAPABILITY_PREFIX=<your-domain>/cap/clawctl`
 3. Tailscale ACL grants for `-view`, `-operate`, `-admin` to that destination
 4. Live `tailscaled` ≥ 1.100.0 with LocalAPI reachable
+
+Hub has **no production default port**. The `--listen` flag default is
+`127.0.0.1:8770`, and Hub refuses that address before it opens the database.
+The operator always passes `CLAWCTL_LISTEN` or `--listen`. `8787` in this
+guide is only the conventional example.
+
+These must all use the **same port** as `CLAWCTL_LISTEN`:
+
+- the Tailscale grant `dst` port (`tcp:<port>`)
+- `CLAWCTL_PUBLIC_URL`, which must be `http://<CLAWCTL_LISTEN>`
+- the agent `--hub` URL
+- a Cloudflare Tunnel origin, when you use one
 
 Rejected listen targets (before DB open): `0.0.0.0`, loopback, non-Tailscale
 IPs, hostnames. Hub does **not** read `X-Forwarded-For`, `X-Real-IP`,
@@ -100,7 +118,7 @@ example `dst` IP with your VPS Tailscale IP).
 | Cloudflare Access as operator IdP | **Not implemented** — do not invent OIDC in front without Hub code changes |
 
 Tunnel origin must target the **same** address Hub listens on
-(`http://100.x.y.z:8787`), because Hub refuses to bind loopback.
+(`http://100.x.y.z:8787` when 8787 is the port in `CLAWCTL_LISTEN`), because Hub refuses to bind loopback. The origin port is the listen port, not a fixed port.
 
 Enable by adding `ops/docker/docker-compose.tunnel.yml` and setting
 `CLOUDFLARE_TUNNEL_TOKEN` in `hub.env` (see
@@ -227,7 +245,7 @@ docker compose -f ops/docker/docker-compose.yml \
   --env-file ops/docker/hub.env up -d
 ```
 
-Without Docker: `make hub` then `./ops/install-hub.sh --listen … --operator-capability-prefix …`.
+Without Docker: `make hub` then `./ops/install-hub.sh --listen <tailscale-ip>:<port> --operator-capability-prefix …`. That is the systemd alternative. Hosted example: [DEPLOY-FLY.md](DEPLOY-FLY.md).
 
 ---
 
@@ -240,7 +258,7 @@ agent procedure is `skills/clawctl-operator/SKILL.md`.
 
 ```bash
 make operator
-export CLAWCTL_HUB_URL=http://100.x.y.z:8787
+export CLAWCTL_HUB_URL=http://100.x.y.z:8787   # same port as CLAWCTL_LISTEN; 8787 is the example
 ./build/clawctl-operator tools
 ./build/clawctl-operator mcp
 ```
@@ -254,7 +272,7 @@ It sends no `Authorization` header and does not open the SQLite file.
 
 Done:
 
-1. **Enrollment** — ticket page shows one install command. `--hub` is the Tailscale `http://100.x:8787` address, or an experimental `https://<hostname>` tunnel URL for agent check-in only.
+1. **Enrollment** — ticket page shows one install command. `--hub` is the Tailscale `http://100.x.y.z:<port>` address (the same port as `CLAWCTL_LISTEN`; `8787` is only the conventional example), or an experimental `https://<hostname>` tunnel URL for agent check-in only.
 2. **R2 / S3** — when `R2_*` or `S3_*` is complete, Hub stores Hub-hashed blobs and keeps digests in SQLite. Partial config refuses to start. Both groups at once is an error.
 3. **Operator MCP / CLI** — `clawctl-operator` reads fleet, jobs, deployments, software, and compliance, and writes enroll tickets, deployments, and profile assignments through the existing preview/apply API. A new deployment's first batch is one machine. After Hub marks that job `succeeded`, the driver pauses. The next batch opens only on an explicit Continue from the UI, CLI, or `rollout_expand`. Deployments already in flight before this hold keep the old auto-open behavior. Plain Continue refuses a failed batch. The deployment page's separate `skip failed batch` action records a reason; MCP does not expose it.
 
@@ -262,6 +280,7 @@ Not implemented:
 
 4. **Cloudflare Access / OIDC** — Hub still does not trust `X-Forwarded-*` or `Authorization` for operator identity. Do not invent an operator login in front of the Tailscale listener.
 5. **Deleting the local tarball after upload** — the artifacts directory remains the working copy. Remote serve is only the fallback when that file is missing and the SQLite row matches.
+6. **Cloudflare Containers** — not implemented. A future advanced option would need tsnet (userspace Tailscale inside the Hub process), Litestream, and a Durable Object keep-alive. It is not a deploy path. Fly Machines, in [DEPLOY-FLY.md](DEPLOY-FLY.md), is the hosted example because a VM can run kernel-mode `tailscaled` and the SQLite process.
 
 ---
 
