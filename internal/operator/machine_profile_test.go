@@ -26,7 +26,8 @@ import (
 
 func writeNodeRuntimeArtifact(t *testing.T, dir, version string) artifact.Sidecar {
 	return writeNodeRuntimeArtifactTargets(t, dir, version,
-		"linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64")
+		"linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64",
+		"windows-amd64", "windows-arm64")
 }
 
 func writeNodeRuntimeArtifactTargets(t *testing.T, dir, version string, targets ...string) artifact.Sidecar {
@@ -35,12 +36,16 @@ func writeNodeRuntimeArtifactTargets(t *testing.T, dir, version string, targets 
 	gz := gzip.NewWriter(&bundle)
 	tw := tar.NewWriter(gz)
 	for _, target := range targets {
+		nodeName := "node-runtime/" + target + "/bin/node"
+		if strings.HasPrefix(target, "windows-") {
+			nodeName = "node-runtime/" + target + "/bin/node.exe"
+		}
 		for _, entry := range []struct {
 			name string
 			mode int64
 			body string
 		}{
-			{name: "node-runtime/" + target + "/bin/node", mode: 0o755, body: "node-" + target},
+			{name: nodeName, mode: 0o755, body: "node-" + target},
 			{name: "node-runtime/" + target + "/lib/node_modules/npm/bin/npm-cli.js", mode: 0o644, body: "npm-" + target},
 		} {
 			if err := tw.WriteHeader(&tar.Header{Name: entry.name, Typeflag: tar.TypeReg,
@@ -290,6 +295,59 @@ func TestCatalogPlatformFromProbeIdentity(t *testing.T) {
 	}
 }
 
+func checkWindowsIdentityCannotReuseOrExtendALinuxPinnedAssignment(t *testing.T) {
+	service, st, _, manifestRequest := admittedOpenClawProfileService(t)
+	profileRequest := machineProfileRequest(manifestRequest.Manifest, "windows-pin-hold-profile")
+	if _, err := service.PublishMachineProfile(t.Context(), profileRequest); err != nil {
+		t.Fatal(err)
+	}
+	machineID := enrollProfileAssignmentMachine(t, st, "windows-pin-hold-target")
+	preview, err := service.PreviewMachineProfileAssignment(t.Context(), MachineProfileAssignmentPreviewRequest{
+		MachineID: machineID, ProfileID: profileRequest.Profile.ID, ProfileRevision: profileRequest.Profile.Revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Target != (appcatalog.Platform{OS: "linux", Arch: "amd64"}) || preview.CreatesJobs != 1 {
+		t.Fatalf("linux preview=%+v", preview)
+	}
+	first, err := service.AssignMachineProfile(t.Context(),
+		profileAssignmentRequest(machineID, profileRequest, preview, "windows-pin-hold-linux"))
+	if err != nil || first.AlreadyAssigned || len(first.Packages) != 1 {
+		t.Fatalf("linux assign=%+v err=%v", first, err)
+	}
+	if _, err := st.DB().Exec(`UPDATE machine_registry SET os=?,arch=? WHERE machine_id=?`,
+		"Windows 11 Pro", "x86_64", machineID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.PreviewMachineProfileAssignment(t.Context(), MachineProfileAssignmentPreviewRequest{
+		MachineID: machineID, ProfileID: profileRequest.Profile.ID, ProfileRevision: profileRequest.Profile.Revision,
+	})
+	var rejection *store.OperatorRequestError
+	if !errors.As(err, &rejection) || rejection.Code != store.OperatorCodeMachineProfileUnresolvable ||
+		!errors.Is(err, store.ErrMachineProfileUnresolvable) {
+		t.Fatalf("windows preview after linux pin rejection=%+v err=%v", rejection, err)
+	}
+	if strings.Contains(rejection.Detail, "agent 回報") {
+		t.Fatalf("recognized Windows identity asked for another agent report: %q", rejection.Detail)
+	}
+	stale := profileAssignmentRequest(machineID, profileRequest, preview, "windows-pin-hold-stale-linux")
+	_, err = service.AssignMachineProfile(t.Context(), stale)
+	if !errors.As(err, &rejection) || rejection.Code != store.OperatorCodeMachineProfileUnresolvable {
+		t.Fatalf("stale linux apply after Windows identity err=%v", err)
+	}
+	if countOperatorRows(t, st, "machine_profile_assignments") != 1 ||
+		countOperatorRows(t, st, "jobs") != 1 {
+		t.Fatalf("Windows identity created extra pin rows assignments=%d jobs=%d",
+			countOperatorRows(t, st, "machine_profile_assignments"), countOperatorRows(t, st, "jobs"))
+	}
+	var targetOS, targetArch string
+	if err := st.DB().QueryRow(`SELECT target_os,target_arch FROM machine_profile_assignments WHERE assignment_id=?`,
+		first.AssignmentID).Scan(&targetOS, &targetArch); err != nil || targetOS != "linux" || targetArch != "amd64" {
+		t.Fatalf("historical linux pin mutated to %s/%s err=%v", targetOS, targetArch, err)
+	}
+}
+
 func TestMachineProfileAssignmentUsesLinuxProbePlatform(t *testing.T) {
 	service, st, _, manifestRequest := admittedOpenClawProfileService(t)
 	profileRequest := machineProfileRequest(manifestRequest.Manifest, "profile-native-platform-profile")
@@ -390,6 +448,89 @@ func TestDarwinNodeProfilePreviewApplyAndMissingArtifactFailure(t *testing.T) {
 		for _, table := range []string{"machine_profile_assignments", "desired_state", "jobs"} {
 			if count := countOperatorRows(t, f.store, table); count != 0 {
 				t.Fatalf("missing Darwin artifact wrote %d rows to %s", count, table)
+			}
+		}
+	})
+}
+
+func TestWindowsNodeProfilePreviewApplyAndMissingArtifactFailure(t *testing.T) {
+	type fixture struct {
+		service     *Service
+		store       *store.Store
+		artifactDir string
+		manifest    appcatalog.Manifest
+		profile     MachineProfilePublishRequest
+		machineID   string
+	}
+	newFixture := func(t *testing.T, suffix string) fixture {
+		t.Helper()
+		service, st, dir, _ := catalogManifestService(t)
+		record := writeNodeRuntimeArtifact(t, dir, "24.15.0")
+		manifest := nodeRuntimeManifest(record)
+		manifest.Platforms = []appcatalog.Platform{{OS: "windows", Arch: "amd64"}}
+		if _, err := service.PublishCatalogManifest(t.Context(), CatalogManifestPublishRequest{
+			Manifest: manifest, Reason: "approve Windows Node runtime",
+			IdempotencyKey: "windows-node-manifest-" + suffix, Actor: verifiedDeploymentActor(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		profile := machineProfileRequest(manifest, "windows-node-profile-"+suffix)
+		profile.Profile.ID = "windows-node-" + suffix
+		if _, err := service.PublishMachineProfile(t.Context(), profile); err != nil {
+			t.Fatal(err)
+		}
+		machineID := enrollProfileAssignmentMachine(t, st, "windows-node-"+suffix)
+		if _, err := st.DB().Exec(`UPDATE machine_registry SET os='Windows 11 Pro',arch='amd64' WHERE machine_id=?`, machineID); err != nil {
+			t.Fatal(err)
+		}
+		return fixture{service: service, store: st, artifactDir: dir, manifest: manifest, profile: profile, machineID: machineID}
+	}
+
+	t.Run("preview and apply produce an exact Windows job", func(t *testing.T) {
+		f := newFixture(t, "apply")
+		preview, err := f.service.PreviewMachineProfileAssignment(t.Context(), MachineProfileAssignmentPreviewRequest{
+			MachineID: f.machineID, ProfileID: f.profile.Profile.ID, ProfileRevision: f.profile.Profile.Revision,
+		})
+		if err != nil || preview.Target != (appcatalog.Platform{OS: "windows", Arch: "amd64"}) ||
+			preview.CreatesJobs != 1 || len(preview.Packages) != 1 ||
+			preview.Packages[0].ResourceKind != agentadapter.ExecutorKindNodeRuntime {
+			t.Fatalf("preview=%+v err=%v", preview, err)
+		}
+		result, err := f.service.AssignMachineProfile(t.Context(),
+			profileAssignmentRequest(f.machineID, f.profile, preview, "windows-node-apply"))
+		if err != nil || len(result.Packages) != 1 || result.Packages[0].JobID == "" {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
+		desired, err := f.store.DesiredState(result.Packages[0].DesiredID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var spec model.NodeRuntimeSpec
+		if err := json.Unmarshal([]byte(desired.Spec), &spec); err != nil ||
+			spec.Kind != agentadapter.ExecutorKindNodeRuntime || spec.TargetOS != "windows" ||
+			spec.TargetArch != "amd64" || spec.Artifact == nil ||
+			spec.Artifact.SHA256 != f.manifest.Artifact.SHA256 {
+			t.Fatalf("desired=%+v spec=%+v err=%v", desired, spec, err)
+		}
+	})
+
+	t.Run("artifact removed after preview rejects apply", func(t *testing.T) {
+		f := newFixture(t, "missing")
+		preview, err := f.service.PreviewMachineProfileAssignment(t.Context(), MachineProfileAssignmentPreviewRequest{
+			MachineID: f.machineID, ProfileID: f.profile.Profile.ID, ProfileRevision: f.profile.Profile.Revision,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(filepath.Join(f.artifactDir, f.manifest.Artifact.SHA256+".tgz")); err != nil {
+			t.Fatal(err)
+		}
+		_, err = f.service.AssignMachineProfile(t.Context(),
+			profileAssignmentRequest(f.machineID, f.profile, preview, "windows-node-missing-apply"))
+		assertDeploymentOperatorCode(t, err, store.OperatorCodeCatalogArtifactUnavailable, false)
+		for _, table := range []string{"machine_profile_assignments", "desired_state", "jobs"} {
+			if count := countOperatorRows(t, f.store, table); count != 0 {
+				t.Fatalf("missing Windows artifact wrote %d rows to %s", count, table)
 			}
 		}
 	})

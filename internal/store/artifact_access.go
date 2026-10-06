@@ -40,7 +40,7 @@ SELECT d.resource_kind,d.resource_id,d.spec
 		if err := rows.Scan(&resourceKind, &resourceID, &raw); err != nil {
 			return false, fmt.Errorf("store: scan machine artifact grant: %w", err)
 		}
-		// Both supported jobs carry this typed version/artifact envelope.
+		// Registered executor jobs carry this typed version/artifact envelope.
 		var spec struct {
 			Kind     string             `json:"kind"`
 			Version  string             `json:"version"`
@@ -49,7 +49,7 @@ SELECT d.resource_kind,d.resource_id,d.spec
 		if err := json.Unmarshal([]byte(raw), &spec); err != nil {
 			return false, fmt.Errorf("store: machine artifact grant has invalid desired state: %w", err)
 		}
-		supported := resourceKind == agentadapter.ExecutorKindOpenClaw || resourceKind == agentadapter.ExecutorKindNodeRuntime
+		supported := agentadapter.ExecutorKindRegistered(resourceKind)
 		if !supported || resourceID != resourceKind || spec.Kind != resourceKind ||
 			spec.Artifact == nil || spec.Artifact.SHA256 != sha256Hex ||
 			spec.Artifact.URL != "/v1/artifacts/"+sha256Hex || spec.Artifact.Size < 0 {

@@ -2,6 +2,7 @@ package artifact
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -47,6 +48,10 @@ func newNodeFetchTestOrigin(t *testing.T, version string) *nodeFetchTestOrigin {
 		filename := "node-v" + version + "-" + target.os + "-" + target.arch + ".tar.gz"
 		origin.archives[filename] = nodeSourceTestArchive(t, version, target.os, target.arch, nil)
 	}
+	for _, arch := range []string{"x64", "arm64"} {
+		filename := "node-v" + version + "-win-" + arch + ".zip"
+		origin.archives[filename] = nodeSourceTestZip(t, version, arch)
+	}
 	origin.refreshChecksums()
 	origin.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin.mu.Lock()
@@ -64,7 +69,11 @@ func newNodeFetchTestOrigin(t *testing.T, version string) *nodeFetchTestOrigin {
 			return
 		}
 		origin.archiveHits++
-		w.Header().Set("Content-Type", "application/gzip")
+		if strings.HasSuffix(filename, ".zip") {
+			w.Header().Set("Content-Type", "application/zip")
+		} else {
+			w.Header().Set("Content-Type", "application/gzip")
+		}
 		w.Header().Set("Content-Length", fmt.Sprint(len(body)))
 		_, _ = w.Write(body)
 	}))
@@ -138,6 +147,29 @@ func nodeSourceTestArchive(t *testing.T, version, targetOS, arch string, extra [
 	return output.Bytes()
 }
 
+func nodeSourceTestZip(t *testing.T, version, arch string) []byte {
+	t.Helper()
+	root := "node-v" + version + "-win-" + arch
+	var output bytes.Buffer
+	zw := zip.NewWriter(&output)
+	for _, entry := range []struct{ name, body string }{
+		{root + "/node.exe", "node-win-" + arch},
+		{root + "/node_modules/npm/bin/npm-cli.js", "npm-win-" + arch},
+	} {
+		w, err := zw.Create(entry.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(entry.body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
+}
+
 func nodeRuntimeTestFetcher(t *testing.T, dir string, origin *nodeFetchTestOrigin) *NodeRuntimeFetcher {
 	t.Helper()
 	fetcher, err := newNodeRuntimeFetcher(nodeRuntimeFetcherConfig{
@@ -162,11 +194,13 @@ func TestNodeRuntimeFetcherPinsBuildsPublishesAndReusesBundle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if plan.PolicyVersion != NodeRuntimeFetchPolicyVersion || plan.Name != "node-runtime" ||
-		plan.SourceOrigin != origin.server.URL || len(plan.Sources) != 4 ||
+		plan.SourceOrigin != origin.server.URL || len(plan.Sources) != 6 ||
 		plan.Sources[0].TargetOS != "linux" || plan.Sources[0].TargetArch != "amd64" ||
 		plan.Sources[1].TargetOS != "linux" || plan.Sources[1].TargetArch != "arm64" ||
 		plan.Sources[2].TargetOS != "darwin" || plan.Sources[2].TargetArch != "amd64" ||
 		plan.Sources[3].TargetOS != "darwin" || plan.Sources[3].TargetArch != "arm64" ||
+		plan.Sources[4].TargetOS != "windows" || plan.Sources[4].TargetArch != "amd64" ||
+		plan.Sources[5].TargetOS != "windows" || plan.Sources[5].TargetArch != "arm64" ||
 		!strings.HasPrefix(plan.SourceIdentity, "sha512-") ||
 		!strings.HasPrefix(plan.PreviewDigest, "sha256:") {
 		t.Fatalf("plan=%+v", plan)
@@ -194,7 +228,9 @@ func TestNodeRuntimeFetcherPinsBuildsPublishesAndReusesBundle(t *testing.T) {
 		NodeRuntimeTarget{OS: "linux", Arch: "amd64"},
 		NodeRuntimeTarget{OS: "linux", Arch: "arm64"},
 		NodeRuntimeTarget{OS: "darwin", Arch: "amd64"},
-		NodeRuntimeTarget{OS: "darwin", Arch: "arm64"}); err != nil {
+		NodeRuntimeTarget{OS: "darwin", Arch: "arm64"},
+		NodeRuntimeTarget{OS: "windows", Arch: "amd64"},
+		NodeRuntimeTarget{OS: "windows", Arch: "arm64"}); err != nil {
 		t.Fatalf("published bundle target validation failed: %v", err)
 	}
 	assertNodeRuntimeTestBundle(t, filepath.Join(dir, record.SHA256+".tgz"), version)
@@ -369,6 +405,25 @@ func TestNodeRuntimeFetcherRejectsLinuxArchiveMasqueradingAsDarwin(t *testing.T)
 	assertNoNodeRuntimePublishedArtifacts(t, fetcher.artifactsDir)
 }
 
+func TestNodeRuntimeFetcherRejectsTarMasqueradingAsWindowsZip(t *testing.T) {
+	const version = "24.21.0"
+	origin := newNodeFetchTestOrigin(t, version)
+	filename := "node-v" + version + "-win-x64.zip"
+	origin.mu.Lock()
+	origin.archives[filename] = nodeSourceTestArchive(t, version, "linux", "x64", nil)
+	origin.refreshChecksums()
+	origin.mu.Unlock()
+	fetcher := nodeRuntimeTestFetcher(t, filepath.Join(t.TempDir(), "artifacts"), origin)
+	plan, err := fetcher.PreviewPlan(t.Context(), version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := fetcher.FetchExact(t.Context(), plan, "operator:test", nil); !errors.Is(err, ErrMetadataInvalid) {
+		t.Fatalf("tar.gz accepted as Windows zip material: %v", err)
+	}
+	assertNoNodeRuntimePublishedArtifacts(t, fetcher.artifactsDir)
+}
+
 func TestNodeRuntimeFetcherRejectsIncompleteMetadataAndTamperedPlan(t *testing.T) {
 	const version = "24.21.0"
 	origin := newNodeFetchTestOrigin(t, version)
@@ -441,14 +496,18 @@ func assertNodeRuntimeTestBundle(t *testing.T, filename, version string) {
 	defer gz.Close()
 	reader := tar.NewReader(gz)
 	want := map[string]string{
-		"node-runtime/linux-amd64/bin/node":                             "node-linux-x64",
-		"node-runtime/linux-amd64/lib/node_modules/npm/bin/npm-cli.js":  "npm-linux-x64",
-		"node-runtime/linux-arm64/bin/node":                             "node-linux-arm64",
-		"node-runtime/linux-arm64/lib/node_modules/npm/bin/npm-cli.js":  "npm-linux-arm64",
-		"node-runtime/darwin-amd64/bin/node":                            "node-darwin-x64",
-		"node-runtime/darwin-amd64/lib/node_modules/npm/bin/npm-cli.js": "npm-darwin-x64",
-		"node-runtime/darwin-arm64/bin/node":                            "node-darwin-arm64",
-		"node-runtime/darwin-arm64/lib/node_modules/npm/bin/npm-cli.js": "npm-darwin-arm64",
+		"node-runtime/linux-amd64/bin/node":                              "node-linux-x64",
+		"node-runtime/linux-amd64/lib/node_modules/npm/bin/npm-cli.js":   "npm-linux-x64",
+		"node-runtime/linux-arm64/bin/node":                              "node-linux-arm64",
+		"node-runtime/linux-arm64/lib/node_modules/npm/bin/npm-cli.js":   "npm-linux-arm64",
+		"node-runtime/darwin-amd64/bin/node":                             "node-darwin-x64",
+		"node-runtime/darwin-amd64/lib/node_modules/npm/bin/npm-cli.js":  "npm-darwin-x64",
+		"node-runtime/darwin-arm64/bin/node":                             "node-darwin-arm64",
+		"node-runtime/darwin-arm64/lib/node_modules/npm/bin/npm-cli.js":  "npm-darwin-arm64",
+		"node-runtime/windows-amd64/bin/node.exe":                        "node-win-x64",
+		"node-runtime/windows-amd64/lib/node_modules/npm/bin/npm-cli.js": "npm-win-x64",
+		"node-runtime/windows-arm64/bin/node.exe":                        "node-win-arm64",
+		"node-runtime/windows-arm64/lib/node_modules/npm/bin/npm-cli.js": "npm-win-arm64",
 	}
 	seen := make(map[string]bool)
 	for {
@@ -467,7 +526,7 @@ func assertNodeRuntimeTestBundle(t *testing.T, filename, version string) {
 			if err != nil || string(body) != expected {
 				t.Fatalf("entry=%s body=%q err=%v", header.Name, body, err)
 			}
-			if strings.HasSuffix(header.Name, "/bin/node") && header.Mode != 0o755 {
+			if (strings.HasSuffix(header.Name, "/bin/node") || strings.HasSuffix(header.Name, "/bin/node.exe")) && header.Mode != 0o755 {
 				t.Fatalf("node mode=%o", header.Mode)
 			}
 			seen[header.Name] = true

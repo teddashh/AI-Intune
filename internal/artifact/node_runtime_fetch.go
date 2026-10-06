@@ -2,6 +2,7 @@ package artifact
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -28,7 +29,7 @@ import (
 
 const (
 	ProductionNodeDistributionOrigin = "https://nodejs.org"
-	NodeRuntimeFetchPolicyVersion    = "node-runtime-official-bundle:v2"
+	NodeRuntimeFetchPolicyVersion    = "node-runtime-official-bundle:v3"
 	DefaultNodeRuntimeSourceMaxBytes = int64(512 << 20)
 	DefaultNodeRuntimeBundleMaxBytes = int64(1 << 30)
 
@@ -207,6 +208,12 @@ func parseNodeRuntimeChecksums(version string, body []byte) ([]NodeRuntimeSource
 		"node-v" + version + "-darwin-arm64.tar.gz": {
 			TargetOS: "darwin", TargetArch: "arm64", Filename: "node-v" + version + "-darwin-arm64.tar.gz",
 		},
+		"node-v" + version + "-win-x64.zip": {
+			TargetOS: "windows", TargetArch: "amd64", Filename: "node-v" + version + "-win-x64.zip",
+		},
+		"node-v" + version + "-win-arm64.zip": {
+			TargetOS: "windows", TargetArch: "arm64", Filename: "node-v" + version + "-win-arm64.zip",
+		},
 	}
 	found := make(map[string]NodeRuntimeSource, len(wanted))
 	for _, line := range strings.Split(string(body), "\n") {
@@ -243,9 +250,14 @@ func parseNodeRuntimeChecksums(version string, body []byte) ([]NodeRuntimeSource
 }
 
 func nodeRuntimeTargetOrder(source NodeRuntimeSource) string {
-	osOrder := "1"
-	if source.TargetOS == "linux" {
+	osOrder := "9"
+	switch source.TargetOS {
+	case "linux":
 		osOrder = "0"
+	case "darwin":
+		osOrder = "1"
+	case "windows":
+		osOrder = "2"
 	}
 	archOrder := "1"
 	if source.TargetArch == "amd64" {
@@ -354,7 +366,7 @@ func (f *NodeRuntimeFetcher) validatePlan(plan NodeRuntimeFetchPlan) error {
 		!validNodeRuntimeVersion(plan.Version) || plan.SourceOrigin != f.originString ||
 		plan.ChecksumURL != f.nodeDistributionURL(plan.Version, "SHASUMS256.txt") ||
 		plan.SourceMaxBytes != f.sourceMax || plan.BundleMaxBytes != f.bundleMax ||
-		plan.PreviewedAt.IsZero() || plan.PreviewedAt.Location() != time.UTC || len(plan.Sources) != 4 {
+		plan.PreviewedAt.IsZero() || plan.PreviewedAt.Location() != time.UTC || len(plan.Sources) != 6 {
 		return fmt.Errorf("%w: Node runtime plan does not match active policy", ErrInvalidFetchRequest)
 	}
 	want := []NodeRuntimeSource{
@@ -362,6 +374,8 @@ func (f *NodeRuntimeFetcher) validatePlan(plan NodeRuntimeFetchPlan) error {
 		{TargetOS: "linux", TargetArch: "arm64", Filename: "node-v" + plan.Version + "-linux-arm64.tar.gz"},
 		{TargetOS: "darwin", TargetArch: "amd64", Filename: "node-v" + plan.Version + "-darwin-x64.tar.gz"},
 		{TargetOS: "darwin", TargetArch: "arm64", Filename: "node-v" + plan.Version + "-darwin-arm64.tar.gz"},
+		{TargetOS: "windows", TargetArch: "amd64", Filename: "node-v" + plan.Version + "-win-x64.zip"},
+		{TargetOS: "windows", TargetArch: "arm64", Filename: "node-v" + plan.Version + "-win-arm64.zip"},
 	}
 	for i := range want {
 		if plan.Sources[i].TargetOS != want[i].TargetOS || plan.Sources[i].TargetArch != want[i].TargetArch ||
@@ -495,7 +509,7 @@ func (f *NodeRuntimeFetcher) downloadSource(ctx context.Context, version string,
 	if err != nil {
 		return "", fmt.Errorf("%w: build Node archive request: %v", ErrRegistryPolicy, err)
 	}
-	req.Header.Set("Accept", "application/gzip, application/octet-stream")
+	req.Header.Set("Accept", "application/gzip, application/zip, application/octet-stream")
 	resp, err := f.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("artifact: download Node archive: %w", err)
@@ -512,8 +526,9 @@ func (f *NodeRuntimeFetcher) downloadSource(ctx context.Context, version string,
 		return "", fmt.Errorf("%w: Node archive declared %d bytes, limit %d", ErrArtifactTooLarge, resp.ContentLength, f.sourceMax)
 	}
 	mediaType, _, mediaErr := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if mediaErr != nil || (mediaType != "application/gzip" && mediaType != "application/octet-stream" && mediaType != "application/x-gzip") {
-		return "", fmt.Errorf("%w: Node archive Content-Type is not gzip", ErrMetadataInvalid)
+	if mediaErr != nil || (mediaType != "application/gzip" && mediaType != "application/octet-stream" &&
+		mediaType != "application/x-gzip" && mediaType != "application/zip" && mediaType != "application/x-zip-compressed") {
+		return "", fmt.Errorf("%w: Node archive Content-Type is not an allowed archive type", ErrMetadataInvalid)
 	}
 	temp, err := os.CreateTemp(f.artifactsDir, nodeRuntimeSourceTempPrefix+"*.tmp")
 	if err != nil {
@@ -607,12 +622,13 @@ func (f *NodeRuntimeFetcher) buildBundle(ctx context.Context, plan NodeRuntimeFe
 	for _, name := range []string{
 		"node-runtime/", "node-runtime/linux-amd64/", "node-runtime/linux-arm64/",
 		"node-runtime/darwin-amd64/", "node-runtime/darwin-arm64/",
+		"node-runtime/windows-amd64/", "node-runtime/windows-arm64/",
 	} {
 		if err := tw.WriteHeader(nodeRuntimeBundleHeader(name, tar.TypeDir, 0, "", false)); err != nil {
 			return "", "", 0, fmt.Errorf("%w: write Node bundle root: %v", ErrArtifactStorage, err)
 		}
 	}
-	budget := &nodeRuntimeBuildBudget{entries: 5}
+	budget := &nodeRuntimeBuildBudget{entries: 7}
 	for _, source := range plan.Sources {
 		if err := copyNodeRuntimeSource(ctx, tw,
 			sourcePaths[nodeRuntimeSourceKey(source.TargetOS, source.TargetArch)], plan.Version, source, budget); err != nil {
@@ -646,6 +662,9 @@ type nodeRuntimeBuildBudget struct {
 func copyNodeRuntimeSource(ctx context.Context, destination *tar.Writer, sourcePath, version string,
 	source NodeRuntimeSource, budget *nodeRuntimeBuildBudget,
 ) error {
+	if source.TargetOS == "windows" {
+		return copyNodeRuntimeZipSource(ctx, destination, sourcePath, version, source, budget)
+	}
 	input, err := os.Open(sourcePath)
 	if err != nil {
 		return fmt.Errorf("%w: open Node archive: %v", ErrArtifactStorage, err)
@@ -744,6 +763,126 @@ func copyNodeRuntimeSource(ctx context.Context, destination *tar.Writer, sourceP
 	}
 	if !nodeFound || !npmFound {
 		return fmt.Errorf("%w: Node archive lacks node or npm", ErrMetadataInvalid)
+	}
+	return nil
+}
+
+func copyNodeRuntimeZipSource(ctx context.Context, destination *tar.Writer, sourcePath, version string,
+	source NodeRuntimeSource, budget *nodeRuntimeBuildBudget,
+) error {
+	reader, err := zip.OpenReader(sourcePath)
+	if err != nil {
+		return fmt.Errorf("%w: open Node zip archive: %v", ErrMetadataInvalid, err)
+	}
+	defer reader.Close()
+	rootArch := "x64"
+	if source.TargetArch == "arm64" {
+		rootArch = "arm64"
+	}
+	root := "node-v" + version + "-win-" + rootArch
+	prefix := "node-runtime/" + source.TargetOS + "-" + source.TargetArch
+	seen := make(map[string]struct{})
+	emitted := map[string]struct{}{prefix + "/": {}}
+	nodeFound, npmFound := false, false
+	for _, file := range reader.File {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		budget.entries++
+		if budget.entries > nodeRuntimeMaxEntries || file.UncompressedSize64 > uint64(nodeRuntimeMaxFileBytes) {
+			return fmt.Errorf("%w: Node archive exceeds extraction policy", ErrArtifactTooLarge)
+		}
+		name := strings.ReplaceAll(file.Name, "\\", "/")
+		relative, err := nodeRuntimeSourcePath(name, root)
+		if err != nil {
+			return err
+		}
+		if relative == "" {
+			continue
+		}
+		if file.FileInfo().IsDir() {
+			relative = remapWindowsNodeRelative(strings.TrimSuffix(relative, "/"))
+			if relative == "" {
+				continue
+			}
+			if err := emitNodeRuntimeBundleDirs(destination, prefix, path.Dir(relative+"/x"), emitted, budget); err != nil {
+				return err
+			}
+			continue
+		}
+		relative = remapWindowsNodeRelative(relative)
+		if _, duplicate := seen[relative]; duplicate {
+			return fmt.Errorf("%w: Node archive contains a duplicate path", ErrMetadataInvalid)
+		}
+		seen[relative] = struct{}{}
+		if budget.uncompressed > nodeRuntimeMaxUncompressedBytes-int64(file.UncompressedSize64) {
+			return fmt.Errorf("%w: Node archive exceeds extraction policy", ErrArtifactTooLarge)
+		}
+		budget.uncompressed += int64(file.UncompressedSize64)
+		if err := emitNodeRuntimeBundleDirs(destination, prefix, path.Dir(relative), emitted, budget); err != nil {
+			return err
+		}
+		opened, err := file.Open()
+		if err != nil {
+			return fmt.Errorf("%w: read Node zip file: %v", ErrMetadataInvalid, err)
+		}
+		executable := relative == "bin/node.exe" || strings.HasSuffix(relative, ".exe")
+		header := nodeRuntimeBundleHeader(prefix+"/"+relative, tar.TypeReg, int64(file.UncompressedSize64), "", executable)
+		if err := destination.WriteHeader(header); err != nil {
+			_ = opened.Close()
+			return fmt.Errorf("%w: write Node bundle header: %v", ErrArtifactStorage, err)
+		}
+		written, err := io.CopyN(destination, opened, int64(file.UncompressedSize64))
+		_ = opened.Close()
+		if err != nil || written != int64(file.UncompressedSize64) {
+			return fmt.Errorf("%w: Node archive file is incomplete", ErrMetadataInvalid)
+		}
+		if relative == "bin/node.exe" {
+			nodeFound = true
+		}
+		if relative == "lib/node_modules/npm/bin/npm-cli.js" {
+			npmFound = true
+		}
+	}
+	if !nodeFound || !npmFound {
+		return fmt.Errorf("%w: Node archive lacks node or npm", ErrMetadataInvalid)
+	}
+	return nil
+}
+
+func remapWindowsNodeRelative(relative string) string {
+	if relative == "node.exe" {
+		return "bin/node.exe"
+	}
+	if relative == "node_modules" || strings.HasPrefix(relative, "node_modules/") {
+		return path.Join("lib", relative)
+	}
+	return relative
+}
+
+func emitNodeRuntimeBundleDirs(destination *tar.Writer, prefix, dir string, emitted map[string]struct{},
+	budget *nodeRuntimeBuildBudget,
+) error {
+	if dir == "." || dir == "/" || dir == "" {
+		return nil
+	}
+	var parts []string
+	for parent := dir; parent != "." && parent != "/"; parent = path.Dir(parent) {
+		parts = append([]string{parent}, parts...)
+	}
+	for _, relative := range parts {
+		name := prefix + "/" + relative + "/"
+		if _, exists := emitted[name]; exists {
+			continue
+		}
+		budget.entries++
+		if budget.entries > nodeRuntimeMaxEntries {
+			return fmt.Errorf("%w: Node archive exceeds extraction policy", ErrArtifactTooLarge)
+		}
+		if err := destination.WriteHeader(nodeRuntimeBundleHeader(name, tar.TypeDir, 0, "", false)); err != nil {
+			return fmt.Errorf("%w: write Node bundle root: %v", ErrArtifactStorage, err)
+		}
+		emitted[name] = struct{}{}
 	}
 	return nil
 }

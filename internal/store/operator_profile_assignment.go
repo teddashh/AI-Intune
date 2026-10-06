@@ -529,6 +529,9 @@ func validateOperatorProfileAssignmentPrepared(q operatorProfileAssignmentQuerye
 		!validArtifactFetchDigest(prepared.ProfileDigest) {
 		return nil, "", profileAssignmentRejection(OperatorCodeProfileAssignmentInvalid)
 	}
+	if !agentadapter.HasExecutorForPlatform(snapshotTarget) {
+		return nil, "", profileAssignmentRejection(OperatorCodeMachinePlatformUnsupported)
+	}
 	profile, err := scanMachineProfile(q.QueryRow(`SELECT profile_json,profile_digest,published_at,published_by
 	 FROM machine_profiles WHERE profile_id=? AND profile_revision=?`, profileID, profileRevision), profileID, profileRevision)
 	if errors.Is(err, ErrNotFound) {

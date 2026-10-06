@@ -16,6 +16,8 @@ import (
 // published for amd64 but assigned to arm64. No corrupt catalog rows are needed
 // to distinguish a resolver failure from an unsupported machine platform.
 func TestProfileAssignmentRejectionsKeepTheirCauseThroughPreviewApplyAndReplay(t *testing.T) {
+	t.Run("stored Windows identity", checkProfileAssignmentUsesStoredWindowsIdentityInsteadOfLinuxPackages)
+	t.Run("Windows identity after Linux pin", checkWindowsIdentityCannotReuseOrExtendALinuxPinnedAssignment)
 	for _, test := range []struct {
 		name       string
 		os         string
@@ -34,6 +36,10 @@ func TestProfileAssignmentRejectionsKeepTheirCauseThroughPreviewApplyAndReplay(t
 		{"Mac arm with Linux-only profile", "macOS 15.1", "arm64", false, 1, store.OperatorCodeMachineProfileUnresolvable, store.ErrMachineProfileUnresolvable, http.StatusBadRequest, "解析"},
 		{"Mac x86 with Linux-only profile", "macOS 15.1", "x86_64", false, 1, store.OperatorCodeMachineProfileUnresolvable, store.ErrMachineProfileUnresolvable, http.StatusBadRequest, "解析"},
 		{"unsupported architecture", "Linux", "riscv64", false, 1, store.OperatorCodeMachinePlatformUnsupported, store.ErrMachinePlatformUnsupported, http.StatusConflict, "套件"},
+		{"Windows 11 x86", "Windows 11 Pro", "x86_64", false, 1, store.OperatorCodeMachineProfileUnresolvable, store.ErrMachineProfileUnresolvable, http.StatusBadRequest, "解析"},
+		{"windows tailscale amd64", "windows", "amd64", false, 1, store.OperatorCodeMachineProfileUnresolvable, store.ErrMachineProfileUnresolvable, http.StatusBadRequest, "解析"},
+		{"Windows Server arm", "Windows Server 2022", "aarch64", false, 1, store.OperatorCodeMachineProfileUnresolvable, store.ErrMachineProfileUnresolvable, http.StatusBadRequest, "解析"},
+		{"Microsoft Windows 10", "Microsoft Windows 10", "x86_64", false, 1, store.OperatorCodeMachineProfileUnresolvable, store.ErrMachineProfileUnresolvable, http.StatusBadRequest, "解析"},
 		{"missing profile revision", "Ubuntu 26.04 LTS", "x86_64", false, 2, store.OperatorCodeMachineProfileNotFound, store.ErrMachineProfileNotFound, http.StatusNotFound, "profile 版本"},
 		{"profile platform mismatch", "Linux", "aarch64", false, 1, store.OperatorCodeMachineProfileUnresolvable, store.ErrMachineProfileUnresolvable, http.StatusBadRequest, "解析"},
 	} {
@@ -161,5 +167,54 @@ func TestProfileAssignmentUsesStoredMacIdentityInsteadOfCallingItUnknown(t *test
 	}
 	if strings.Contains(rejection.Detail, "agent 回報") {
 		t.Fatalf("Hub 已保存 macOS identity evidence，卻仍建議等待 agent 回報：%q", rejection.Detail)
+	}
+}
+
+func checkProfileAssignmentUsesStoredWindowsIdentityInsteadOfLinuxPackages(t *testing.T) {
+	service, st, _, record := catalogManifestService(t)
+	manifest := catalogManifestRequest(record, "observed-windows-identity-manifest")
+	manifest.Manifest.Platforms = []appcatalog.Platform{{OS: "linux", Arch: "amd64"}}
+	if _, err := service.PublishCatalogManifest(t.Context(), manifest); err != nil {
+		t.Fatal(err)
+	}
+	profile := machineProfileRequest(manifest.Manifest, "observed-windows-identity-profile")
+	if _, err := service.PublishMachineProfile(t.Context(), profile); err != nil {
+		t.Fatal(err)
+	}
+
+	machineID, token, err := st.CreateEnrollTokenFor("observed-windows-identity", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, _, err := st.RedeemEnrollToken(token, model.EnrollRequest{
+		SchemaVersion: model.SchemaVersion, Hostname: "observed-windows-identity",
+		UnixUser: "profile-test", Arch: "amd64", AgentVersion: "old",
+	}, now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordObservation(machineID, model.ObservationBatch{
+		SchemaVersion: model.SchemaVersion, MeasuredAt: now,
+		Identity: model.Identity{Hostname: "observed-windows-identity", OS: "Windows 11 Pro", Arch: "amd64"},
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = service.PreviewMachineProfileAssignment(t.Context(), MachineProfileAssignmentPreviewRequest{
+		MachineID: machineID, ProfileID: profile.Profile.ID, ProfileRevision: profile.Profile.Revision,
+	})
+	var rejection *store.OperatorRequestError
+	if !errors.As(err, &rejection) || rejection.Code != store.OperatorCodeMachineProfileUnresolvable ||
+		!errors.Is(err, store.ErrMachineProfileUnresolvable) {
+		t.Fatalf("stored windows identity rejection=%+v err=%v; want %s, not a linux package pin",
+			rejection, err, store.OperatorCodeMachineProfileUnresolvable)
+	}
+	if strings.Contains(rejection.Detail, "agent 回報") {
+		t.Fatalf("Hub 已保存 Windows identity evidence，卻仍建議等待 agent 回報：%q", rejection.Detail)
+	}
+	for _, table := range []string{"machine_profile_assignments", "machine_profile_assignment_packages", "desired_state", "jobs"} {
+		if count := countOperatorRows(t, st, table); count != 0 {
+			t.Errorf("Windows identity wrote %d rows to %s", count, table)
+		}
 	}
 }

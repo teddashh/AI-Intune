@@ -1124,7 +1124,7 @@ SELECT command, exit_code, stdout_excerpt, stderr_excerpt, passed, verified_at
 // MarkSucceededIfVerified 只依 Hub 已保存的驗證證據判定工作單成功。
 // ⚠ 回傳的是判決後工作單真正停在的狀態；呼叫端不得假設 nil 就等於 succeeded。
 func (s *Store) MarkSucceededIfVerified(jobID string, now time.Time) (deploy.JobState, error) {
-	required, ready, err := s.darwinNodeRuntimeEvidenceReady(jobID)
+	required, ready, err := s.nodeRuntimeMeasuredEvidenceReady(jobID)
 	if err != nil {
 		return "", err
 	}
@@ -1213,7 +1213,7 @@ SELECT jobs.state,
 	if failed > 0 {
 		return "", ErrVerificationFailed
 	}
-	// Darwin 的完整證據只限制成功，不能蓋過已保存的 executor 失敗。
+	// Node 的完整證據只限制成功，不能蓋過已保存的 executor 失敗。
 	if required && !ready {
 		return "", ErrNoVerification
 	}
@@ -1225,7 +1225,7 @@ SELECT jobs.state,
 	return "", fmt.Errorf("store: 工作單 %s 未能寫入成功狀態", jobID)
 }
 
-func (s *Store) darwinNodeRuntimeEvidenceReady(jobID string) (required, ready bool, err error) {
+func (s *Store) nodeRuntimeMeasuredEvidenceReady(jobID string) (required, ready bool, err error) {
 	var state deploy.JobState
 	var resourceKind, resourceID, rawSpec string
 	err = s.rdb.QueryRow(`
@@ -1236,7 +1236,7 @@ SELECT jobs.state,desired_state.resource_kind,desired_state.resource_id,desired_
 		return false, false, ErrJobNotFound
 	}
 	if err != nil {
-		return false, false, fmt.Errorf("store: inspect Darwin Node runtime job: %w", err)
+		return false, false, fmt.Errorf("store: inspect Node runtime job: %w", err)
 	}
 	if deploy.IsTerminal(state) || resourceKind != agentadapter.ExecutorKindNodeRuntime ||
 		resourceID != agentadapter.ExecutorKindNodeRuntime {
@@ -1244,13 +1244,17 @@ SELECT jobs.state,desired_state.resource_kind,desired_state.resource_id,desired_
 	}
 	var spec model.NodeRuntimeSpec
 	if json.Unmarshal([]byte(rawSpec), &spec) != nil || spec.Kind != agentadapter.ExecutorKindNodeRuntime ||
-		spec.TargetOS != "darwin" {
+		(spec.TargetOS != "darwin" && spec.TargetOS != "windows") {
 		return false, false, nil
 	}
 	required = true
 	if !validMeasuredNodeRuntimeVersion(spec.Version) || spec.Artifact == nil ||
 		!validLowerSHA256(spec.Artifact.SHA256) {
 		return true, false, nil
+	}
+	nodeRel := "/bin/node"
+	if spec.TargetOS == "windows" {
+		nodeRel = "/bin/node.exe"
 	}
 	type evidencePair struct {
 		releasePath string
@@ -1284,20 +1288,22 @@ SELECT verification_results.rule_id,verification_results.command,
 		JobVerificationProducerExecutorAgent, JobVerificationRoleExecutor,
 		JobVerificationAuthorityMachineLease)
 	if err != nil {
-		return true, false, fmt.Errorf("store: read Darwin Node runtime evidence: %w", err)
+		return true, false, fmt.Errorf("store: read Node runtime evidence: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var ruleID, command, stdout string
 		if err := rows.Scan(&ruleID, &command, &stdout); err != nil {
-			return true, false, fmt.Errorf("store: scan Darwin Node runtime evidence: %w", err)
+			return true, false, fmt.Errorf("store: scan Node runtime evidence: %w", err)
 		}
+		command = normalizeNodeRuntimeEvidenceCommand(command)
 		for prefix, pair := range pairs {
 			switch ruleID {
 			case prefix + "-artifact":
 				suffix := "/.local/share/clawctl/node-runtime/releases/" + spec.Version +
 					"/.clawctl-artifact-sha256"
-				if strings.HasPrefix(command, "cat /") && strings.HasSuffix(command, suffix) &&
+				if nodeRuntimeEvidenceLocationOK(spec.TargetOS, command, "cat /") &&
+					strings.HasSuffix(command, suffix) &&
 					!strings.ContainsAny(command, "\r\n") &&
 					stdout == "sha256:"+spec.Artifact.SHA256+"\n" {
 					pair.releasePath = strings.TrimSuffix(strings.TrimPrefix(command, "cat "),
@@ -1305,8 +1311,9 @@ SELECT verification_results.rule_id,verification_results.command,
 					pair.artifact = true
 				}
 			case prefix + "-node":
-				suffix := "/.local/share/clawctl/node-runtime/releases/" + spec.Version + "/bin/node --version"
-				if strings.HasPrefix(command, "/") && strings.HasSuffix(command, suffix) &&
+				suffix := "/.local/share/clawctl/node-runtime/releases/" + spec.Version + nodeRel + " --version"
+				if nodeRuntimeEvidenceLocationOK(spec.TargetOS, command, "/") &&
+					strings.HasSuffix(command, suffix) &&
 					!strings.ContainsAny(command, "\r\n") && strings.TrimSpace(stdout) == "v"+spec.Version {
 					pair.nodePath = strings.TrimSuffix(command, " --version")
 					pair.node = true
@@ -1321,10 +1328,10 @@ SELECT verification_results.rule_id,verification_results.command,
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return true, false, fmt.Errorf("store: iterate Darwin Node runtime evidence: %w", err)
+		return true, false, fmt.Errorf("store: iterate Node runtime evidence: %w", err)
 	}
 	for _, pair := range pairs {
-		releasePath := strings.TrimSuffix(pair.nodePath, "/bin/node")
+		releasePath := strings.TrimSuffix(pair.nodePath, nodeRel)
 		if pair.artifact && pair.node && pair.npm && pair.releasePath == releasePath &&
 			pair.npmCommand == pair.nodePath+" "+releasePath+
 				"/lib/node_modules/npm/bin/npm-cli.js --version" {
@@ -1332,6 +1339,35 @@ SELECT verification_results.rule_id,verification_results.command,
 		}
 	}
 	return true, false, nil
+}
+
+func normalizeNodeRuntimeEvidenceCommand(command string) string {
+	return strings.ReplaceAll(command, "\\", "/")
+}
+
+func nodeRuntimeEvidenceLocationOK(targetOS, command, unixPrefix string) bool {
+	if strings.HasPrefix(command, unixPrefix) {
+		return true
+	}
+	if targetOS != "windows" {
+		return false
+	}
+	if unixPrefix == "cat /" {
+		if !strings.HasPrefix(command, "cat ") {
+			return false
+		}
+		return windowsDrivePath(strings.TrimPrefix(command, "cat "))
+	}
+	if unixPrefix == "/" {
+		return windowsDrivePath(command)
+	}
+	return false
+}
+
+func windowsDrivePath(value string) bool {
+	return len(value) >= 3 &&
+		((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) &&
+		value[1] == ':' && value[2] == '/'
 }
 
 func validMeasuredNodeRuntimeVersion(value string) bool {

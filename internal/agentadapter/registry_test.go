@@ -12,7 +12,7 @@ func TestRegistryReturnsDefensiveDeterministicCopies(t *testing.T) {
 	if len(contracts) != 3 || contracts[0].Adapter.Name != "node-runtime" ||
 		contracts[0].Adapter.Version != 1 || contracts[0].PackageID != "node-runtime" ||
 		contracts[0].PackageKind != appcatalog.KindRuntime ||
-		contracts[0].ExecutorKind != ExecutorKindNodeRuntime || len(contracts[0].Platforms) != 4 ||
+		contracts[0].ExecutorKind != ExecutorKindNodeRuntime || len(contracts[0].Platforms) != 6 ||
 		contracts[1].ExecutorKind != ExecutorKindOpenClaw || contracts[2].ExecutorKind != ExecutorKindHermes {
 		t.Fatalf("contracts=%+v", contracts)
 	}
@@ -62,11 +62,17 @@ func TestSupportsManifestRequiresExactContract(t *testing.T) {
 	}
 	if !HasExecutorForPlatform(appcatalog.Platform{OS: "linux", Arch: "amd64"}) ||
 		!HasExecutorForPlatform(appcatalog.Platform{OS: "darwin", Arch: "amd64"}) ||
-		!HasExecutorForPlatform(appcatalog.Platform{OS: "darwin", Arch: "arm64"}) {
+		!HasExecutorForPlatform(appcatalog.Platform{OS: "darwin", Arch: "arm64"}) ||
+		!HasExecutorForPlatform(appcatalog.Platform{OS: "windows", Arch: "amd64"}) ||
+		!HasExecutorForPlatform(appcatalog.Platform{OS: "windows", Arch: "arm64"}) {
 		t.Fatal("platform support does not match the registered executor contracts")
 	}
 	node.Platforms = []appcatalog.Platform{{OS: "darwin", Arch: "arm64"}}
 	if !SupportsManifest(node) {
 		t.Fatal("exact Darwin Node runtime contract is unsupported")
+	}
+	node.Platforms = []appcatalog.Platform{{OS: "windows", Arch: "amd64"}}
+	if !SupportsManifest(node) {
+		t.Fatal("exact Windows Node runtime contract is unsupported")
 	}
 }

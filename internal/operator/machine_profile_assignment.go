@@ -212,7 +212,8 @@ func (s *Service) prepareMachineProfileAssignment(ctx context.Context, machineID
 
 // catalogPlatformFromMachine converts the probe's OS display name and uname -m
 // into the catalog target vocabulary. Recognized macOS identities remain
-// darwin targets even when a selected profile has no matching packages.
+// darwin targets, and recognized Windows identities remain windows targets,
+// even when a selected profile has no matching packages.
 func catalogPlatformFromMachine(machine store.Machine) (appcatalog.Platform, error) {
 	return appcatalog.PlatformFromProbeIdentity(machine.OS, machine.Arch)
 }

@@ -39,6 +39,35 @@ func artifactFetchTestPrepared(req OperatorArtifactFetchRequest) ArtifactFetchPr
 	}
 }
 
+func TestValidSingleLineText(t *testing.T) {
+	tests := []struct {
+		name       string
+		value      string
+		maxBytes   int
+		allowEmpty bool
+		want       bool
+	}{
+		{name: "ordinary multi-byte text", value: "操作理由", maxBytes: 500, want: true},
+		{name: "control rune", value: "reason\x1b[2J", maxBytes: 500},
+		{name: "format rune", value: "reason\u202Etext", maxBytes: 500},
+		{name: "line separator", value: "reason\u2028text", maxBytes: 500},
+		{name: "paragraph separator", value: "reason\u2029text", maxBytes: 500},
+		{name: "invalid UTF-8", value: string([]byte{'r', 0xff}), maxBytes: 500},
+		{name: "untrimmed", value: " reason ", maxBytes: 500},
+		{name: "empty", value: "", maxBytes: 500},
+		{name: "empty allowed", value: "", maxBytes: 500, allowEmpty: true, want: true},
+		{name: "over length", value: strings.Repeat("a", 501), maxBytes: 500},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := validSingleLineText(tt.value, tt.maxBytes, tt.allowEmpty); got != tt.want {
+				t.Fatalf("validSingleLineText(%q, %d, %t) = %t, want %t",
+					tt.value, tt.maxBytes, tt.allowEmpty, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestOperatorArtifactFetchPersistsPrivateNodeRuntimePlan(t *testing.T) {
 	s := newTestStore(t)
 	req := artifactFetchTestRequest("artifact-fetch-node-runtime", "d")

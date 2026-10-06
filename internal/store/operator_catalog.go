@@ -90,7 +90,7 @@ func (s *Store) ApplyOperatorCatalogManifest(req OperatorCatalogManifestRequest,
 	rejectCode := ""
 	switch {
 	case canonicalErr != nil || !validCatalogPublisher(req.PublishedBy) ||
-		!validArtifactFetchText(req.Reason, auditMaxReason, false):
+		!validSingleLineText(req.Reason, auditMaxReason, false):
 		rejectCode = OperatorCodeCatalogManifestInvalid
 	case verify == nil:
 		return OperatorCatalogManifestResult{}, errors.New("store: catalog manifest verification callback is nil")
@@ -196,7 +196,7 @@ func operatorCatalogManifestAudit(req OperatorCatalogManifestRequest) AuditEntry
 	audit := req.Audit
 	audit.Action = AuditCatalogManifest
 	audit.Subject = catalogManifestSubject(req.Manifest.ID, req.Manifest.Version)
-	if validArtifactFetchText(req.Reason, auditMaxReason, false) {
+	if validSingleLineText(req.Reason, auditMaxReason, false) {
 		audit.Reason = req.Reason
 	} else {
 		audit.Reason = ""
@@ -541,7 +541,7 @@ func (s *Store) ApplyOperatorMachineProfile(req OperatorMachineProfileRequest,
 	rejectCode := ""
 	switch {
 	case canonicalErr != nil || !validCatalogPublisher(req.PublishedBy) ||
-		!validArtifactFetchText(req.Reason, auditMaxReason, false):
+		!validSingleLineText(req.Reason, auditMaxReason, false):
 		rejectCode = OperatorCodeMachineProfileInvalid
 	case verify == nil:
 		return OperatorMachineProfileResult{}, errors.New("store: machine profile verification callback is nil")
@@ -681,7 +681,7 @@ func operatorMachineProfileAudit(req OperatorMachineProfileRequest) AuditEntry {
 	audit := req.Audit
 	audit.Action = AuditMachineProfile
 	audit.Subject = machineProfileSubject(req.Profile.ID, req.Profile.Revision)
-	if validArtifactFetchText(req.Reason, auditMaxReason, false) {
+	if validSingleLineText(req.Reason, auditMaxReason, false) {
 		audit.Reason = req.Reason
 	} else {
 		audit.Reason = ""

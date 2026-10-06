@@ -32,6 +32,8 @@ var registered = []Contract{
 			{OS: "linux", Arch: "arm64"},
 			{OS: "darwin", Arch: "amd64"},
 			{OS: "darwin", Arch: "arm64"},
+			{OS: "windows", Arch: "amd64"},
+			{OS: "windows", Arch: "arm64"},
 		},
 	},
 	{
@@ -96,6 +98,18 @@ func HasExecutorForPlatform(platform appcatalog.Platform) bool {
 			if supported == platform {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func ExecutorKindRegistered(kind string) bool {
+	if kind == "" {
+		return false
+	}
+	for _, contract := range registered {
+		if contract.ExecutorKind == kind {
+			return true
 		}
 	}
 	return false

@@ -140,6 +140,48 @@ func TestOperatorProfileAssignmentRejectsUnparseableCheckinWithoutAuthority(t *t
 	}
 }
 
+func TestWindowsIdentityRejectsLinuxPreparedAssignmentGraph(t *testing.T) {
+	st, machineID, _, prepared := operatorProfileAssignmentFixture(t)
+	if _, err := st.DB().Exec(`INSERT INTO machine_checkins
+		(machine_id,sent_at,received_at,jobs_enabled) VALUES (?,?,?,1)`,
+		machineID, "2026-09-14T11:59:00Z", "2026-09-14T11:59:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	linuxPreview, err := st.PreviewOperatorMachineProfileAssignment(machineID, "node-profile", 1, prepared)
+	if err != nil || linuxPreview.Target != (appcatalog.Platform{OS: "linux", Arch: "amd64"}) {
+		t.Fatalf("linux preview=%+v err=%v", linuxPreview, err)
+	}
+	if _, err := st.DB().Exec(`UPDATE machine_registry SET os=?,arch=? WHERE machine_id=?`,
+		"Windows 11 Pro", "x86_64", machineID); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = st.PreviewOperatorMachineProfileAssignment(machineID, "node-profile", 1, prepared)
+	var rejection *OperatorRequestError
+	if !errors.As(err, &rejection) || rejection.Code != OperatorCodeProfileAssignmentInvalid {
+		t.Fatalf("linux prepared graph on Windows identity err=%v", err)
+	}
+
+	windowsPrepared := prepared
+	windowsPrepared.Target = appcatalog.Platform{OS: "windows", Arch: "amd64"}
+	_, err = st.PreviewOperatorMachineProfileAssignment(machineID, "node-profile", 1, windowsPrepared)
+	if !errors.As(err, &rejection) || rejection.Code != OperatorCodeMachineProfileUnresolvable {
+		t.Fatalf("windows prepared graph err=%v; want %s", err, OperatorCodeMachineProfileUnresolvable)
+	}
+
+	_, applyErr := st.ApplyOperatorMachineProfileAssignment(operatorProfileAssignmentTestRequest(machineID, linuxPreview),
+		func() (OperatorMachineProfileAssignmentPrepared, error) { return prepared, nil })
+	if !errors.As(applyErr, &rejection) || rejection.Code != OperatorCodeProfileAssignmentInvalid {
+		t.Fatalf("stale linux apply after Windows identity err=%v", applyErr)
+	}
+	if got := countRows(t, st, `SELECT COUNT(*) FROM machine_profile_assignments`); got != 0 {
+		t.Fatalf("Windows identity accepted linux pin rows=%d", got)
+	}
+	if got := countRows(t, st, `SELECT COUNT(*) FROM jobs`); got != 0 {
+		t.Fatalf("Windows identity accepted linux jobs=%d", got)
+	}
+}
+
 func TestOperatorProfileAssignmentCanonicalCheckinOrderingRemainsStable(t *testing.T) {
 	t.Run("unselected history preserves preview digest", func(t *testing.T) {
 		st, machineID, _, prepared := operatorProfileAssignmentFixture(t)
