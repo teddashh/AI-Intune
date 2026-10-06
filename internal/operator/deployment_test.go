@@ -90,12 +90,28 @@ func TestProjectDeploymentPromotionCarriesEveryIndependentNextStep(t *testing.T)
 	}
 }
 
+func TestProjectDeploymentPromotionKeepsCanaryNotSucceededOutOfThePassedCount(t *testing.T) {
+	decision := rollout.PromoteDecision{Allowed: false, IndependentTargets: []rollout.IndependentGateTarget{
+		{MachineID: "machine-pass", DisplayName: "passed", JobID: "job-pass", State: rollout.IndependentGatePassed},
+		{MachineID: "machine-miss", DisplayName: "missing", JobID: "", State: rollout.IndependentGateCanaryNotSucceeded},
+	}}
+	projected := projectDeploymentPromotion(decision)
+	if projected.IndependentPassedTargets != 1 || len(projected.IndependentTargets) != 2 {
+		t.Fatalf("projection=%+v", projected)
+	}
+	missing := projected.IndependentTargets[1]
+	if missing.State != string(rollout.IndependentGateCanaryNotSucceeded) || missing.JobID != "" ||
+		missing.NextStep != PromotionNextStepRepairAndRerunCanary {
+		t.Fatalf("missing target=%+v", missing)
+	}
+}
+
 // A promotion field crosses three public documents: the create preview, the
 // action preview that may finish a stable deployment, and Updates. Old strict
 // clients reject unknown fields, so all three schema versions move together.
 func TestIndependentPromotionFieldsComeWithNewSchemaVersions(t *testing.T) {
-	if DeploymentReadSchemaVersion != 3 || DeploymentPreviewSchemaVersion != 3 ||
-		DeploymentActionSchemaVersion != 3 || UpdateReadSchemaVersion != 4 {
+	if DeploymentReadSchemaVersion != 3 || DeploymentPreviewSchemaVersion != 4 ||
+		DeploymentActionSchemaVersion != 4 || UpdateReadSchemaVersion != 5 {
 		t.Fatalf("schema versions read=%d preview=%d action=%d updates=%d",
 			DeploymentReadSchemaVersion, DeploymentPreviewSchemaVersion,
 			DeploymentActionSchemaVersion, UpdateReadSchemaVersion)

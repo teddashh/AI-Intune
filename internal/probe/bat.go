@@ -57,12 +57,12 @@ var procNetTCPPaths = []string{"/proc/net/tcp", "/proc/net/tcp6"}
 //
 // ⚠ 吃 procs 而不是自己再掃一次 /proc：掃兩次會拿到兩個時間點的機隊狀態，
 // 然後「process 在但 BAT 不在」這種矛盾會變成偶發的假訊號。
-func batServer(procs []procInfo, processScan string) model.BAT {
-	return batServerWithSocketPaths(procs, processScan, procNetTCPPaths)
+func batServer(procs []procInfo, processScan, home string) model.BAT {
+	return batServerWithSocketPaths(procs, processScan, procNetTCPPaths, home)
 }
 
-func batServerWithSocketPaths(procs []procInfo, processScan string, socketPaths []string) model.BAT {
-	p, ok := findBAT(procs)
+func batServerWithSocketPaths(procs []procInfo, processScan string, socketPaths []string, home string) model.BAT {
+	p, ok := findBAT(procs, home)
 	if !ok {
 		// ⚠ 這裡不能回一個空的 BAT{} 就算了 —— 空的意思是「這台沒跑 BAT」，
 		// 而真相可能是「我沒有看到 /proc」。那兩件事要做的事完全不同。
@@ -118,9 +118,15 @@ func batServerWithSocketPaths(procs []procInfo, processScan string, socketPaths 
 // ⚠ 不用 exe：那個要 ptrace，在 agent 的 unit 裡永遠是空的（§5.10）。
 // argv[0] 是這裡唯一在四台機器上都讀得到的東西 —— 包括 sampleagent3 上那個
 // 以 root 身分跑、而 agent 是 opc 的那一個。
-func findBAT(procs []procInfo) (procInfo, bool) {
+func findBAT(procs []procInfo, home string) (procInfo, bool) {
+	ownDataDir := model.BATServerDataDir(home)
 	for _, p := range procs {
 		if len(p.argv) > 0 && baseName(p.argv[0]) == batProcName {
+			// ⚠ AI-Intune 自己的 bat-server 只聽 loopback、只給終端用；
+			// Connect 要指向的是這台機器使用者自己的那一個。
+			if batFlagStr(p.argv, "--data-dir") == ownDataDir {
+				continue
+			}
 			return p, true
 		}
 	}

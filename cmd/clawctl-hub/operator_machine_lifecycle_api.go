@@ -28,13 +28,23 @@ type machineLifecycleOperatorRequest struct {
 	Reason             string                         `json:"reason"`
 }
 
+func (h *hub) controlPlaneService() *operator.Service {
+	if h.operatorService != nil {
+		return h.operatorService
+	}
+	if h.tailnet != nil {
+		return operator.NewWithTailnet(h.store, h.tailnet)
+	}
+	return operator.NewWithTailnet(h.store, nil)
+}
+
 func (h *hub) handleGetOperatorMachineLifecycle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if r.URL.ForceQuery || r.URL.RawQuery != "" {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "machine lifecycle 不接受 query parameters")
 		return
 	}
-	result, err := operator.New(h.store).MachineLifecycle(r.PathValue("id"))
+	result, err := h.controlPlaneService().MachineLifecycle(r.PathValue("id"))
 	if err != nil {
 		writeOperatorMachineLifecycleError(w, err, "read", r.PathValue("id"))
 		return
@@ -60,7 +70,7 @@ func (h *hub) handlePreviewOperatorMachineLifecycle(w http.ResponseWriter, r *ht
 		writeErr(w, rejection.Status, rejection.Code, rejection.Detail)
 		return
 	}
-	result, err := operator.New(h.store).PreviewMachineLifecycle(operator.MachineLifecyclePreviewRequest{
+	result, err := h.controlPlaneService().PreviewMachineLifecycle(operator.MachineLifecyclePreviewRequest{
 		MachineID: r.PathValue("id"), DesiredState: body.DesiredState,
 		ExpectedRevision: body.ExpectedRevision,
 	})
@@ -92,7 +102,7 @@ func (h *hub) handlePutOperatorMachineLifecycle(w http.ResponseWriter, r *http.R
 			rejection.Status, rejection.Code, rejection.Detail)
 		return
 	}
-	result, err := operator.New(h.store).ChangeMachineLifecycle(operator.MachineLifecycleRequest{
+	result, err := h.controlPlaneService().ChangeMachineLifecycle(operator.MachineLifecycleRequest{
 		MachineID: r.PathValue("id"), DesiredState: body.DesiredState,
 		ExpectedRevision: body.ExpectedRevision, ConfirmDisplayName: body.ConfirmDisplayName,
 		PreviewDigest: body.PreviewDigest, Reason: body.Reason,

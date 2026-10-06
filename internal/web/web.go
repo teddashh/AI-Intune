@@ -62,8 +62,8 @@ type Server struct {
 	hubBase string
 	// artifactsDir 由 Hub 啟動路徑注入；空字串等同尚未 fetch。
 	artifactsDir string
-	// agentBundles is the immutable two-architecture bootstrap release owned by
-	// the running Hub version.
+	// agentBundles is the immutable bootstrap release owned by the running Hub
+	// version: required Linux amd64/arm64, plus a complete Darwin pair when published.
 	agentBundles *agentBundleCatalog
 	// tailnet 是名冊的**獨立證人**。名冊是我們自己寫進去的，
 	// 所以它答不出「有沒有一台機器存在、而我忘了把它放進名冊」。
@@ -178,7 +178,7 @@ func (s *Server) Routes(mux *http.ServeMux) []string {
 		"GET /reports/install.csv",
 		"GET /reports/profile",
 		"GET /reports/profile.csv",
-		"GET /preferences/navigation-language/{locale}",
+		"POST /preferences/navigation-language",
 	}
 	mux.HandleFunc(patterns[0], s.dashboard)
 	mux.HandleFunc(patterns[1], s.dashboard)

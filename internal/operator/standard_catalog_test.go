@@ -83,6 +83,7 @@ func TestStandardCatalogPublishesNodeThenCompatibleOpenClaw(t *testing.T) {
 		!slices.Equal(nodePreview.Manifest.Platforms, []appcatalog.Platform{
 			{OS: "darwin", Arch: "amd64"}, {OS: "darwin", Arch: "arm64"},
 			{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"},
+			{OS: "windows", Arch: "amd64"}, {OS: "windows", Arch: "arm64"},
 		}) ||
 		nodePreview.ManifestDigest == "" || nodePreview.PreviewDigest == "" || nodePreview.EnginesNode != nil ||
 		nodePreview.AlreadyPublished {

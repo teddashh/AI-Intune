@@ -250,6 +250,9 @@ func TestTheProfileCSVExportsOneRowPerRevisionPerPackageOverHTTP(t *testing.T) {
 			t.Errorf("rev 1 那一列：seen=%q misattributed=%q",
 				row[at["機隊上看到幾台"]], row[at["其中版號不是跑的那一份的台數"]])
 		}
+		if !strings.Contains(row[at["這個套件版本的下一步"]], "到每機安裝狀態核對執行檔與其版號") {
+			t.Errorf("CSV 的 rev 1 沒有指出查核動作：%q", row[at["這個套件版本的下一步"]])
+		}
 	}
 	if !found {
 		t.Errorf("CSV 裡沒有 rev 1 那一列：%v", rows)
@@ -353,6 +356,9 @@ func TestEachProfileRowSaysHowManyOfItsSeenMachinesMeasuredADeadFile(t *testing.
 	section := body[strings.Index(body, `id="profile-openclaw-standard-1"`):]
 	if !strings.Contains(section, "其中 1 台量的是沒在跑的那一份") {
 		t.Errorf("rev 1 那一節的看到台數沒有帶著這件事：%s", section)
+	}
+	if !strings.Contains(section, "到每機安裝狀態核對執行檔與其版號") {
+		t.Errorf("rev 1 那一節沒有指出下一步：%s", section)
 	}
 	clean := body[strings.Index(body, `id="profile-openclaw-standard-2"`):strings.Index(body, `id="profile-openclaw-standard-1"`)]
 	if strings.Contains(clean, "量的是沒在跑的那一份") {

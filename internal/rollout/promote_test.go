@@ -245,9 +245,63 @@ func TestPromotionDoesNotAskForAVerifierOnAFailedCanaryJob(t *testing.T) {
 		}},
 	}}
 	decision := PromoteGate(facts, now, time.UTC)
-	if decision.Allowed || len(decision.IndependentTargets) != 0 ||
+	if decision.Allowed || len(decision.IndependentTargets) != 1 ||
+		decision.IndependentTargets[0].State != IndependentGateCanaryNotSucceeded ||
+		decision.IndependentTargets[0].JobID != "failed-job" ||
 		!strings.Contains(decision.Summary(), "工作單沒有成功完成") {
 		t.Fatalf("failed canary got a verifier action: %+v", decision)
+	}
+}
+
+func TestPromoteGateCountsEveryCanaryMachineInTheIndependentDenominator(t *testing.T) {
+	now := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	digest := strings.Repeat("f", 64)
+	passed := CanaryTarget{
+		MachineID: "passed", DisplayName: "passed-host", JobID: "passed-job",
+		Ran: true, Succeeded: true, Judged: true, LastObservation: now,
+		WorkloadObserved: true, OpenClawPresent: true, WorkloadReady: true,
+		RunningVersion: "2026.9.2", AppliedDigest: digest, IndependentGate: IndependentGatePassed,
+	}
+	targets := []CanaryTarget{
+		passed,
+		{MachineID: "excluded", DisplayName: "excluded-host", ExcludedReason: "missing_package", JobID: ""},
+		{MachineID: "unopened", DisplayName: "unopened-host", Ran: false, JobID: ""},
+		{MachineID: "failed", DisplayName: "failed-host", Ran: true, Succeeded: false, JobID: "failed-job"},
+		{MachineID: "retired", DisplayName: "retired-host", Retired: true, Ran: true, Succeeded: false, JobID: "retired-job"},
+	}
+	decision := PromoteGate(PromoteFacts{Version: "2026.9.2", Digest: digest, Canary: &CanaryRun{
+		DeploymentID: "canary-denominator", FinishedAt: now.Add(-48 * time.Hour), Targets: targets,
+	}}, now, time.UTC)
+	want := []IndependentGateTarget{
+		{MachineID: "passed", DisplayName: "passed-host", JobID: "passed-job", State: IndependentGatePassed},
+		{MachineID: "excluded", DisplayName: "excluded-host", JobID: "", State: IndependentGateCanaryNotSucceeded},
+		{MachineID: "unopened", DisplayName: "unopened-host", JobID: "", State: IndependentGateCanaryNotSucceeded},
+		{MachineID: "failed", DisplayName: "failed-host", JobID: "failed-job", State: IndependentGateCanaryNotSucceeded},
+		{MachineID: "retired", DisplayName: "retired-host", JobID: "retired-job", State: IndependentGateCanaryNotSucceeded},
+	}
+	if decision.Allowed || len(decision.IndependentTargets) != len(want) {
+		t.Fatalf("decision=%+v", decision)
+	}
+	for i, target := range decision.IndependentTargets {
+		if target != want[i] {
+			t.Errorf("target[%d]=%+v want=%+v", i, target, want[i])
+		}
+	}
+
+	failed := CanaryTarget{MachineID: "failed", DisplayName: "failed-host", Ran: true, Succeeded: false, JobID: "failed-job"}
+	pair := PromoteGate(PromoteFacts{Version: "2026.9.2", Digest: digest, Canary: &CanaryRun{
+		DeploymentID: "canary-pair", FinishedAt: now.Add(-48 * time.Hour), Targets: []CanaryTarget{passed, failed},
+	}}, now, time.UTC)
+	passedCount := 0
+	for _, target := range pair.IndependentTargets {
+		if target.State == IndependentGatePassed {
+			passedCount++
+		}
+	}
+	if len(pair.IndependentTargets) != 2 || passedCount != 1 ||
+		pair.IndependentTargets[0].State != IndependentGatePassed || pair.IndependentTargets[0].JobID != "passed-job" ||
+		pair.IndependentTargets[1].State != IndependentGateCanaryNotSucceeded || pair.IndependentTargets[1].JobID != "failed-job" {
+		t.Fatalf("pair=%+v passed=%d", pair.IndependentTargets, passedCount)
 	}
 }
 

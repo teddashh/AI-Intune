@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	DeploymentActionSchemaVersion = 3
+	DeploymentActionSchemaVersion = 4
 	DeploymentActionPolicyVersion = "deployment-control-v1"
 )
 

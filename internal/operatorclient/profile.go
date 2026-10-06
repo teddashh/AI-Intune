@@ -295,8 +295,8 @@ func validateProfilePackages(label string, row operator.ProfileRow, machines int
 			return fmt.Errorf("operator client: %s 有兩列 %s %s", label, pkg.PackageID, pkg.Version)
 		}
 		keys[key] = true
-		if err := validateProfilePackageStateSentences(pkg.State, pkg.Title,
-			pkg.Meaning, pkg.NextStep); err != nil {
+		if err := validateProfilePackageStateSentences(pkg.State, pkg.Title, pkg.Meaning,
+			pkg.NextStep, operator.ProfilePackageNextStep(pkg.State, pkg.SeenMisattributedOn)); err != nil {
 			return err
 		}
 		if pkg.Intents < 0 || pkg.SeenOn < 0 || pkg.SeenMisattributedOn < 0 {
@@ -377,7 +377,8 @@ func validateProfilePackageStateCounts(summary []operator.ProfilePackageStateCou
 				index, stateCount.State, states[index])
 		}
 		if err := validateProfilePackageStateSentences(stateCount.State, stateCount.Title,
-			stateCount.Meaning, stateCount.NextStep); err != nil {
+			stateCount.Meaning, stateCount.NextStep,
+			operator.ProfilePackageStateNextStep(stateCount.State)); err != nil {
 			return err
 		}
 		if stateCount.Count != counted[stateCount.State] {
@@ -393,6 +394,8 @@ func validateProfilePackageStateCounts(summary []operator.ProfilePackageStateCou
 //
 // 對面的 Hub 對某一個狀態有第二種說法時，畫面上會出現一個看起來合理、其實指錯下一步
 // 的句子——而操作員就是照那一句決定要去指派，還是去確認那一版存不存在。
+//
+// 一格的下一步還看它自己量錯檔案的台數，所以由呼叫的那一邊把該是哪一句傳進來。
 func validateProfileStateSentences(stateValue operator.ProfileState,
 	title, meaning, nextStep string,
 ) error {
@@ -408,7 +411,7 @@ func validateProfileStateSentences(stateValue operator.ProfileState,
 }
 
 func validateProfilePackageStateSentences(stateValue operator.ProfilePackageState,
-	title, meaning, nextStep string,
+	title, meaning, nextStep, wantNextStep string,
 ) error {
 	// ⚠ 一格落在這個版本不認得的狀態上，就會從逐格的比對裡整個消失。
 	if _, _, known := operator.ProfilePackageStateAxes(stateValue); !known {
@@ -416,7 +419,7 @@ func validateProfilePackageStateSentences(stateValue operator.ProfilePackageStat
 	}
 	if title != operator.ProfilePackageStateTitle(stateValue) ||
 		meaning != operator.ProfilePackageStateMeaning(stateValue) ||
-		nextStep != operator.ProfilePackageStateNextStep(stateValue) {
+		nextStep != wantNextStep {
 		return fmt.Errorf("operator client: profile package state %q 的句子跟這個版本不一樣", stateValue)
 	}
 	return nil

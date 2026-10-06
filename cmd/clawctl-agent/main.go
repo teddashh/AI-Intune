@@ -166,7 +166,7 @@ func dispatch(args []string) string {
 const usage = `clawctl-agent —— 觀測這一台機器並回報給 Hub。
 
 用法：
-  clawctl-agent                             以 daemon 跑（systemd --user 用的是這個）
+  clawctl-agent                             以 daemon 跑（systemd service 用的是這個）
   clawctl-agent enroll --hub URL --token T  用一次性的票報到
   clawctl-agent probe                       印出一次觀測就結束，不回報
   clawctl-agent verify                      等 Hub 確認這個版本已開始接單

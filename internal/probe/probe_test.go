@@ -142,7 +142,7 @@ func TestProcessObservationsSharesProcessScan(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			tools, bat := processObservations(context.Background(), nil, tt.processScan)
+			tools, bat := processObservations(context.Background(), nil, tt.processScan, "/home/bat-test")
 			for _, tool := range tools {
 				if tool.ProcessScan != tt.processScan {
 					t.Errorf("%s ProcessScan = %q，想要 %q", tool.Name, tool.ProcessScan, tt.processScan)
@@ -1649,7 +1649,7 @@ func TestShowUnitMeasurementStates(t *testing.T) {
 				t.Errorf("Reason=%q, want it to contain %q", got.Reason, tc.reasonPart)
 			}
 			if tc.name == "systemctl unavailable" {
-				if !strings.Contains(got.Reason, "systemctl --user show clawctl-agent.service") ||
+				if !strings.Contains(got.Reason, "systemctl show clawctl-agent.service") ||
 					strings.Contains(got.Reason, "-p LoadState") {
 					t.Errorf("Reason=%q, want concise command identity without property arguments", got.Reason)
 				}
@@ -1659,6 +1659,30 @@ func TestShowUnitMeasurementStates(t *testing.T) {
 					got.ActiveState, got.SubState, tc.active, tc.sub)
 			}
 		})
+	}
+}
+
+func TestShowUnitSelectsSystemManagerOnlyForAgent(t *testing.T) {
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args")
+	writeExec(t, filepath.Join(dir, "systemctl"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >>\"$ARGS_FILE\"\nprintf 'LoadState=loaded\\nActiveState=active\\nSubState=running\\n'\n")
+	t.Setenv("PATH", dir)
+	t.Setenv("ARGS_FILE", argsFile)
+
+	if _, ok := showUnit(context.Background(), "clawctl-agent.service", true); !ok {
+		t.Fatal("system agent unit was not measured")
+	}
+	if _, ok := showUnit(context.Background(), "openclaw-gateway.service", true); !ok {
+		t.Fatal("user runtime unit was not measured")
+	}
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "show clawctl-agent.service ") ||
+		!strings.HasPrefix(lines[1], "--user show openclaw-gateway.service ") {
+		t.Fatalf("unexpected systemctl manager selection: %q", lines)
 	}
 }
 

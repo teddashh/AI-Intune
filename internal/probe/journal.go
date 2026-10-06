@@ -257,11 +257,14 @@ func readJournal(ctx context.Context, unit string) model.UnitJournal {
 	// ⚠ unit 名字要帶 `.service`。實測 `journalctl --user -u openclaw-watcher`
 	// 會回 "No entries"，而 `-u openclaw-watcher.service` 回 38 行 ——
 	// 一個問錯問題得到的、看起來像「什麼都沒發生」的乾淨答案。
-	stdout, stderr, err := run(ctx, journalCmdTimeout, "journalctl",
-		"--user", "-u", unit,
-		"--since", "-"+journalWindow.String(),
+	args := []string{"-u", unit,
+		"--since", "-" + journalWindow.String(),
 		"-n", strconv.Itoa(journalMaxLines),
-		"--no-pager", "-o", "cat")
+		"--no-pager", "-o", "cat"}
+	if unit != "clawctl-agent.service" {
+		args = append([]string{"--user"}, args...)
+	}
+	stdout, stderr, err := run(ctx, journalCmdTimeout, "journalctl", args...)
 	if err != nil {
 		msg := strings.TrimSpace(stderr)
 		if msg == "" {

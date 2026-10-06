@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	UpdateReadSchemaVersion   = 4
+	UpdateReadSchemaVersion   = 5
 	UpdateReadConsistencyLive = "live"
 )
 

@@ -811,12 +811,13 @@ install_ancestor_symlink_fixture() {
 }
 
 agent_installer_complete_fixture() {
-	local fixture="$TMP/agent-installer-complete" mock home token tailscale_key log install_agent
+	local fixture="$TMP/agent-installer-complete" mock home token tailscale_key log install_agent system_unit_dir
 	mock="$fixture/mock"
 	home="$fixture/home"
 	token="$fixture/enroll-token"
 	tailscale_key="$fixture/tailscale-key"
 	log="$fixture/calls"
+	system_unit_dir="$fixture/systemd/system"
 	mkdir -p "$mock" "$home"
 	chmod 0700 "$home"
 	printf '%s\n' 'one-time-token' >"$token"
@@ -831,6 +832,11 @@ agent_installer_complete_fixture() {
 		'case "$*" in' \
 		'  *property=NRestarts*) echo 0 ;;' \
 		'  *property=MainPID*) echo 4242 ;;' \
+		'  *property=LoadState*) echo loaded ;;' \
+		'  *property=FragmentPath*) echo "$AGENT_TEST_SYSTEM_UNIT/clawctl-agent.service" ;;' \
+		'  *property=User*) echo "$AGENT_TEST_USER" ;;' \
+		'  *property=ProtectSystem*) echo strict ;;' \
+		'  *property=ProtectHome*) echo read-only ;;' \
 		'esac' \
 		'exit 0' >"$mock/systemctl"
 	printf '%s\n' '#!/usr/bin/env bash' \
@@ -849,7 +855,7 @@ agent_installer_complete_fixture() {
 		'  exit 2' \
 		'fi' >"$mock/tailscale"
 	printf '%s\n' '#!/usr/bin/env bash' \
-		'if [[ "$1" == "-o" ]]; then echo clawctl-agent; else echo clawctl-agent; fi' >"$mock/ps"
+		'if [[ "$1" == "-o" && "$2" == "uid=" ]]; then echo "$AGENT_TEST_UID"; else echo clawctl-agent; fi' >"$mock/ps"
 	printf '%s\n' '#!/usr/bin/env bash' 'echo true' >"$mock/systemd-run"
 	printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$mock/podman"
 	printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$mock/newuidmap"
@@ -874,9 +880,14 @@ agent_installer_complete_fixture() {
 
 	HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
 		TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
+		CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+		AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
 		"$install_agent" --hub http://100.64.0.1:8787 --token-file "$token" \
 		--tailscale-auth-key-file "$tailscale_key" --binary "$fixture/clawctl-agent" || return
-	[[ -f "$home/.config/systemd/user/clawctl-agent.service" ]] || return 91
+	[[ -f "$system_unit_dir/clawctl-agent.service" ]] || return 91
+	[[ ! -e "$home/.config/systemd/user/clawctl-agent.service" ]] || return 98
+	grep -Fq "User=$(id -un)" "$system_unit_dir/clawctl-agent.service" || return 99
+	! grep -Fq 'CLAWCTL_AGENT_' "$system_unit_dir/clawctl-agent.service" || return 100
 	[[ -f "$home/.config/systemd/user/clawctl-hermes.service" ]] || return 96
 	[[ -f "$home/.config/systemd/user/openclaw-gateway.service" ]] || return 97
 	[[ -x "$home/.local/bin/clawctl-agent" ]] || return 92
@@ -1247,13 +1258,19 @@ expect 'upgrade-agent shell syntax valid' 0 is_silent
 run grep -Fq 'build -buildvcs=false -trimpath' "$ROOT/Makefile"
 expect 'release binaries exclude ambient VCS state from reproducible bytes' 0 is_silent
 
-run grep -Fq 'ReadWritePaths=%h/.config/clawctl %h/.config/systemd/user/openclaw-gateway.service.d %h/.cache/clawctl %h/.local/share/clawctl %h/.openclaw' "$AGENT_UNIT"
+run grep -Fq 'ReadWritePaths=@@CLAWCTL_AGENT_HOME@@/.config/clawctl @@CLAWCTL_AGENT_HOME@@/.config/systemd/user/openclaw-gateway.service.d @@CLAWCTL_AGENT_HOME@@/.cache/clawctl @@CLAWCTL_AGENT_HOME@@/.local/share/clawctl @@CLAWCTL_AGENT_HOME@@/.openclaw' "$AGENT_UNIT"
 expect 'agent unit grants the exact managed write roots for catalog activation' 0 is_silent
 
-run appears_before 'ensure_owned_directory "$RUNTIME_DIR" 0700' 'systemctl --user restart clawctl-agent.service' "$INSTALL_AGENT"
+run grep -Fq 'User=@@CLAWCTL_AGENT_USER@@' "$AGENT_UNIT"
+expect 'agent unit renders an explicit unprivileged service user' 0 is_silent
+
+run grep -Fq 'WantedBy=multi-user.target' "$AGENT_UNIT"
+expect 'agent unit is enabled by the system manager target' 0 is_silent
+
+run appears_before 'ensure_owned_directory "$RUNTIME_DIR" 0700' 'sudo systemctl restart clawctl-agent.service' "$INSTALL_AGENT"
 expect 'agent install creates the private runtime root before service start' 0 is_silent
 
-run appears_in_order3 'STEP="Tailscale install"' '"$BIN_FILE" enroll --hub "$HUB" --token-file "$TOKEN_FILE"' 'systemctl --user restart clawctl-agent.service' "$INSTALL_AGENT"
+run appears_in_order3 'STEP="Tailscale install"' '"$BIN_FILE" enroll --hub "$HUB" --token-file "$TOKEN_FILE"' 'sudo systemctl restart clawctl-agent.service' "$INSTALL_AGENT"
 expect 'agent install connects the dependency plane before enrollment and service start' 0 is_silent
 
 run appears_in_order3 'https://tailscale.com/install.sh' 'sudo systemctl enable --now tailscaled.service' 'sudo tailscale up --auth-key="file:$TAILSCALE_KEY_FILE"' "$INSTALL_AGENT"
@@ -1262,11 +1279,14 @@ expect 'agent install provisions and starts Tailscale before joining the tailnet
 run grep -Fq 'sudo tailscale up --auth-key="file:$TAILSCALE_KEY_FILE"' "$INSTALL_AGENT"
 expect 'agent install keeps the Tailscale auth key out of argv' 0 is_silent
 
-run appears_before 'sudo loginctl enable-linger "$USER"' 'systemctl --user restart clawctl-agent.service' "$INSTALL_AGENT"
+run appears_before 'sudo loginctl enable-linger "$AGENT_USER"' 'sudo systemctl restart clawctl-agent.service' "$INSTALL_AGENT"
 expect 'agent install enables persistence before service start' 0 is_silent
 
-run appears_in_order3 'systemctl --user reset-failed clawctl-agent.service' 'systemctl --user restart clawctl-agent.service' '"$BIN_FILE" verify --hub "$HUB" --since "$SERVICE_STARTED_AT" --timeout 2m' "$INSTALL_AGENT"
+run appears_in_order3 'sudo systemctl reset-failed clawctl-agent.service' 'sudo systemctl restart clawctl-agent.service' '"$BIN_FILE" verify --hub "$HUB" --since "$SERVICE_STARTED_AT" --timeout 2m' "$INSTALL_AGENT"
 expect 'agent install resets the restart gate before start and requires a fresh Hub receipt' 0 is_silent
+
+run appears_in_order3 'sudo systemctl daemon-reload' 'systemctl --user disable --now clawctl-agent.service' 'sudo systemctl restart clawctl-agent.service' "$INSTALL_AGENT"
+expect 'agent install loads the system unit before retiring the legacy user service' 0 is_silent
 
 run appears_before '[[ "$AGENT_COUNT" == "1" ]]' 'echo "Managed: agent=$AGENT_VERSION tailscale=$TAILSCALE_IP service=active jobs=enabled"' "$INSTALL_AGENT"
 expect 'agent install publishes success only after exact process validation' 0 is_silent
@@ -1286,17 +1306,20 @@ expect 'macOS 安裝腳本在 Linux 上指出該跑哪一支' 1 has 'On Linux ru
 run linux_installer_names_macos_fixture
 expect 'Linux 安裝腳本在 macOS 上指出該跑哪一支' 1 has 'ops/install-agent-macos.sh'
 
-run appears_in_order3 'got="$(timeout 5 "$bin.new" version' 'mv -f "$unit.new" "$unit"' 'systemctl --user restart clawctl-agent.service' "$UPGRADE_AGENT"
+run appears_in_order3 'got="$(timeout 5 "$bin.new" version' 'sudo mv -f "$system_unit.new" "$system_unit"' 'sudo systemctl restart clawctl-agent.service' "$UPGRADE_AGENT"
 expect 'agent upgrade validates binary before publishing unit and restarting' 0 is_silent
 
 run appears_before 'Managed agent preflight failed: $target' 'scp -q -o BatchMode=yes "$source"' "$UPGRADE_AGENT"
 expect 'agent upgrade validates the enrolled service account before transfer' 0 is_silent
 
-run grep -Fq 'writable_roots="$(systemctl --user show clawctl-agent.service -p ReadWritePaths --value)"' "$UPGRADE_AGENT"
+run grep -Fq 'writable_roots="$(systemctl show clawctl-agent.service -p ReadWritePaths --value)"' "$UPGRADE_AGENT"
 expect 'agent upgrade verifies the live writable-root contract' 0 is_silent
 
-run appears_in_order3 'systemctl --user reset-failed clawctl-agent.service' 'systemctl --user restart clawctl-agent.service' '"$bin" verify --since "$started_at" --timeout 2m' "$UPGRADE_AGENT"
+run appears_in_order3 'sudo systemctl reset-failed clawctl-agent.service' 'sudo systemctl restart clawctl-agent.service' '"$bin" verify --since "$started_at" --timeout 2m' "$UPGRADE_AGENT"
 expect 'agent upgrade requires a fresh Hub readiness receipt' 0 is_silent
+
+run appears_in_order3 'sudo systemctl daemon-reload' 'systemctl --user disable --now clawctl-agent.service' 'sudo systemctl restart clawctl-agent.service' "$UPGRADE_AGENT"
+expect 'agent upgrade migrates from the user manager without overlapping agents' 0 is_silent
 
 run appears_before '[[ "$restarts" == "0" ]]' 'echo "Managed: agent=$running_version service=active jobs=enabled processes=1 restarts=0"' "$UPGRADE_AGENT"
 expect 'agent upgrade publishes success only after the zero-restart gate' 0 is_silent
