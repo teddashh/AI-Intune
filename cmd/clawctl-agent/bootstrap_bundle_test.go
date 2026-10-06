@@ -110,6 +110,9 @@ func TestBootstrapBundlesCarryTheTargetInstallerAndService(t *testing.T) {
 			}
 		})
 	}
+	if _, err := exec.LookPath("make"); err != nil {
+		t.Skip("make is not installed; skipping the Makefile bundle-target dry runs")
+	}
 	cmd := exec.Command("make", "-n", "agent-bundles-darwin", "VERSION="+version, "GO=go")
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
