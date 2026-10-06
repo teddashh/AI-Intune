@@ -36,19 +36,21 @@ Act on Hub fields. An agent finish line, an SSH exit code, or a BAT session is n
 4. Poll `rollout_status`.
    - `canary_pending`: wait. Do not expand.
    - `canary_stopped` or `expand_stopped`: stop. Do not call `rollout_expand` or `deployment_continue`.
-   - `ready_to_expand` and `deployment_state` `running`: poll. The Hub driver opens the next batch. Do not create a second deployment.
+   - `ready_to_expand` and `deployment_state` `running`: poll until the Hub pauses. A new deployment does not open the next batch by itself. Do not create a second deployment. A deployment created before the hold still lets the driver open the next batch; `rollout_expand` still writes nothing while it is running.
    - `ready_to_expand` and `paused`: `deployment_continue_preview`, then `rollout_expand` with that digest and the `control_revision` and `opened_batch` from the status you just read.
    - `expanding`: poll until `finished`, `canary_stopped`, or `expand_stopped`.
    - `finished`: canary-channel batches for this deployment are done. Stable promotion is a separate `deployment_create_preview` on channel `stable`. Apply it only when that preview says `create_allowed`.
 5. Show `canary.rollback` when you report the outcome. Do not add a rollback the list does not state.
 
-The same phase is on the deployment page under Canary rollout. The new-deployment form defaults batch size to 1.
+The same phase is on the deployment page under Canary rollout. The new-deployment form defaults the later batch size to 1, and the first batch is always one machine. Hub enforces that for new deployments even when an API caller omits `batch_size`.
+
+Plain Continue on a failed batch is refused. The deployment page has a separate button labelled `skip failed batch`. It needs its own preview and a reason. MCP has no skip tool. Do not use `deployment_continue` to pass a failed batch.
 
 ## Unreachable machine
 
 Read `machine_get` and `machine_evidence`. Leave the deployment paused. Open the machine page: Connect BAT shows the address and a command; Hub does not connect for you. Use SSH you already have if you must get on the host. Where this build has the Linux terminal action, it is on that page for the assigned user.
 
-Do not report success from SSH, BAT, the installer, or a missing check-in. Do not skip the machine with `deployment_continue`.
+Do not report success from SSH, BAT, the installer, or a missing check-in. Do not skip the machine with `deployment_continue`. That tool refuses a failed batch and does not write.
 
 ## Writes
 

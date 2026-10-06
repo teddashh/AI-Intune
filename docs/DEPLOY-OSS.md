@@ -1,6 +1,6 @@
 # Open-source deploy guide — clawctl-hub (OSS / any cloud)
 
-Status: **Milestone 3 — operator MCP/CLI and canary rollout**. This document describes how to run Hub on a
+Status: **Milestone 4 — Hub-enforced canary hold**. This document describes how to run Hub on a
 generic Linux host with Docker + Cloudflare Tunnel + Tailscale. It does **not**
 change the operator auth model.
 
@@ -209,7 +209,7 @@ Done:
 
 1. **Enrollment** — ticket page shows one install command. `--hub` is the Tailscale `http://100.x:8787` address, or an experimental `https://<hostname>` tunnel URL for agent check-in only.
 2. **R2 / S3** — when `R2_*` or `S3_*` is complete, Hub stores Hub-hashed blobs and keeps digests in SQLite. Partial config refuses to start. Both groups at once is an error.
-3. **Operator MCP / CLI** — `clawctl-operator` reads fleet, jobs, deployments, software, and compliance, and writes enroll tickets, deployments, and profile assignments through the existing preview/apply API. Canary rollout is one machine, then Hub's job verdict, then the next batch.
+3. **Operator MCP / CLI** — `clawctl-operator` reads fleet, jobs, deployments, software, and compliance, and writes enroll tickets, deployments, and profile assignments through the existing preview/apply API. A new deployment's first batch is one machine. After Hub marks that job `succeeded`, the driver pauses. The next batch opens only on an explicit Continue from the UI, CLI, or `rollout_expand`. Deployments already in flight before this hold keep the old auto-open behavior. Plain Continue refuses a failed batch. The deployment page's separate `skip failed batch` action records a reason; MCP does not expose it.
 
 Not implemented:
 

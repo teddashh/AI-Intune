@@ -178,7 +178,7 @@ func (s *Store) CanarySilentFailuresSince(machineIDs []string, since, now time.T
 func (s *Store) PromoteFacts(version, digest string, now time.Time) (rollout.PromoteFacts, error) {
 	facts := rollout.PromoteFacts{Version: version, Digest: strings.TrimPrefix(digest, "sha256:")}
 	rows, err := s.db.Query(`SELECT p.deployment_id,p.channel,p.desired_id,p.resource_kind,p.resource_id,
-		 p.revision,p.control_revision,p.batch_size,p.state,p.created_at,p.created_by,p.paused_at,p.finished_at,p.retry_of,d.spec
+		 p.revision,p.control_revision,p.batch_size,p.pause_after_canary,p.state,p.created_at,p.created_by,p.paused_at,p.finished_at,p.retry_of,d.spec
 	 FROM deployments p JOIN desired_state d ON d.desired_id=p.desired_id
 	 WHERE p.channel='canary' ORDER BY p.rowid DESC`)
 	if err != nil {

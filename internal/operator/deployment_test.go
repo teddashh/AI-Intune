@@ -158,7 +158,8 @@ func TestDeploymentListDetailFiltersCursorActionsAndSafeJSON(t *testing.T) {
 	if len(detail.Targets) != 2 || detail.Targets[0].DisplayName != "alpha" || detail.Targets[1].DisplayName != "beta" {
 		t.Fatalf("targets=%+v", detail.Targets)
 	}
-	if !detail.Actions.Continue.Eligible || detail.Actions.Continue.AffectedTargets != 1 ||
+	if detail.Actions.Continue.Eligible || detail.Actions.Continue.AffectedTargets != 1 ||
+		!detail.Actions.SkipFailedBatch.Eligible || detail.Actions.SkipFailedBatch.AffectedTargets != 1 ||
 		!detail.Actions.Retry.Eligible || detail.Actions.Retry.AffectedTargets != 1 ||
 		!detail.Actions.Abandon.Eligible || detail.Actions.Abandon.AffectedTargets != 1 {
 		t.Fatalf("actions=%+v", detail.Actions)
@@ -287,8 +288,30 @@ func TestDeploymentActionEligibilityCountsOnlyTerminalFailuresForRetry(t *testin
 
 func TestDeploymentActionEligibilityBlocksExhaustedControlRevision(t *testing.T) {
 	st := newDeploymentOperatorStore(t)
-	view := coherentFailedDeploymentView()
-	view.ControlRevision = store.MaxDeploymentControlRevision
+	// Continue is otherwise eligible only when the opened batch succeeded.
+	// Retry is otherwise eligible only when some target is a terminal failure.
+	// An earlier failed batch plus a succeeded opened batch satisfies both,
+	// so the exhausted control revision is the only blocker on each action.
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	terminal := now.Add(-time.Minute)
+	paused := now
+	view := store.DeploymentView{
+		Deployment: store.Deployment{
+			DeploymentID: "deployment", Channel: "canary", DesiredID: "desired",
+			ResourceKind: "openclaw", ResourceID: "openclaw", Revision: 1, BatchSize: 1,
+			State: store.DeploymentPaused, CreatedAt: now.Add(-time.Hour), PausedAt: &paused,
+			ControlRevision: store.MaxDeploymentControlRevision,
+			Spec:            deploymentTestSpec(strings.Repeat("a", 64)),
+		},
+		Targets: []store.DeploymentTarget{
+			{MachineID: "machine-a", DisplayName: "alpha", BatchNo: 1, JobID: "job-a",
+				JobState: deploy.Failed, StuckKind: "terminal_failure", TerminalAt: &terminal},
+			{MachineID: "machine-b", DisplayName: "beta", BatchNo: 2, JobID: "job-b",
+				JobState: deploy.Succeeded, TerminalAt: &terminal},
+			{MachineID: "machine-c", DisplayName: "gamma", BatchNo: 3},
+		},
+		OpenedBatch: 2, TotalBatches: 3,
+	}
 	version, digest := "2026.9.2", "sha256:"+strings.Repeat("a", 64)
 	actions, err := New(st).deploymentActionEligibility(view, DeploymentMaterialSummary{
 		Status: DeploymentMaterialRecorded, Version: &version, ArtifactDigest: &digest,
@@ -794,6 +817,8 @@ func TestTheBlockerLabelSaysTheseExactWords(t *testing.T) {
 		{"no_included_targets", "沒有可開啟的 target"},
 		{"target_snapshot_changed", "target snapshot 已變更"},
 		{"control_revision_exhausted", "deployment 控制版本已達上限，不能再執行動作"},
+		{"failed_batch_requires_explicit_skip", "plain Continue 拒絕失敗批次。請改用單獨標示的 skip failed batch，並留下理由。"},
+		{"opened_batch_not_failed", "目前已開批次沒有失敗終態，不能 skip failed batch"},
 		{"some_unknown_blocker", "目前安全條件不允許這個動作（some_unknown_blocker）"},
 	}
 

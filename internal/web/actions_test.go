@@ -45,7 +45,8 @@ func postForm(t *testing.T, s *Server, path string, form url.Values) *httptest.R
 	req.RemoteAddr = "100.64.200.2:54321"
 	capability := "example.com/cap/clawctl-admin"
 	if strings.HasSuffix(path, "/connect") || strings.HasSuffix(path, "/continue") ||
-		strings.HasSuffix(path, "/continue-preview") || strings.HasSuffix(path, "/retry") ||
+		strings.HasSuffix(path, "/continue-preview") || strings.HasSuffix(path, "/skip-failed-batch") ||
+		strings.HasSuffix(path, "/skip-failed-batch-preview") || strings.HasSuffix(path, "/retry") ||
 		strings.HasSuffix(path, "/retry-preview") || strings.HasSuffix(path, "/diagnostic-noop-preview") ||
 		strings.HasSuffix(path, "/diagnostic-noop-jobs") {
 		capability = "example.com/cap/clawctl-operate"
@@ -171,6 +172,8 @@ func TestWritePathsRefuseGET(t *testing.T) {
 		"/machines/" + id + "/notes",
 		"/deployments/deployment-id/continue-preview",
 		"/deployments/deployment-id/continue",
+		"/deployments/deployment-id/skip-failed-batch-preview",
+		"/deployments/deployment-id/skip-failed-batch",
 		"/deployments/deployment-id/retry-preview",
 		"/deployments/deployment-id/retry",
 		"/deployments/deployment-id/abandon-preview",

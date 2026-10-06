@@ -152,7 +152,7 @@ func Tools() []Tool {
 			"confirm_channel": str, "confirm_version": str, "reason": str,
 			"idempotency_key": map[string]any{"type": "string", "description": idem},
 		}, "channel", "version", "artifact_sha256", "preview_digest", "confirm_channel", "confirm_version", "reason", "idempotency_key")},
-		{Name: "rollout_expand", Description: "Continue a paused deployment only when the shared assessment says the one canary job is succeeded. Requires preview_digest from deployment_continue_preview plus the expected control revision and opened batch from rollout_status. Refuses without calling Hub when the canary is not succeeded. A running deployment is left to the Hub driver; this tool then writes nothing.", InputSchema: obj(map[string]any{
+		{Name: "rollout_expand", Description: "Continue a paused deployment only when the shared assessment says the one canary job is succeeded. Requires preview_digest from deployment_continue_preview plus the expected control revision and opened batch from rollout_status. Refuses without calling Hub when the canary is not succeeded. A new deployment pauses after that verdict; this tool does not open the next batch while the deployment is still running. Deployments created before the hold still let the Hub driver open the next batch.", InputSchema: obj(map[string]any{
 			"deployment_id":             str,
 			"preview_digest":            map[string]any{"type": "string", "description": digest},
 			"expected_control_revision": num, "expected_opened_batch": num,
@@ -172,7 +172,7 @@ func Tools() []Tool {
 			"preview_digest": str, "confirm_channel": str, "confirm_version": str, "reason": str, "idempotency_key": str,
 		}, "channel", "version", "artifact_sha256", "preview_digest", "confirm_channel", "confirm_version", "reason", "idempotency_key")},
 		{Name: "deployment_continue_preview", Description: "POST /v1/operator/deployments/{id}/continue-preview.", InputSchema: obj(map[string]any{"deployment_id": str}, "deployment_id")},
-		{Name: "deployment_continue", Description: "POST the existing Continue route. Requires preview_digest, expected_control_revision, and expected_opened_batch. This is the explicit skip of a failed batch when the server still allows it. Use rollout_expand for the canary flow.", InputSchema: obj(map[string]any{
+		{Name: "deployment_continue", Description: "POST the existing Continue route. Requires preview_digest, expected_control_revision, and expected_opened_batch. Plain Continue refuses a failed batch. This tool does not send skip failed batch. Use rollout_expand after a succeeded canary.", InputSchema: obj(map[string]any{
 			"deployment_id": str, "preview_digest": str, "expected_control_revision": num, "expected_opened_batch": num,
 			"confirm_channel": str, "reason": str, "idempotency_key": str,
 		}, "deployment_id", "preview_digest", "expected_control_revision", "expected_opened_batch", "confirm_channel", "reason", "idempotency_key")},
@@ -483,9 +483,13 @@ func (s *Service) rolloutExpand(ctx context.Context, raw json.RawMessage) (any, 
 		}
 	}
 	if detail.Item.State == "running" {
+		next := "The deployment is running. This deployment was created before the canary hold, so the Hub driver still opens the next batch. Poll rollout_status. rollout_expand does not open it."
+		if detail.Item.PauseAfterCanary {
+			next = "The deployment is running. Poll rollout_status until the Hub pauses after the canary verdict. rollout_expand does not open the next batch."
+		}
 		return map[string]any{
 			"wrote": false, "canary": assessment,
-			"next": "The deployment is running. Poll rollout_status. The Hub driver opens the next batch after the canary job is succeeded.",
+			"next": next,
 		}, nil
 	}
 	if detail.Item.State != "paused" {
@@ -612,6 +616,18 @@ func (s *Service) deploymentContinue(ctx context.Context, raw json.RawMessage) (
 	}
 	if strings.TrimSpace(args.ConfirmChannel) == "" {
 		return nil, &CallError{Code: "invalid_arguments", Message: "confirm_channel is required"}
+	}
+	detail, err := s.Hub.Deployment(ctx, args.DeploymentID)
+	if err != nil {
+		return nil, hubErr(err)
+	}
+	for _, blocker := range detail.Actions.Continue.Blockers {
+		if blocker == "failed_batch_requires_explicit_skip" {
+			return nil, &CallError{
+				Code:    "failed_batch_skip_refused",
+				Message: "plain Continue refuses a failed batch. Use the separately labelled skip failed batch action and record a reason. MCP tools do not send that skip.",
+			}
+		}
 	}
 	result, err := s.Hub.ContinueDeployment(ctx, args.DeploymentID, args.IdempotencyKey, operatorclient.DeploymentContinueRequest{
 		PreviewDigest: args.PreviewDigest, ExpectedControlRevision: args.ExpectedControlRevision,
@@ -806,6 +822,7 @@ func canaryFromDetail(detail operator.DeploymentDetailResult) rollout.CanaryInpu
 	in := rollout.CanaryInput{
 		State: detail.Item.State, OpenedBatch: detail.Item.OpenedBatch,
 		TotalBatches: detail.Item.TotalBatches, BatchSize: detail.Item.BatchSize,
+		PauseAfterCanary: detail.Item.PauseAfterCanary,
 	}
 	for _, target := range detail.Targets {
 		machine := rollout.CanaryMachine{
@@ -826,6 +843,7 @@ func canaryFromDetail(detail operator.DeploymentDetailResult) rollout.CanaryInpu
 func canaryFromPreview(preview operator.DeploymentCreatePreviewResult) rollout.CanaryInput {
 	in := rollout.CanaryInput{
 		State: "preview", BatchSize: preview.BatchSize, TotalBatches: preview.TotalBatches,
+		PauseAfterCanary: true,
 	}
 	for _, target := range preview.Targets {
 		machine := rollout.CanaryMachine{

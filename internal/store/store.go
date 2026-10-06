@@ -792,7 +792,8 @@ func addMissingColumns(db *sql.DB) error {
 		// desired_state revision is immutable deployment material identity.  This
 		// separate token fences stale lifecycle/open-batch operator requests.
 		"deployments": {
-			"control_revision": "INTEGER NOT NULL DEFAULT 0",
+			"control_revision":   "INTEGER NOT NULL DEFAULT 0",
+			"pause_after_canary": "INTEGER NOT NULL DEFAULT 0",
 		},
 		"audit_log": {
 			"idempotency_key":   "TEXT",

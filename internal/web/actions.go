@@ -90,6 +90,8 @@ func (s *Server) actionRoutes(mux *http.ServeMux) []string {
 		"POST /machines/{id}/display-name",
 		"POST /machines/{id}/notes-preview",
 		"POST /machines/{id}/notes",
+		"POST /deployments/{id}/skip-failed-batch-preview",
+		"POST /deployments/{id}/skip-failed-batch",
 	}
 	mux.HandleFunc(patterns[0], s.auditPage)
 	mux.HandleFunc(patterns[1], s.doConnect)
@@ -141,6 +143,8 @@ func (s *Server) actionRoutes(mux *http.ServeMux) []string {
 	mux.HandleFunc(patterns[47], s.applyMachineRename)
 	mux.HandleFunc(patterns[48], s.previewMachineNotes)
 	mux.HandleFunc(patterns[49], s.applyMachineNotes)
+	mux.HandleFunc(patterns[50], s.previewDeploymentSkipFailedBatch)
+	mux.HandleFunc(patterns[51], s.applyDeploymentSkipFailedBatch)
 	return patterns
 }
 

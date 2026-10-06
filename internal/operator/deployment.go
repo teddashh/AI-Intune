@@ -50,9 +50,11 @@ const (
 	DeploymentPreviewSchemaVersion = 3
 	DefaultDeploymentReadLimit     = 50
 	MaxDeploymentReadLimit         = 100
-	DefaultDeploymentBatchSize     = 5
-	DefaultDeploymentTimeout       = 600
-	DeploymentReadConsistencyLive  = "live"
+	// DefaultDeploymentBatchSize is the later-batch size when a caller omits
+	// batch_size. The first included machine is still alone in batch 1.
+	DefaultDeploymentBatchSize    = 1
+	DefaultDeploymentTimeout      = 600
+	DeploymentReadConsistencyLive = "live"
 )
 
 var (
@@ -90,28 +92,29 @@ type DeploymentListResult struct {
 }
 
 type DeploymentSummary struct {
-	DeploymentID    string                     `json:"deployment_id"`
-	Channel         string                     `json:"channel"`
-	DesiredID       string                     `json:"desired_id"`
-	ResourceKind    string                     `json:"resource_kind"`
-	ResourceID      string                     `json:"resource_id"`
-	DesiredRevision deploy.Revision            `json:"desired_revision"`
-	ControlRevision int64                      `json:"control_revision"`
-	BatchSize       int                        `json:"batch_size"`
-	State           string                     `json:"state"`
-	CreatedAt       time.Time                  `json:"created_at"`
-	PausedAt        *time.Time                 `json:"paused_at"`
-	FinishedAt      *time.Time                 `json:"finished_at"`
-	RetryOf         *string                    `json:"retry_of"`
-	Attempt         int                        `json:"attempt"`
-	OpenedBatch     int                        `json:"opened_batch"`
-	TotalBatches    int                        `json:"total_batches"`
-	Stuck           int                        `json:"stuck"`
-	TerminalStuck   int                        `json:"terminal_stuck"`
-	SilentStuck     int                        `json:"silent_stuck"`
-	JobStateCounts  []JobStateCount            `json:"job_state_counts"`
-	Material        DeploymentMaterialSummary  `json:"material"`
-	BoundaryPause   *DeploymentBoundarySummary `json:"boundary_pause"`
+	DeploymentID     string                     `json:"deployment_id"`
+	Channel          string                     `json:"channel"`
+	DesiredID        string                     `json:"desired_id"`
+	ResourceKind     string                     `json:"resource_kind"`
+	ResourceID       string                     `json:"resource_id"`
+	DesiredRevision  deploy.Revision            `json:"desired_revision"`
+	ControlRevision  int64                      `json:"control_revision"`
+	BatchSize        int                        `json:"batch_size"`
+	PauseAfterCanary bool                       `json:"pause_after_canary"`
+	State            string                     `json:"state"`
+	CreatedAt        time.Time                  `json:"created_at"`
+	PausedAt         *time.Time                 `json:"paused_at"`
+	FinishedAt       *time.Time                 `json:"finished_at"`
+	RetryOf          *string                    `json:"retry_of"`
+	Attempt          int                        `json:"attempt"`
+	OpenedBatch      int                        `json:"opened_batch"`
+	TotalBatches     int                        `json:"total_batches"`
+	Stuck            int                        `json:"stuck"`
+	TerminalStuck    int                        `json:"terminal_stuck"`
+	SilentStuck      int                        `json:"silent_stuck"`
+	JobStateCounts   []JobStateCount            `json:"job_state_counts"`
+	Material         DeploymentMaterialSummary  `json:"material"`
+	BoundaryPause    *DeploymentBoundarySummary `json:"boundary_pause"`
 }
 
 type DeploymentMaterialStatus string
@@ -224,6 +227,10 @@ func DeploymentBlockerLabel(blocker string) string {
 		return "target snapshot 已變更"
 	case "control_revision_exhausted":
 		return "deployment 控制版本已達上限，不能再執行動作"
+	case "failed_batch_requires_explicit_skip":
+		return "plain Continue 拒絕失敗批次。請改用單獨標示的 skip failed batch，並留下理由。"
+	case "opened_batch_not_failed":
+		return "目前已開批次沒有失敗終態，不能 skip failed batch"
 	default:
 		return "目前安全條件不允許這個動作（" + blocker + "）"
 	}
@@ -231,16 +238,18 @@ func DeploymentBlockerLabel(blocker string) string {
 
 // DeploymentActionImpact 說明 deployment 動作確認後的影響，或目前不可執行的原因。
 func DeploymentActionImpact(action string, eligibility DeploymentActionEligibility) string {
-	if action != "continue" && action != "retry" && action != "abandon" {
+	if action != "continue" && action != "retry" && action != "abandon" && action != "skip_failed_batch" {
 		return ""
 	}
 	if eligibility.Eligible {
 		switch action {
 		case "continue":
 			if eligibility.Outcome == "finish" {
-				return "所有批次都已開完；確認後會把 deployment 收成 finished，既有終態未成功的工作單不會重開。"
+				return "所有批次都已開完且最後一批是 succeeded；確認後會把 deployment 收成 finished。"
 			}
-			return fmt.Sprintf("將開下一批 %d 台；既有終態未成功的工作單會保留，不會重開。", eligibility.AffectedTargets)
+			return fmt.Sprintf("將開下一批 %d 台。目前批次的 Hub 判決是 succeeded；Continue 不會跳過失敗批次。", eligibility.AffectedTargets)
+		case "skip_failed_batch":
+			return fmt.Sprintf("將跳過失敗批次並開下一批 %d 台。失敗的工作單不會重開。理由會寫進稽核與 Hub 事件。這不是 Continue。", eligibility.AffectedTargets)
 		case "retry":
 			// ⚠ terminal_failure 含沒有改動機器及沒有回退證據的終態，不能統稱失敗；見 internal/deploy/deploy.go:106-110。
 			return fmt.Sprintf("將建立新的 deployment，為 %d 台終態未成功的機器重新開單；不會沿用原本那張單的進度，也不會判斷機器停在哪一步。", eligibility.AffectedTargets)
@@ -256,9 +265,25 @@ func DeploymentActionImpact(action string, eligibility DeploymentActionEligibili
 }
 
 type DeploymentActionEligibilitySet struct {
-	Continue DeploymentActionEligibility `json:"continue"`
-	Retry    DeploymentActionEligibility `json:"retry"`
-	Abandon  DeploymentActionEligibility `json:"abandon"`
+	Continue        DeploymentActionEligibility `json:"continue"`
+	SkipFailedBatch DeploymentActionEligibility `json:"skip_failed_batch"`
+	Retry           DeploymentActionEligibility `json:"retry"`
+	Abandon         DeploymentActionEligibility `json:"abandon"`
+}
+
+func deploymentOpenedBatchFailed(view store.DeploymentView) bool {
+	if view.OpenedBatch < 1 {
+		return false
+	}
+	for _, target := range view.Targets {
+		if target.BatchNo != view.OpenedBatch || target.JobID == "" {
+			continue
+		}
+		if deploy.IsTerminal(target.JobState) && target.JobState != deploy.Succeeded {
+			return true
+		}
+	}
+	return false
 }
 
 type DeploymentDetailResult struct {
@@ -536,6 +561,7 @@ func (s *Service) PreviewDeploymentCreateContext(ctx context.Context, request De
 	if err != nil {
 		return DeploymentCreatePreviewResult{}, err
 	}
+	plan = rollout.ApplyCanaryFirst(plan, normalized.BatchSize)
 	targets, err := projectDeploymentPlan(plan, normalized.BatchSize)
 	if err != nil {
 		return DeploymentCreatePreviewResult{}, err
@@ -678,7 +704,7 @@ func projectDeploymentSummary(view store.DeploymentView) (DeploymentSummary, err
 		DeploymentID: d.DeploymentID, Channel: d.Channel, DesiredID: d.DesiredID,
 		ResourceKind: d.ResourceKind, ResourceID: d.ResourceID,
 		DesiredRevision: d.Revision, ControlRevision: d.ControlRevision,
-		BatchSize: d.BatchSize, State: d.State, CreatedAt: d.CreatedAt.UTC(),
+		BatchSize: d.BatchSize, PauseAfterCanary: d.PauseAfterCanary, State: d.State, CreatedAt: d.CreatedAt.UTC(),
 		PausedAt: utcTimePtr(d.PausedAt), FinishedAt: utcTimePtr(d.FinishedAt),
 		Attempt: view.Attempt, OpenedBatch: view.OpenedBatch, TotalBatches: view.TotalBatches,
 		Stuck: view.Stuck, TerminalStuck: view.TerminalStuck, SilentStuck: view.SilentStuck,
@@ -842,9 +868,10 @@ func projectDeploymentTargets(view store.DeploymentView) ([]DeploymentTargetSumm
 
 func (s *Service) deploymentActionEligibility(view store.DeploymentView, material DeploymentMaterialSummary, now time.Time) (DeploymentActionEligibilitySet, error) {
 	set := DeploymentActionEligibilitySet{
-		Continue: DeploymentActionEligibility{Outcome: "open_next_batch", Blockers: []string{}},
-		Retry:    DeploymentActionEligibility{Outcome: "create_retry_attempt", Blockers: []string{}},
-		Abandon:  DeploymentActionEligibility{Outcome: "finish_without_unopened_batches", Blockers: []string{}},
+		Continue:        DeploymentActionEligibility{Outcome: "open_next_batch", Blockers: []string{}},
+		SkipFailedBatch: DeploymentActionEligibility{Outcome: "open_next_batch", Blockers: []string{}},
+		Retry:           DeploymentActionEligibility{Outcome: "create_retry_attempt", Blockers: []string{}},
+		Abandon:         DeploymentActionEligibility{Outcome: "finish_without_unopened_batches", Blockers: []string{}},
 	}
 	nonterminal, retryTargets, unopened := 0, 0, 0
 	for _, target := range view.Targets {
@@ -868,10 +895,13 @@ func (s *Service) deploymentActionEligibility(view store.DeploymentView, materia
 	} else {
 		set.Continue.Outcome = "finish"
 	}
+	set.SkipFailedBatch.AffectedTargets = set.Continue.AffectedTargets
 	set.Retry.AffectedTargets = retryTargets
 	set.Abandon.AffectedTargets = unopened
+	openedFailed := deploymentOpenedBatchFailed(view)
 	if view.State != store.DeploymentPaused {
 		set.Continue.Blockers = append(set.Continue.Blockers, "deployment_not_paused")
+		set.SkipFailedBatch.Blockers = append(set.SkipFailedBatch.Blockers, "deployment_not_paused")
 		set.Abandon.Blockers = append(set.Abandon.Blockers, "deployment_not_paused")
 	}
 	if view.State != store.DeploymentPaused && view.State != store.DeploymentFinished {
@@ -879,6 +909,7 @@ func (s *Service) deploymentActionEligibility(view store.DeploymentView, materia
 	}
 	if nonterminal > 0 {
 		set.Continue.Blockers = append(set.Continue.Blockers, "nonterminal_jobs")
+		set.SkipFailedBatch.Blockers = append(set.SkipFailedBatch.Blockers, "nonterminal_jobs")
 		set.Retry.Blockers = append(set.Retry.Blockers, "nonterminal_jobs")
 		set.Abandon.Blockers = append(set.Abandon.Blockers, "nonterminal_jobs")
 	}
@@ -887,14 +918,22 @@ func (s *Service) deploymentActionEligibility(view store.DeploymentView, materia
 	}
 	if view.OpenedBatch == 0 {
 		set.Continue.Blockers = append(set.Continue.Blockers, "no_opened_batch")
+		set.SkipFailedBatch.Blockers = append(set.SkipFailedBatch.Blockers, "no_opened_batch")
 		set.Retry.Blockers = append(set.Retry.Blockers, "no_opened_batch")
 	}
 	if view.OpenedBatch < view.TotalBatches && set.Continue.AffectedTargets == 0 {
 		set.Continue.Blockers = append(set.Continue.Blockers, "next_batch_empty")
 	}
+	if view.OpenedBatch >= view.TotalBatches || set.SkipFailedBatch.AffectedTargets == 0 {
+		set.SkipFailedBatch.Blockers = append(set.SkipFailedBatch.Blockers, "next_batch_empty")
+	}
+	if !openedFailed {
+		set.SkipFailedBatch.Blockers = append(set.SkipFailedBatch.Blockers, "opened_batch_not_failed")
+	}
 	if material.Status != DeploymentMaterialRecorded {
 		if view.OpenedBatch < view.TotalBatches {
 			set.Continue.Blockers = append(set.Continue.Blockers, "invalid_material")
+			set.SkipFailedBatch.Blockers = append(set.SkipFailedBatch.Blockers, "invalid_material")
 		}
 		set.Retry.Blockers = append(set.Retry.Blockers, "invalid_material")
 	}
@@ -906,6 +945,7 @@ func (s *Service) deploymentActionEligibility(view store.DeploymentView, materia
 		if !decision.Allowed {
 			if view.OpenedBatch < view.TotalBatches {
 				set.Continue.Blockers = append(set.Continue.Blockers, "stable_promotion_locked")
+				set.SkipFailedBatch.Blockers = append(set.SkipFailedBatch.Blockers, "stable_promotion_locked")
 			}
 			set.Retry.Blockers = append(set.Retry.Blockers, "stable_promotion_locked")
 		}
@@ -919,6 +959,7 @@ func (s *Service) deploymentActionEligibility(view store.DeploymentView, materia
 			(candidate.State == store.DeploymentRunning || candidate.State == store.DeploymentPaused) &&
 			candidate.ResourceKind == view.ResourceKind && candidate.ResourceID == view.ResourceID {
 			set.Continue.Blockers = append(set.Continue.Blockers, "active_resource_deployment")
+			set.SkipFailedBatch.Blockers = append(set.SkipFailedBatch.Blockers, "active_resource_deployment")
 			set.Retry.Blockers = append(set.Retry.Blockers, "active_resource_deployment")
 			set.Abandon.Blockers = append(set.Abandon.Blockers, "active_resource_deployment")
 			break
@@ -926,10 +967,15 @@ func (s *Service) deploymentActionEligibility(view store.DeploymentView, materia
 	}
 	if view.ControlRevision == store.MaxDeploymentControlRevision {
 		set.Continue.Blockers = append(set.Continue.Blockers, "control_revision_exhausted")
+		set.SkipFailedBatch.Blockers = append(set.SkipFailedBatch.Blockers, "control_revision_exhausted")
 		set.Retry.Blockers = append(set.Retry.Blockers, "control_revision_exhausted")
 		set.Abandon.Blockers = append(set.Abandon.Blockers, "control_revision_exhausted")
 	}
+	if openedFailed {
+		set.Continue.Blockers = append(set.Continue.Blockers, "failed_batch_requires_explicit_skip")
+	}
 	set.Continue.Eligible = len(set.Continue.Blockers) == 0
+	set.SkipFailedBatch.Eligible = len(set.SkipFailedBatch.Blockers) == 0
 	set.Retry.Eligible = len(set.Retry.Blockers) == 0
 	set.Abandon.Eligible = len(set.Abandon.Blockers) == 0
 	return set, nil

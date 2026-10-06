@@ -183,6 +183,8 @@ func (e *OperatorRequestError) Unwrap() error {
 		return ErrDeploymentPreviewStale
 	case OperatorCodeDeploymentPreconditionFailed:
 		return ErrDeploymentPreconditionFailed
+	case OperatorCodeDeploymentContinueRefused:
+		return ErrDeploymentContinueRefused
 	case OperatorCodeDeploymentNotFound:
 		return ErrDeploymentNotFound
 	case OperatorCodeDeploymentNotPaused:

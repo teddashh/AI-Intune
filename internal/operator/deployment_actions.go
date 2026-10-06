@@ -15,6 +15,7 @@ import (
 	"github.com/teddashh/AI-Intune/internal/artifact"
 	"github.com/teddashh/AI-Intune/internal/deploy"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
+	"github.com/teddashh/AI-Intune/internal/rollout"
 	"github.com/teddashh/AI-Intune/internal/store"
 )
 
@@ -28,10 +29,11 @@ var ErrInvalidDeploymentAction = errors.New("operator: invalid deployment action
 type DeploymentTransportRejectionAction string
 
 const (
-	DeploymentTransportRejectionCreate   DeploymentTransportRejectionAction = "create"
-	DeploymentTransportRejectionContinue DeploymentTransportRejectionAction = "continue"
-	DeploymentTransportRejectionRetry    DeploymentTransportRejectionAction = "retry"
-	DeploymentTransportRejectionAbandon  DeploymentTransportRejectionAction = "abandon"
+	DeploymentTransportRejectionCreate          DeploymentTransportRejectionAction = "create"
+	DeploymentTransportRejectionContinue        DeploymentTransportRejectionAction = "continue"
+	DeploymentTransportRejectionSkipFailedBatch DeploymentTransportRejectionAction = "skip_failed_batch"
+	DeploymentTransportRejectionRetry           DeploymentTransportRejectionAction = "retry"
+	DeploymentTransportRejectionAbandon         DeploymentTransportRejectionAction = "abandon"
 )
 
 type DeploymentTransportRejectionRequest struct {
@@ -170,6 +172,8 @@ func (s *Service) RecordDeploymentTransportRejection(request DeploymentTransport
 		action, subject = store.AuditDeploymentCreate, "deployment create"
 	case DeploymentTransportRejectionContinue:
 		action = store.AuditDeploymentContinue
+	case DeploymentTransportRejectionSkipFailedBatch:
+		action = store.AuditDeploymentSkipFailedBatch
 	case DeploymentTransportRejectionRetry:
 		action = store.AuditDeploymentRetry
 	case DeploymentTransportRejectionAbandon:
@@ -191,6 +195,12 @@ func (s *Service) PreviewDeploymentContinueContext(ctx context.Context, request 
 	evaluatedAt time.Time,
 ) (DeploymentActionPreviewResult, error) {
 	return s.previewDeploymentAction(ctx, "continue", request.DeploymentID, evaluatedAt)
+}
+
+func (s *Service) PreviewDeploymentSkipFailedBatchContext(ctx context.Context, request DeploymentContinuePreviewRequest,
+	evaluatedAt time.Time,
+) (DeploymentActionPreviewResult, error) {
+	return s.previewDeploymentAction(ctx, "skip_failed_batch", request.DeploymentID, evaluatedAt)
 }
 
 func (s *Service) PreviewDeploymentRetry(request DeploymentRetryPreviewRequest, evaluatedAt time.Time) (DeploymentActionPreviewResult, error) {
@@ -268,7 +278,7 @@ func (s *Service) ApplyDeploymentCreateContext(ctx context.Context, request Depl
 		}
 		prepared.Deployment = store.NewDeployment{
 			Channel: preview.Channel, ResourceKind: "openclaw", ResourceID: "openclaw",
-			Spec: material.Spec, BatchSize: preview.BatchSize, CreatedBy: createdBy,
+			Spec: material.Spec, BatchSize: preview.BatchSize, PauseAfterCanary: true, CreatedBy: createdBy,
 			Targets: deploymentTargetsFromPlan(preview.Targets),
 			Job: store.NewJob{
 				ArtifactDigest: material.Digest, Irreversible: preview.Irreversible,
@@ -342,6 +352,62 @@ func (s *Service) ApplyDeploymentContinueContext(ctx context.Context, request De
 	return projected, nil
 }
 
+func (s *Service) ApplyDeploymentSkipFailedBatch(request DeploymentContinueApplyRequest) (DeploymentMutationResult, error) {
+	return s.ApplyDeploymentSkipFailedBatchContext(context.Background(), request)
+}
+
+func (s *Service) ApplyDeploymentSkipFailedBatchContext(ctx context.Context, request DeploymentContinueApplyRequest) (DeploymentMutationResult, error) {
+	if ctx == nil {
+		return DeploymentMutationResult{}, fmt.Errorf("%w: context is required", ErrInvalidDeploymentAction)
+	}
+	if err := ctx.Err(); err != nil {
+		return DeploymentMutationResult{}, err
+	}
+	if s == nil || s.store == nil {
+		return DeploymentMutationResult{}, fmt.Errorf("%w: store is required", ErrInvalidDeploymentAction)
+	}
+	digest := DeploymentSkipFailedBatchSemanticDigest(request)
+	audit := deploymentActionAudit(request.Actor, request.Reason, request.IdempotencyKey, digest)
+	result, err := s.store.ApplyOperatorDeploymentSkipFailedBatch(store.OperatorDeploymentRequest{
+		DeploymentID: request.DeploymentID, PreviewDigest: request.PreviewDigest,
+		ExpectedControlRevision: request.ExpectedControlRevision, ExpectedOpenedBatch: request.ExpectedOpenedBatch,
+		ConfirmChannel: request.ConfirmChannel,
+		IdempotencyKey: request.IdempotencyKey, RequestDigest: digest, Audit: audit,
+	}, func() (store.OperatorDeploymentPrepared, error) {
+		if err := validateDeploymentActionReason(request.Reason); err != nil {
+			return store.OperatorDeploymentPrepared{}, err
+		}
+		if strings.TrimSpace(request.Reason) == "" {
+			return store.OperatorDeploymentPrepared{}, fmt.Errorf("%w: skip failed batch requires a reason", ErrInvalidDeploymentAction)
+		}
+		snapshot, err := s.deploymentActionSnapshot(ctx, "skip_failed_batch", request.DeploymentID, time.Now().UTC())
+		if err != nil {
+			return store.OperatorDeploymentPrepared{}, deploymentControlPrepareError(err)
+		}
+		prepared := store.OperatorDeploymentPrepared{CurrentPreviewDigest: snapshot.Result.PreviewDigest}
+		if snapshot.Result.PreviewDigest != request.PreviewDigest {
+			return prepared, nil
+		}
+		if request.ConfirmChannel != snapshot.Result.Deployment.Channel {
+			return store.OperatorDeploymentPrepared{}, deploymentRejection(store.OperatorCodeDeploymentConfirmationMismatch)
+		}
+		if !snapshot.Result.Eligibility.Eligible {
+			return store.OperatorDeploymentPrepared{}, deploymentEligibilityRejection("skip_failed_batch", snapshot.Result.Eligibility.Blockers)
+		}
+		return prepared, nil
+	})
+	if err != nil {
+		s.recordDeploymentActionFallback(store.AuditDeploymentSkipFailedBatch, request.DeploymentID, request.Reason,
+			request.IdempotencyKey, digest, request.Actor, result.Audited, err)
+		return DeploymentMutationResult{}, err
+	}
+	projected, projectErr := projectDeploymentMutation("skip_failed_batch", result)
+	if projectErr != nil {
+		return DeploymentMutationResult{}, projectErr
+	}
+	return projected, nil
+}
+
 func (s *Service) ApplyDeploymentRetry(request DeploymentRetryApplyRequest) (DeploymentMutationResult, error) {
 	return s.ApplyDeploymentRetryContext(context.Background(), request)
 }
@@ -403,7 +469,7 @@ func (s *Service) ApplyDeploymentRetryContext(ctx context.Context, request Deplo
 		prepared.Deployment = store.NewDeployment{
 			Channel: snapshot.View.Channel, ResourceKind: snapshot.View.ResourceKind,
 			ResourceID: snapshot.View.ResourceID, Spec: snapshot.View.Spec,
-			BatchSize: snapshot.View.BatchSize, CreatedBy: createdBy, RetryOf: request.DeploymentID,
+			BatchSize: snapshot.View.BatchSize, PauseAfterCanary: true, CreatedBy: createdBy, RetryOf: request.DeploymentID,
 			Targets: deploymentTargetsFromActionPlan(snapshot.Result.Targets), Job: template,
 		}
 		return prepared, nil
@@ -501,7 +567,7 @@ func (s *Service) deploymentActionSnapshot(ctx context.Context, action, deployme
 		return deploymentActionSnapshot{}, fmt.Errorf("%w: deployment_id and evaluated_at are required", ErrInvalidDeploymentAction)
 	}
 	switch action {
-	case "continue", "retry", "abandon":
+	case "continue", "skip_failed_batch", "retry", "abandon":
 	default:
 		return deploymentActionSnapshot{}, fmt.Errorf("%w: action is invalid", ErrInvalidDeploymentAction)
 	}
@@ -519,9 +585,12 @@ func (s *Service) deploymentActionSnapshot(ctx context.Context, action, deployme
 		return deploymentActionSnapshot{}, err
 	}
 	eligibility := actions.Continue
-	if action == "retry" {
+	switch action {
+	case "skip_failed_batch":
+		eligibility = actions.SkipFailedBatch
+	case "retry":
 		eligibility = actions.Retry
-	} else if action == "abandon" {
+	case "abandon":
 		eligibility = actions.Abandon
 	}
 	result := DeploymentActionPreviewResult{
@@ -548,7 +617,7 @@ func (s *Service) deploymentActionSnapshot(ctx context.Context, action, deployme
 	sort.Strings(snapshot.TerminalFailureMachineIDs)
 
 	switch action {
-	case "continue":
+	case "continue", "skip_failed_batch":
 		if view.OpenedBatch < view.TotalBatches {
 			for _, target := range view.Targets {
 				if target.ExcludedReason == "" && target.JobID == "" && target.BatchNo == view.OpenedBatch+1 {
@@ -593,6 +662,7 @@ func (s *Service) deploymentActionSnapshot(ctx context.Context, action, deployme
 				if planErr != nil {
 					return deploymentActionSnapshot{}, planErr
 				}
+				plan = rollout.ApplyCanaryFirst(plan, view.BatchSize)
 				planned, projectErr := projectDeploymentPlan(plan, view.BatchSize)
 				if projectErr != nil {
 					return deploymentActionSnapshot{}, projectErr
@@ -616,7 +686,7 @@ func (s *Service) deploymentActionSnapshot(ctx context.Context, action, deployme
 		return snapshot.Result.Targets[i].MachineID < snapshot.Result.Targets[j].MachineID
 	})
 
-	if (action == "continue" && view.OpenedBatch < view.TotalBatches) || action == "retry" {
+	if ((action == "continue" || action == "skip_failed_batch") && view.OpenedBatch < view.TotalBatches) || action == "retry" {
 		if view.Channel == "stable" && summary.Material.Status == DeploymentMaterialRecorded &&
 			summary.Material.Version != nil && summary.Material.ArtifactDigest != nil {
 			decision, promoteErr := s.store.PreviewStableOpenClawPromotion(
@@ -767,6 +837,21 @@ func DeploymentCreateApplySemanticDigest(request DeploymentCreateApplyRequest) s
 	return sha256JSON(body)
 }
 
+func DeploymentSkipFailedBatchSemanticDigest(request DeploymentContinueApplyRequest) string {
+	body := struct {
+		Version                 int    `json:"version"`
+		Action                  string `json:"action"`
+		DeploymentID            string `json:"deployment_id"`
+		PreviewDigest           string `json:"preview_digest"`
+		ExpectedControlRevision *int64 `json:"expected_control_revision"`
+		ExpectedOpenedBatch     *int   `json:"expected_opened_batch"`
+		ConfirmChannel          string `json:"confirm_channel"`
+		Reason                  string `json:"reason"`
+	}{DeploymentActionSchemaVersion, "skip_failed_batch", request.DeploymentID, request.PreviewDigest,
+		request.ExpectedControlRevision, request.ExpectedOpenedBatch, request.ConfirmChannel, request.Reason}
+	return sha256JSON(body)
+}
+
 func DeploymentContinueSemanticDigest(request DeploymentContinueApplyRequest) string {
 	body := struct {
 		Version                 int    `json:"version"`
@@ -890,6 +975,9 @@ func deploymentControlPrepareError(err error) error {
 }
 
 func deploymentEligibilityRejection(action string, blockers []string) error {
+	if containsActionBlocker(blockers, "failed_batch_requires_explicit_skip") {
+		return deploymentRejection(store.OperatorCodeDeploymentContinueRefused)
+	}
 	if containsActionBlocker(blockers, "stable_promotion_locked") {
 		return deploymentRejection(store.OperatorCodeDeploymentPromotionBlocked)
 	}

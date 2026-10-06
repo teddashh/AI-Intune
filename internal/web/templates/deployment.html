@@ -101,6 +101,17 @@
     {{end}}
   {{end}}
 
+  <h3>skip failed batch</h3>
+  <p class="small {{if not $d.SkipFailedBatch.Eligible}}dim{{end}}">{{$d.SkipFailedBatch.Reason}}</p>
+  {{if $d.SkipFailedBatch.Eligible}}
+    {{if $.Access.CanOperate}}
+    <form class="action-form" method="post" action="/deployments/{{$v.DeploymentID}}/skip-failed-batch-preview">
+      <label><span class="field-label">理由</span><input type="text" name="reason" maxlength="500" autocomplete="off" required></label>
+      <button type="submit">skip failed batch</button>
+    </form>
+    {{end}}
+  {{end}}
+
   <h3>Retry terminal failures</h3>
   <p class="small {{if not $d.Retry.Eligible}}dim{{end}}">{{$d.Retry.Reason}}</p>
   {{if $d.Retry.Eligible}}

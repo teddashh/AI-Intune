@@ -403,7 +403,14 @@ func TestOperatorDeploymentReplayRejectsForgedTerminalLifecycleTimes(t *testing.
 			now := time.Date(2026, 9, 8, 13, 45, 0, 0, time.UTC)
 			s.nowFn = func() time.Time { return now }
 			d, jobs := createBatchGuardFixture(t, s, 1)
-			setRolloutJobTerminal(t, s, jobs[0], deploy.Failed)
+			// Continue finishes a succeeded last batch and writes FinishedAt.
+			// Abandon still stops a failed deployment. Plain Continue does not
+			// finish a failed last batch.
+			terminal := deploy.Failed
+			if action == operatorDeploymentContinue {
+				terminal = deploy.Succeeded
+			}
+			setRolloutJobTerminal(t, s, jobs[0], terminal)
 			if changed, err := s.SetDeploymentState(d.DeploymentID, DeploymentRunning, DeploymentPaused, now); err != nil || !changed {
 				t.Fatalf("pause changed=%t err=%v", changed, err)
 			}
@@ -663,7 +670,7 @@ func TestApplyOperatorDeploymentContinueCASNoDoubleOpenAndRejectionReplay(t *tes
 	now := time.Date(2026, 9, 8, 16, 0, 0, 0, time.UTC)
 	s.nowFn = func() time.Time { return now }
 	d, firstJobs := createBatchGuardFixture(t, s, 2)
-	setRolloutJobTerminal(t, s, firstJobs[0], deploy.Failed)
+	setRolloutJobTerminal(t, s, firstJobs[0], deploy.Succeeded)
 	if changed, err := s.SetDeploymentState(d.DeploymentID, DeploymentRunning, DeploymentPaused, now); err != nil || !changed {
 		t.Fatalf("pause changed=%v err=%v", changed, err)
 	}
@@ -677,7 +684,7 @@ func TestApplyOperatorDeploymentContinueCASNoDoubleOpenAndRejectionReplay(t *tes
 		ExpectedControlRevision: &expectedRevision, ExpectedOpenedBatch: &expectedOpened,
 		ConfirmChannel: "canary",
 		IdempotencyKey: "continue-key", RequestDigest: "sha256:continue-body",
-		Audit: AuditEntry{SourceAddr: "test", Reason: "accept failed first batch"},
+		Audit: AuditEntry{SourceAddr: "test", Reason: "accept succeeded canary batch"},
 	}
 	prepareCalls := 0
 	prepare := func() (OperatorDeploymentPrepared, error) {

@@ -79,7 +79,7 @@ func TestWriteDeploymentActionPreviewAddsHumanImpactOnlyToHumanOutput(t *testing
 				Deployment:  operator.DeploymentSummary{DeploymentID: "deployment-finish", Channel: "canary"},
 				Eligibility: operator.DeploymentActionEligibility{Eligible: true, Outcome: "finish"},
 			},
-			wantHuman:       "確認後會發生：\"所有批次都已開完；確認後會把 deployment 收成 finished，既有終態未成功的工作單不會重開。\"",
+			wantHuman:       "確認後會發生：\"所有批次都已開完且最後一批是 succeeded；確認後會把 deployment 收成 finished。\"",
 			forbiddenInJSON: []string{"確認後會發生", "所有批次都已開完"},
 		},
 		{

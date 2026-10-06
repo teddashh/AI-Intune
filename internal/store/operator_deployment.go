@@ -18,6 +18,7 @@ import (
 const (
 	OperatorCodeDeploymentPreviewStale         = "DEPLOYMENT_PREVIEW_STALE"
 	OperatorCodeDeploymentPreconditionFailed   = "DEPLOYMENT_PRECONDITION_FAILED"
+	OperatorCodeDeploymentContinueRefused      = "DEPLOYMENT_CONTINUE_REFUSED"
 	OperatorCodeDeploymentNotFound             = "DEPLOYMENT_NOT_FOUND"
 	OperatorCodeDeploymentNotPaused            = "DEPLOYMENT_NOT_PAUSED"
 	OperatorCodeDeploymentActiveJobs           = "DEPLOYMENT_ACTIVE_JOBS"
@@ -46,10 +47,11 @@ const (
 type operatorDeploymentAction string
 
 const (
-	operatorDeploymentCreate   operatorDeploymentAction = "create"
-	operatorDeploymentContinue operatorDeploymentAction = "continue"
-	operatorDeploymentRetry    operatorDeploymentAction = "retry"
-	operatorDeploymentAbandon  operatorDeploymentAction = "abandon"
+	operatorDeploymentCreate          operatorDeploymentAction = "create"
+	operatorDeploymentContinue        operatorDeploymentAction = "continue"
+	operatorDeploymentSkipFailedBatch operatorDeploymentAction = "skip_failed_batch"
+	operatorDeploymentRetry           operatorDeploymentAction = "retry"
+	operatorDeploymentAbandon         operatorDeploymentAction = "abandon"
 )
 
 // OperatorDeploymentRequest is the canonical Store-side control envelope.
@@ -107,6 +109,10 @@ func (s *Store) ApplyOperatorDeploymentCreate(req OperatorDeploymentRequest, pre
 
 func (s *Store) ApplyOperatorDeploymentContinue(req OperatorDeploymentRequest, prepare OperatorDeploymentPrepare) (OperatorDeploymentResult, error) {
 	return s.applyOperatorDeployment(operatorDeploymentContinue, req, prepare)
+}
+
+func (s *Store) ApplyOperatorDeploymentSkipFailedBatch(req OperatorDeploymentRequest, prepare OperatorDeploymentPrepare) (OperatorDeploymentResult, error) {
+	return s.applyOperatorDeployment(operatorDeploymentSkipFailedBatch, req, prepare)
 }
 
 func (s *Store) ApplyOperatorDeploymentRetry(req OperatorDeploymentRequest, prepare OperatorDeploymentPrepare) (OperatorDeploymentResult, error) {
@@ -267,6 +273,8 @@ func operatorDeploymentAudit(action operatorDeploymentAction, req OperatorDeploy
 		audit.Action = AuditDeploymentCreate
 	case operatorDeploymentContinue:
 		audit.Action = AuditDeploymentContinue
+	case operatorDeploymentSkipFailedBatch:
+		audit.Action = AuditDeploymentSkipFailedBatch
 	case operatorDeploymentRetry:
 		audit.Action = AuditDeploymentRetry
 	case operatorDeploymentAbandon:
@@ -467,7 +475,7 @@ func validOperatorDeploymentReceipt(receipt operatorDeploymentReceipt, action op
 			(d.FinishedAt != nil && d.FinishedAt.Before(*d.PausedAt)))) {
 		return false
 	}
-	if action == operatorDeploymentCreate || action == operatorDeploymentContinue || action == operatorDeploymentRetry {
+	if action == operatorDeploymentCreate || action == operatorDeploymentContinue || action == operatorDeploymentSkipFailedBatch || action == operatorDeploymentRetry {
 		if req.ConfirmChannel != d.Channel {
 			return false
 		}
@@ -519,6 +527,15 @@ func validOperatorDeploymentReceipt(receipt operatorDeploymentReceipt, action op
 		finished := receipt.OpenedBatch == *req.ExpectedOpenedBatch &&
 			d.State == DeploymentFinished && d.FinishedAt != nil && len(receipt.Jobs) == 0
 		return openedNext || finished
+	case operatorDeploymentSkipFailedBatch:
+		if d.DeploymentID != req.DeploymentID || req.ExpectedControlRevision == nil ||
+			req.ExpectedOpenedBatch == nil || d.ControlRevision != *req.ExpectedControlRevision+1 ||
+			d.PausedAt != nil {
+			return false
+		}
+		return receipt.OpenedBatch == *req.ExpectedOpenedBatch+1 &&
+			d.State == DeploymentRunning && d.FinishedAt == nil && len(receipt.Jobs) > 0 &&
+			len(receipt.Jobs) <= d.BatchSize
 	case operatorDeploymentAbandon:
 		return d.DeploymentID == req.DeploymentID && req.ExpectedControlRevision != nil &&
 			req.ExpectedOpenedBatch != nil && d.ControlRevision == *req.ExpectedControlRevision+1 &&
@@ -771,6 +788,8 @@ func canonicalOperatorDeploymentRejectionDetail(code string) (string, bool) {
 		return "expected_control_revision 與 expected_opened_batch 不可省略；請重新讀取 deployment", true
 	case OperatorCodeDeploymentPreconditionFailed:
 		return "deployment control revision 或 opened batch 不符合 request 預期；請重新讀取並預覽", true
+	case OperatorCodeDeploymentContinueRefused:
+		return "plain Continue refuses a failed batch. Use the separately labelled skip failed batch action and record a reason.", true
 	case OperatorCodeDeploymentNotFound:
 		return "找不到指定的 deployment", true
 	case OperatorCodeDeploymentNotPaused:
@@ -819,6 +838,8 @@ func operatorDeploymentCodeForError(err error) (string, bool) {
 		return OperatorCodeDeploymentPromotionBlocked, true
 	case errors.Is(err, ErrBadChannel):
 		return OperatorCodeBadChannel, true
+	case errors.Is(err, ErrDeploymentContinueRefused):
+		return OperatorCodeDeploymentContinueRefused, true
 	case errors.Is(err, ErrDeploymentPreconditionFailed), errors.Is(err, ErrDeploymentBatchNotReady),
 		errors.Is(err, ErrDeploymentFinishNotReady), errors.Is(err, ErrDeploymentBadTransition):
 		return OperatorCodeDeploymentPreconditionFailed, true
@@ -867,7 +888,11 @@ func (s *Store) mutateOperatorDeploymentTx(tx *sql.Tx, action operatorDeployment
 		}
 		return s.createOperatorDeploymentTx(tx, prepared.Deployment, now)
 	case operatorDeploymentContinue:
-		return s.continueDeploymentTx(tx, req.DeploymentID, now)
+		return s.continueDeploymentTx(tx, req.DeploymentID, now, deploymentContinuePolicy{RefuseFailedBatch: true})
+	case operatorDeploymentSkipFailedBatch:
+		return s.continueDeploymentTx(tx, req.DeploymentID, now, deploymentContinuePolicy{
+			SkipFailedBatch: true, SkipReason: req.Audit.Reason,
+		})
 	case operatorDeploymentAbandon:
 		d, err := s.abandonDeploymentTx(tx, req.DeploymentID, now)
 		return d, nil, err

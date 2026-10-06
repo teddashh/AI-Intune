@@ -175,13 +175,17 @@ func TestDeploymentActionEligibilityHidesDoomedContinueForm(t *testing.T) {
 
 		body := renderWithCapabilities(t, s, "/deployments/"+d.DeploymentID, names)
 		for _, want := range []string{
-			`action="/deployments/` + d.DeploymentID + `/continue-preview"`,
-			"既有終態未成功的工作單不會重開", "Retry terminal failures",
+			"plain Continue 拒絕失敗批次", "Retry terminal failures",
 			`action="/deployments/` + d.DeploymentID + `/abandon-preview"`,
+			`action="/deployments/` + d.DeploymentID + `/retry-preview"`,
 		} {
 			if !strings.Contains(body, want) {
-				t.Errorf("eligible deployment detail missing %q", want)
+				t.Errorf("failed-batch deployment detail missing %q", want)
 			}
+		}
+		if strings.Contains(body, `action="/deployments/`+d.DeploymentID+`/continue-preview"`) ||
+			strings.Contains(body, `action="/deployments/`+d.DeploymentID+`/skip-failed-batch-preview"`) {
+			t.Fatal("single-batch failure exposed Continue or skip failed batch")
 		}
 		if strings.Contains(body, "clawctl-hub deployment") || strings.Contains(body, `name="confirm_channel"`) {
 			t.Fatal("detail exposed a CLI placeholder or skipped the preview step")
@@ -190,6 +194,7 @@ func TestDeploymentActionEligibilityHidesDoomedContinueForm(t *testing.T) {
 		viewOnly := renderWithCapabilities(t, s, "/deployments/"+d.DeploymentID,
 			operatorauth.CapabilityNames{View: names.View})
 		if strings.Contains(viewOnly, `action="/deployments/`+d.DeploymentID+`/continue-preview"`) ||
+			strings.Contains(viewOnly, `action="/deployments/`+d.DeploymentID+`/skip-failed-batch-preview"`) ||
 			strings.Contains(viewOnly, `action="/deployments/`+d.DeploymentID+`/retry-preview"`) ||
 			strings.Contains(viewOnly, `action="/deployments/`+d.DeploymentID+`/abandon-preview"`) {
 			t.Fatal("view-only operator saw a mutation form")
@@ -226,7 +231,7 @@ func TestDeploymentActionEligibilityHidesDoomedContinueForm(t *testing.T) {
 			t.Fatal(err)
 		}
 		body := renderWithCapabilities(t, s, "/deployments/"+d.DeploymentID, names)
-		for _, action := range []string{"continue", "retry", "abandon"} {
+		for _, action := range []string{"continue", "skip-failed-batch", "retry", "abandon"} {
 			if strings.Contains(body, `action="/deployments/`+d.DeploymentID+`/`+action+`-preview"`) {
 				t.Errorf("exhausted deployment exposed %s form", action)
 			}

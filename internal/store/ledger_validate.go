@@ -335,6 +335,13 @@ var additiveLedgerColumns = []struct {
 		},
 	},
 	{
+		table: "deployments",
+		column: ledgerColumnInvariant{
+			name: "pause_after_canary", declaredType: "INTEGER", notNull: 1,
+			hasDefault: true, defaultSQL: "0",
+		},
+	},
+	{
 		table: "verification_results",
 		column: ledgerColumnInvariant{
 			name: "producer_kind", declaredType: "TEXT", notNull: 1,

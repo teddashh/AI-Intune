@@ -74,6 +74,7 @@ type deploymentPage struct {
 	CanarySilent     []rollout.SilentFailure
 	Independent      deploymentIndependentSummary
 	Continue         deploymentActionEligibility
+	SkipFailedBatch  deploymentActionEligibility
 	Retry            deploymentActionEligibility
 	Abandon          deploymentActionEligibility
 	Rollout          rollout.CanaryAssessment
@@ -308,6 +309,7 @@ func (s *Server) deployment(w http.ResponseWriter, r *http.Request) {
 	dp.Independent = deploymentIndependentFromSafe(detail.Independent)
 	dp.Rollout = canaryAssessment(detail)
 	dp.Continue = deploymentActionView("continue", detail.Actions.Continue)
+	dp.SkipFailedBatch = deploymentActionView("skip_failed_batch", detail.Actions.SkipFailedBatch)
 	dp.Retry = deploymentActionView("retry", detail.Actions.Retry)
 	dp.Abandon = deploymentActionView("abandon", detail.Actions.Abandon)
 	s.render(w, r, "deployment.html", page{
@@ -320,6 +322,7 @@ func canaryAssessment(detail operator.DeploymentDetailResult) rollout.CanaryAsse
 	in := rollout.CanaryInput{
 		State: detail.Item.State, OpenedBatch: detail.Item.OpenedBatch,
 		TotalBatches: detail.Item.TotalBatches, BatchSize: detail.Item.BatchSize,
+		PauseAfterCanary: detail.Item.PauseAfterCanary,
 	}
 	for _, target := range detail.Targets {
 		machine := rollout.CanaryMachine{

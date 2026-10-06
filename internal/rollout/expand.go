@@ -27,7 +27,7 @@ var RollbackSentences = []string{
 	"There is no automatic fleet rollback to the previous artifact.",
 	"Abandon stops opening further jobs. Machines whose jobs already succeeded keep that result.",
 	"failed means Hub closed a reversible job as returned to the previous version. manual_intervention has no rollback evidence. rejected means the machine did not apply the job. lease_expired means the agent stopped reporting and the machine contents are unknown.",
-	"Continue on a paused deployment can skip a failed batch and open the next one. rollout_expand does not send Continue while the canary job is not succeeded.",
+	"A new deployment pauses after its canary batch is succeeded. Expansion is an explicit Continue from the UI, CLI, or rollout_expand. Deployments created before that hold still let the driver open the next batch. Plain Continue refuses a failed batch. skip failed batch is a separate labelled action with its own preview digest and a recorded reason. MCP tools do not send that skip.",
 	"Stable promotion uses the existing promotion gate: a finished canary, one full business day, and cross-failure-domain evidence. Opening the next canary batch is not that gate.",
 	"succeeded is the terminal state Hub writes after stored verification evidence. An agent finish_work report only enters verifying.",
 }
@@ -49,11 +49,12 @@ type CanaryMachine struct {
 // CanaryInput is the deployment facts AssessCanary needs. State is the
 // deployment state (running, paused, finished) or "preview" before create.
 type CanaryInput struct {
-	State        string
-	OpenedBatch  int
-	TotalBatches int
-	BatchSize    int
-	Targets      []CanaryMachine
+	State            string
+	OpenedBatch      int
+	TotalBatches     int
+	BatchSize        int
+	PauseAfterCanary bool
+	Targets          []CanaryMachine
 }
 
 // CanaryAssessment is the operator-visible canary position.
@@ -154,7 +155,7 @@ func AssessCanary(in CanaryInput) CanaryAssessment {
 	case anyUnopened(later):
 		out.Phase = CanaryReadyToExpand
 		out.ExpandAllowed = true
-		out.Reason = readyReason(in.State)
+		out.Reason = readyReason(in.State, in.PauseAfterCanary)
 	case anyOpenNonTerminal(later):
 		out.Phase = CanaryExpanding
 		out.Reason = "A later batch is open. Those jobs are waiting for a Hub terminal state."
@@ -227,12 +228,15 @@ func stoppedReason(canary CanaryMachine) string {
 	}
 }
 
-func readyReason(state string) string {
+func readyReason(state string, pauseAfterCanary bool) string {
 	switch state {
 	case "running":
-		return "The canary job is succeeded. A later machine is still unopened. While the deployment is running, the Hub deployment driver opens the next batch after that verdict."
+		if pauseAfterCanary {
+			return "The canary job is succeeded. A later machine is still unopened. The Hub pauses this deployment after that verdict. Expansion waits for an explicit Continue."
+		}
+		return "The canary job is succeeded. A later machine is still unopened. This deployment was created before the canary hold, so the Hub driver still opens the next batch."
 	case "paused":
-		return "The canary job is succeeded and the deployment is paused. A later machine is still unopened. The next write is the existing Continue preview, then rollout_expand with that preview digest."
+		return "The canary job is succeeded and the deployment is paused. A later machine is still unopened. The next write is the existing Continue preview, then Continue from the UI, CLI, or rollout_expand."
 	default:
 		return "The canary job is succeeded. A later machine is still unopened."
 	}

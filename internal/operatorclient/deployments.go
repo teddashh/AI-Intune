@@ -21,6 +21,7 @@ import (
 	"github.com/teddashh/AI-Intune/internal/artifact"
 	"github.com/teddashh/AI-Intune/internal/deploy"
 	"github.com/teddashh/AI-Intune/internal/operator"
+	"github.com/teddashh/AI-Intune/internal/rollout"
 	"github.com/teddashh/AI-Intune/internal/store"
 )
 
@@ -397,8 +398,21 @@ func validateDeploymentDetailResult(result operator.DeploymentDetailResult, depl
 	if opened >= total {
 		continueOutcome = "finish"
 	}
+	openedFailed := false
+	for _, target := range result.Targets {
+		if target.JobState == nil || target.BatchNo != opened {
+			continue
+		}
+		if deploy.IsTerminal(*target.JobState) && *target.JobState != deploy.Succeeded {
+			openedFailed = true
+		}
+	}
 	if err := validateDeploymentDetailActionEligibility("continue", result.Actions.Continue, continueOutcome,
 		continueAffected, deploymentContinueBlockers); err != nil {
+		return err
+	}
+	if err := validateDeploymentDetailActionEligibility("skip_failed_batch", result.Actions.SkipFailedBatch, "open_next_batch",
+		continueAffected, deploymentSkipFailedBatchBlockers); err != nil {
 		return err
 	}
 	if err := validateDeploymentDetailActionEligibility("retry", result.Actions.Retry, "create_retry_attempt",
@@ -410,7 +424,7 @@ func validateDeploymentDetailResult(result operator.DeploymentDetailResult, depl
 		return err
 	}
 	if err := validateDeploymentVisibleActionBlockers(result.Item, result.Actions, nonterminal,
-		retryTargets, continueAffected); err != nil {
+		retryTargets, continueAffected, openedFailed); err != nil {
 		return err
 	}
 	return nil
@@ -601,7 +615,7 @@ func validateDeploymentCreatePreviewResult(result operator.DeploymentCreatePrevi
 			continue
 		}
 		impact++
-		if target.BatchNo != (impact-1)/result.BatchSize+1 {
+		if target.BatchNo != rollout.CanaryFirstBatch(impact, result.BatchSize) {
 			return errors.New("operator client: preview batches are not canonical")
 		}
 		if target.BatchNo > totalBatches {
@@ -853,6 +867,14 @@ var deploymentContinueBlockers = map[string]int{
 	"deployment_not_paused": 0, "nonterminal_jobs": 1, "no_opened_batch": 2,
 	"next_batch_empty": 3, "invalid_material": 4, "stable_promotion_locked": 5,
 	"active_resource_deployment": 6, "control_revision_exhausted": 7,
+	"failed_batch_requires_explicit_skip": 8,
+}
+
+var deploymentSkipFailedBatchBlockers = map[string]int{
+	"deployment_not_paused": 0, "nonterminal_jobs": 1, "no_opened_batch": 2,
+	"next_batch_empty": 3, "opened_batch_not_failed": 4, "invalid_material": 5,
+	"stable_promotion_locked": 6, "active_resource_deployment": 7,
+	"control_revision_exhausted": 8,
 }
 
 var deploymentRetryBlockers = map[string]int{
@@ -895,6 +917,7 @@ func validateDeploymentActionEligibility(action operator.DeploymentActionEligibi
 
 func validateDeploymentVisibleActionBlockers(item operator.DeploymentSummary,
 	actions operator.DeploymentActionEligibilitySet, nonterminal, retryTargets, continueAffected int,
+	openedBatchFailed bool,
 ) error {
 	checks := []struct {
 		name     string
@@ -915,8 +938,16 @@ func validateDeploymentVisibleActionBlockers(item operator.DeploymentSummary,
 		{"abandon", actions.Abandon, "deployment_not_paused", item.State != store.DeploymentPaused},
 		{"abandon", actions.Abandon, "nonterminal_jobs", nonterminal > 0},
 		{"continue", actions.Continue, "control_revision_exhausted", item.ControlRevision == store.MaxDeploymentControlRevision},
+		{"skip_failed_batch", actions.SkipFailedBatch, "control_revision_exhausted", item.ControlRevision == store.MaxDeploymentControlRevision},
 		{"retry", actions.Retry, "control_revision_exhausted", item.ControlRevision == store.MaxDeploymentControlRevision},
 		{"abandon", actions.Abandon, "control_revision_exhausted", item.ControlRevision == store.MaxDeploymentControlRevision},
+		{"continue", actions.Continue, "failed_batch_requires_explicit_skip", openedBatchFailed},
+		{"skip_failed_batch", actions.SkipFailedBatch, "deployment_not_paused", item.State != store.DeploymentPaused},
+		{"skip_failed_batch", actions.SkipFailedBatch, "nonterminal_jobs", nonterminal > 0},
+		{"skip_failed_batch", actions.SkipFailedBatch, "no_opened_batch", item.OpenedBatch == 0},
+		{"skip_failed_batch", actions.SkipFailedBatch, "next_batch_empty", item.OpenedBatch >= item.TotalBatches || continueAffected == 0},
+		{"skip_failed_batch", actions.SkipFailedBatch, "opened_batch_not_failed", !openedBatchFailed},
+		{"skip_failed_batch", actions.SkipFailedBatch, "invalid_material", item.OpenedBatch < item.TotalBatches && item.Material.Status != operator.DeploymentMaterialRecorded},
 	}
 	for _, check := range checks {
 		if deploymentHasBlocker(check.action, check.blocker) != check.expected {
@@ -930,10 +961,15 @@ func validateDeploymentVisibleActionBlockers(item operator.DeploymentSummary,
 		return errors.New("operator client: stable promotion blockers are incoherent")
 	}
 	activeContinue := deploymentHasBlocker(actions.Continue, "active_resource_deployment")
+	activeSkip := deploymentHasBlocker(actions.SkipFailedBatch, "active_resource_deployment")
 	activeRetry := deploymentHasBlocker(actions.Retry, "active_resource_deployment")
 	activeAbandon := deploymentHasBlocker(actions.Abandon, "active_resource_deployment")
-	if activeContinue != activeRetry || activeRetry != activeAbandon {
+	if activeContinue != activeRetry || activeRetry != activeAbandon || activeSkip != activeContinue {
 		return errors.New("operator client: active resource blockers are incoherent")
+	}
+	stableSkip := deploymentHasBlocker(actions.SkipFailedBatch, "stable_promotion_locked")
+	if stableSkip != stableContinue {
+		return errors.New("operator client: skip stable promotion blocker is incoherent")
 	}
 	return nil
 }

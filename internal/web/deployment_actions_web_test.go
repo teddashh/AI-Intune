@@ -63,7 +63,7 @@ func TestDeploymentActionReviewExplainsContinueFinish(t *testing.T) {
 		Action: "continue", Deployment: operator.DeploymentSummary{DeploymentID: "deployment-finish"},
 		Eligibility: operator.DeploymentActionEligibility{Eligible: true, Outcome: "finish"},
 	})
-	want := "確認後會發生：</b>所有批次都已開完；確認後會把 deployment 收成 finished，既有終態未成功的工作單不會重開。"
+	want := "確認後會發生：</b>所有批次都已開完且最後一批是 succeeded；確認後會把 deployment 收成 finished。"
 	if !strings.Contains(body, want) || strings.Contains(body, "預覽允許：") {
 		t.Fatalf("action review 未正確解釋 finish: %s", body)
 	}
@@ -121,7 +121,7 @@ func TestDeploymentCreateReviewLabelsBlockersWithoutWireTokens(t *testing.T) {
 func TestDeploymentDetailAndActionReviewUseIdenticalImpact(t *testing.T) {
 	s, _ := newServer(t)
 	eligibility := operator.DeploymentActionEligibility{Eligible: true, Outcome: "open_next_batch", AffectedTargets: 3}
-	want := "將開下一批 3 台；既有終態未成功的工作單會保留，不會重開。"
+	want := "將開下一批 3 台。目前批次的 Hub 判決是 succeeded；Continue 不會跳過失敗批次。"
 
 	detailRec := httptest.NewRecorder()
 	detailReq := httptest.NewRequest(http.MethodGet, "/deployments/deployment-shared", nil)
@@ -466,7 +466,10 @@ func TestDeploymentContinueWebRejectsStaleReview(t *testing.T) {
 	s, st := newServer(t)
 	parent, jobs, _ := webDeployment(t, st, "canary", "stale-opened", "stale-next")
 	attachVerifiedDeploymentMaterial(t, s, st, parent)
-	failDeploymentJob(t, st, jobs[0], time.Now().UTC())
+	// The confirm form exists only when Continue is eligible. A failed opened
+	// batch hides it; this review is the legitimate expand after success.
+	// The concurrent opener below is the legacy store transition.
+	succeedDeploymentJob(t, st, jobs[0], time.Now().UTC())
 	if changed, err := st.SetDeploymentState(parent.DeploymentID, store.DeploymentRunning, store.DeploymentPaused, time.Now().UTC()); err != nil || !changed {
 		t.Fatalf("pause parent changed=%t err=%v", changed, err)
 	}

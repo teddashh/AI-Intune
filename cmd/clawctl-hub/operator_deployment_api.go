@@ -132,19 +132,23 @@ func (h *hub) handlePreviewOperatorDeploymentCreate(w http.ResponseWriter, r *ht
 		return
 	}
 	if body.Channel == nil || body.Version == nil || body.ArtifactSHA256 == nil ||
-		body.BatchSize == nil || body.ExecutionTimeoutSeconds == nil || body.Irreversible == nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "deployment preview 必須明列所有 planning fields")
+		body.ExecutionTimeoutSeconds == nil || body.Irreversible == nil {
+		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "deployment preview 必須明列 channel、version、artifact 與 timeout")
 		return
 	}
-	if *body.BatchSize == 0 || *body.ExecutionTimeoutSeconds == 0 {
+	batchSize := 0
+	if body.BatchSize != nil {
+		batchSize = *body.BatchSize
+	}
+	if batchSize == 0 && body.BatchSize != nil || *body.ExecutionTimeoutSeconds == 0 {
 		writeErr(w, http.StatusBadRequest, "BAD_REQUEST",
-			"deployment preview 的 batch_size 與 execution_timeout_seconds 必須是明確的非零值")
+			"deployment preview 的 batch_size 不可為 0；省略則第一批 1 台且後續批次也是 1。execution_timeout_seconds 必須是明確的非零值")
 		return
 	}
 	result, err := operator.NewWithArtifacts(h.store, h.artifactsDir).PreviewDeploymentCreateContext(r.Context(),
 		operator.DeploymentCreatePreviewRequest{
 			Channel: *body.Channel, Version: *body.Version, ArtifactSHA256: *body.ArtifactSHA256,
-			BatchSize: *body.BatchSize, ExecutionTimeoutSeconds: *body.ExecutionTimeoutSeconds,
+			BatchSize: batchSize, ExecutionTimeoutSeconds: *body.ExecutionTimeoutSeconds,
 			Irreversible: *body.Irreversible,
 		}, time.Now().UTC())
 	if err != nil {
@@ -181,23 +185,27 @@ func (h *hub) handleCreateOperatorDeployment(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if body.Channel == nil || body.Version == nil || body.ArtifactSHA256 == nil ||
-		body.BatchSize == nil || body.ExecutionTimeoutSeconds == nil || body.Irreversible == nil {
+		body.ExecutionTimeoutSeconds == nil || body.Irreversible == nil {
 		h.rejectOperatorDeploymentTransport(w, r, actor, store.AuditDeploymentCreate,
 			"deployment create", http.StatusBadRequest, "BAD_REQUEST",
-			"deployment create 必須明列所有 planning fields")
+			"deployment create 必須明列 channel、version、artifact 與 timeout")
 		return
 	}
-	if *body.BatchSize == 0 || *body.ExecutionTimeoutSeconds == 0 {
+	batchSize := 0
+	if body.BatchSize != nil {
+		batchSize = *body.BatchSize
+	}
+	if batchSize == 0 && body.BatchSize != nil || *body.ExecutionTimeoutSeconds == 0 {
 		h.rejectOperatorDeploymentTransport(w, r, actor, store.AuditDeploymentCreate,
 			"deployment create", http.StatusBadRequest, "BAD_REQUEST",
-			"deployment create 的 batch_size 與 execution_timeout_seconds 必須是明確的非零值")
+			"deployment create 的 batch_size 不可為 0；省略則第一批 1 台且後續批次也是 1。execution_timeout_seconds 必須是明確的非零值")
 		return
 	}
 	result, err := operator.NewWithArtifacts(h.store, h.artifactsDir).ApplyDeploymentCreateContext(r.Context(),
 		operator.DeploymentCreateApplyRequest{
 			DeploymentCreatePreviewRequest: operator.DeploymentCreatePreviewRequest{
 				Channel: *body.Channel, Version: *body.Version, ArtifactSHA256: *body.ArtifactSHA256,
-				BatchSize: *body.BatchSize, ExecutionTimeoutSeconds: *body.ExecutionTimeoutSeconds,
+				BatchSize: batchSize, ExecutionTimeoutSeconds: *body.ExecutionTimeoutSeconds,
 				Irreversible: *body.Irreversible,
 			},
 			PreviewDigest: body.PreviewDigest, ConfirmChannel: body.ConfirmChannel,
@@ -217,6 +225,10 @@ func (h *hub) handlePreviewOperatorDeploymentRetry(w http.ResponseWriter, r *htt
 
 func (h *hub) handlePreviewOperatorDeploymentAbandon(w http.ResponseWriter, r *http.Request) {
 	h.previewOperatorDeploymentAction(w, r, "abandon")
+}
+
+func (h *hub) handlePreviewOperatorDeploymentSkipFailedBatch(w http.ResponseWriter, r *http.Request) {
+	h.previewOperatorDeploymentAction(w, r, "skip_failed_batch")
 }
 
 func (h *hub) previewOperatorDeploymentAction(w http.ResponseWriter, r *http.Request, action string) {
@@ -245,6 +257,8 @@ func (h *hub) previewOperatorDeploymentAction(w http.ResponseWriter, r *http.Req
 		result, err = service.PreviewDeploymentRetryContext(r.Context(), operator.DeploymentRetryPreviewRequest{DeploymentID: r.PathValue("id")}, now)
 	case "abandon":
 		result, err = service.PreviewDeploymentAbandonContext(r.Context(), operator.DeploymentAbandonPreviewRequest{DeploymentID: r.PathValue("id")}, now)
+	case "skip_failed_batch":
+		result, err = service.PreviewDeploymentSkipFailedBatchContext(r.Context(), operator.DeploymentContinuePreviewRequest{DeploymentID: r.PathValue("id")}, now)
 	default:
 		err = errors.New("unknown deployment action")
 	}
@@ -275,6 +289,28 @@ func (h *hub) handleContinueOperatorDeployment(w http.ResponseWriter, r *http.Re
 			IdempotencyKey: r.Header.Get("Idempotency-Key"), Actor: actor,
 		})
 	writeOperatorDeploymentMutation(w, result, err, http.StatusOK, "continue")
+}
+
+func (h *hub) handleSkipFailedBatchOperatorDeployment(w http.ResponseWriter, r *http.Request) {
+	actor := operatorActor(r)
+	w.Header().Set("Cache-Control", "no-store")
+	if !h.prepareOperatorDeploymentMutationTransport(w, r, actor, store.AuditDeploymentSkipFailedBatch) {
+		return
+	}
+	var body deploymentContinueOperatorRequest
+	if rejection := decodeOperatorBody(w, r, &body); rejection != nil {
+		h.rejectOperatorDeploymentTransport(w, r, actor, store.AuditDeploymentSkipFailedBatch,
+			"deployment skip failed batch", rejection.Status, rejection.Code, rejection.Detail)
+		return
+	}
+	result, err := operator.NewWithArtifacts(h.store, h.artifactsDir).ApplyDeploymentSkipFailedBatchContext(r.Context(),
+		operator.DeploymentContinueApplyRequest{
+			DeploymentID: r.PathValue("id"), PreviewDigest: body.PreviewDigest,
+			ExpectedControlRevision: body.ExpectedControlRevision, ExpectedOpenedBatch: body.ExpectedOpenedBatch,
+			ConfirmChannel: body.ConfirmChannel, Reason: body.Reason,
+			IdempotencyKey: r.Header.Get("Idempotency-Key"), Actor: actor,
+		})
+	writeOperatorDeploymentMutation(w, result, err, http.StatusOK, "skip_failed_batch")
 }
 
 func (h *hub) handleRetryOperatorDeployment(w http.ResponseWriter, r *http.Request) {

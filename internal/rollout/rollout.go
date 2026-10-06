@@ -99,6 +99,44 @@ func Plan(members []MachineFacts, engines string, batchSize int) DeploymentPlan 
 	return p
 }
 
+// CanaryFirstBatch is the batch number of the includedIndex-th included
+// machine (1-based). The first machine is always batch 1. laterBatchSize
+// sizes only the batches after that. laterBatchSize <= 0 is treated as 1,
+// which matches Plan's uniform formula.
+func CanaryFirstBatch(includedIndex, laterBatchSize int) int {
+	if laterBatchSize <= 0 {
+		laterBatchSize = 1
+	}
+	if includedIndex <= 1 {
+		return 1
+	}
+	return 2 + (includedIndex-2)/laterBatchSize
+}
+
+// ApplyCanaryFirst rewrites an already-built plan so batch 1 holds exactly
+// one included machine. Excluded targets stay at batch 0. Callers that are
+// not creating a new deployment should keep Plan's uniform batches.
+func ApplyCanaryFirst(plan DeploymentPlan, laterBatchSize int) DeploymentPlan {
+	if laterBatchSize <= 0 {
+		laterBatchSize = 1
+	}
+	included := 0
+	maxBatch := 0
+	for i := range plan.Targets {
+		if plan.Targets[i].ExcludedReason != "" {
+			plan.Targets[i].BatchNo = 0
+			continue
+		}
+		included++
+		plan.Targets[i].BatchNo = CanaryFirstBatch(included, laterBatchSize)
+		if plan.Targets[i].BatchNo > maxBatch {
+			maxBatch = plan.Targets[i].BatchNo
+		}
+	}
+	plan.TotalBatches = maxBatch
+	return plan
+}
+
 func (p DeploymentPlan) Summary() string {
 	s := fmt.Sprintf("影響 %d 台，衝突 %d，缺套件 %d，unreachable %d", p.Impact, p.Conflicts, p.MissingPackages, p.Unreachable)
 	if p.UnknownNodes > 0 {

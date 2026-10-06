@@ -841,6 +841,10 @@ CREATE TABLE IF NOT EXISTS deployments (
   -- what agents apply; control_revision answers which operator/driver view
   -- authorized the next control-plane transition.
   control_revision INTEGER NOT NULL DEFAULT 0,
+  -- 0 keeps the pre-hold driver: a succeeded batch opens the next one.
+  -- New operator creates set 1. After batch 1 is Hub-succeeded, the driver
+  -- pauses until an explicit Continue. Existing rows stay 0 via DEFAULT.
+  pause_after_canary INTEGER NOT NULL DEFAULT 0,
   batch_size    INTEGER NOT NULL,
   state         TEXT NOT NULL, -- running | paused | finished
   created_at    TEXT NOT NULL,

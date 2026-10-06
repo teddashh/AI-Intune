@@ -90,9 +90,11 @@ and `rollout_preview` all use `AssessCanary`.
    - `canary_pending`: Hub has not marked the canary job `succeeded`. Wait.
    - `canary_stopped` or `expand_stopped`: stop. `rollout_expand` returns
      `canary_blocked` and does not send Continue.
-   - `ready_to_expand` while the deployment is `running`: poll. The existing
-     deployment driver opens the next batch after that Hub verdict. The tool
-     writes nothing.
+   - `ready_to_expand` while the deployment is `running`: poll. A new
+     deployment pauses after the Hub `succeeded` verdict; `rollout_expand`
+     does not open the next batch while it is still running. A deployment
+     created before that hold (`pause_after_canary` false) still lets the
+     driver open the next batch.
    - `ready_to_expand` while `paused`: `deployment_continue_preview`, then
      `rollout_expand` with that digest and the revision from the status.
    - `expanding`: a later batch is open. Poll.
@@ -106,11 +108,21 @@ verdict is reported as `canary_independent` and does not move the phase.
 Stable promotion stays on the existing gate (`promotion_gate`).
 
 The deployment page shows the same phase, the same reason, and the same
-rollback lines. Continue and Abandon stay on that page. Continue can still
-skip a failed batch when you submit it there. `rollout_expand` will not.
+rollback lines. Continue, skip failed batch, and Abandon stay on that page.
+Plain Continue refuses a failed batch. skip failed batch is a separate
+button and `POST /v1/operator/deployments/{id}/skip-failed-batches`. It has
+its own preview digest and records a reason. MCP tools do not send that skip.
+`deployment_continue` returns `failed_batch_skip_refused` and does not write.
 
-The new-deployment form defaults batch size to 1. The server default for an
-API caller that omits `batch_size` is still 5. The canary tools send 1.
+New operator creates and retries set `pause_after_canary`. The first included
+machine is batch 1. An omitted `batch_size` means later batches are also 1.
+An explicit `batch_size` of 2–5 sizes only the later batches. Existing
+in-flight rows stay `pause_after_canary` 0, so their driver still opens the
+next batch after a succeeded canary. Continue's refusal of a failed batch
+applies to those paused deployments too.
+
+The new-deployment form defaults the later batch size to 1. `rollout_preview`
+and `rollout_apply` still reject any batch size other than 1 before HTTP.
 
 ## Rollback
 

@@ -112,6 +112,7 @@ var (
 	ErrDeploymentBadTransition        = errors.New("store: deployment state transition is not allowed")
 	ErrDeploymentControlRevisionLimit = errors.New("store: deployment control revision cannot be incremented")
 	ErrDeploymentFinishNotReady       = errors.New("store: deployment is not ready to finish")
+	ErrDeploymentContinueRefused      = errors.New("store: plain Continue refuses a failed batch")
 	ErrDeploymentAbandonActiveJobs    = errors.New("store: deployment has nonterminal jobs; cannot abandon")
 	ErrMachineActiveJob               = errors.New("store: machine has a nonterminal job; cannot change channel")
 	ErrStablePromoteGateRequired      = errors.New("store: stable deployment requires promote gate")
@@ -347,13 +348,16 @@ type Deployment struct {
 	// batches. It is independent from the desired-state Revision agents see.
 	ControlRevision int64
 	BatchSize       int
-	State           string
-	CreatedAt       time.Time
-	CreatedBy       string
-	PausedAt        *time.Time
-	FinishedAt      *time.Time
-	RetryOf         string
-	Spec            string
+	// PauseAfterCanary is set on operator creates. Existing rows and direct
+	// store creates stay false and keep the auto-open driver.
+	PauseAfterCanary bool
+	State            string
+	CreatedAt        time.Time
+	CreatedBy        string
+	PausedAt         *time.Time
+	FinishedAt       *time.Time
+	RetryOf          string
+	Spec             string
 }
 
 type NewDeploymentTarget struct {
@@ -363,15 +367,16 @@ type NewDeploymentTarget struct {
 }
 
 type NewDeployment struct {
-	Channel      string
-	ResourceKind string
-	ResourceID   string
-	Spec         string
-	BatchSize    int
-	CreatedBy    string
-	RetryOf      string
-	Targets      []NewDeploymentTarget
-	Job          NewJob
+	Channel          string
+	ResourceKind     string
+	ResourceID       string
+	Spec             string
+	BatchSize        int
+	PauseAfterCanary bool
+	CreatedBy        string
+	RetryOf          string
+	Targets          []NewDeploymentTarget
+	Job              NewJob
 }
 
 type DeploymentTarget struct {
@@ -636,13 +641,17 @@ func createDeploymentTx(tx *sql.Tx, n NewDeployment, now time.Time) (Deployment,
 	}
 	d := Deployment{
 		DeploymentID: newID(), Channel: n.Channel, DesiredID: desiredID, ResourceKind: n.ResourceKind,
-		ResourceID: n.ResourceID, Revision: rev, BatchSize: n.BatchSize, State: DeploymentRunning,
-		CreatedAt: now, CreatedBy: n.CreatedBy, RetryOf: n.RetryOf, Spec: n.Spec,
+		ResourceID: n.ResourceID, Revision: rev, BatchSize: n.BatchSize, PauseAfterCanary: n.PauseAfterCanary,
+		State: DeploymentRunning, CreatedAt: now, CreatedBy: n.CreatedBy, RetryOf: n.RetryOf, Spec: n.Spec,
+	}
+	pauseAfterCanary := 0
+	if d.PauseAfterCanary {
+		pauseAfterCanary = 1
 	}
 	if _, err := tx.Exec(`INSERT INTO deployments
- (deployment_id,channel,desired_id,resource_kind,resource_id,revision,control_revision,batch_size,state,created_at,created_by,retry_of)
- VALUES (?,?,?,?,?,?,0,?,?,?,?,?)`, d.DeploymentID, d.Channel, d.DesiredID, d.ResourceKind, d.ResourceID,
-		d.Revision, d.BatchSize, d.State, fmtTime(now), d.CreatedBy, nullIfEmpty(d.RetryOf)); err != nil {
+ (deployment_id,channel,desired_id,resource_kind,resource_id,revision,control_revision,batch_size,pause_after_canary,state,created_at,created_by,retry_of)
+ VALUES (?,?,?,?,?,?,0,?,?,?,?,?,?)`, d.DeploymentID, d.Channel, d.DesiredID, d.ResourceKind, d.ResourceID,
+		d.Revision, d.BatchSize, pauseAfterCanary, d.State, fmtTime(now), d.CreatedBy, nullIfEmpty(d.RetryOf)); err != nil {
 		return Deployment{}, nil, fmt.Errorf("store: create deployment: %w", err)
 	}
 	for _, target := range n.Targets {
@@ -1279,7 +1288,7 @@ type deploymentQueryRower interface {
 
 func deploymentByID(q deploymentQueryRower, id string) (Deployment, error) {
 	return scanDeployment(q.QueryRow(`SELECT p.deployment_id,p.channel,p.desired_id,p.resource_kind,p.resource_id,
-	 p.revision,p.control_revision,p.batch_size,p.state,p.created_at,p.created_by,p.paused_at,p.finished_at,p.retry_of,d.spec
+	 p.revision,p.control_revision,p.batch_size,p.pause_after_canary,p.state,p.created_at,p.created_by,p.paused_at,p.finished_at,p.retry_of,d.spec
  FROM deployments p JOIN desired_state d ON d.desired_id=p.desired_id WHERE p.deployment_id=?`, id))
 }
 
@@ -1328,15 +1337,17 @@ func deploymentRetryLineageFromID(q deploymentQueryRower, id string) ([]Deployme
 func scanDeployment(row rowScanner) (Deployment, error) {
 	var d Deployment
 	var created string
+	var pauseAfterCanary int
 	var paused, finished, retry sql.NullString
 	err := row.Scan(&d.DeploymentID, &d.Channel, &d.DesiredID, &d.ResourceKind, &d.ResourceID,
-		&d.Revision, &d.ControlRevision, &d.BatchSize, &d.State, &created, &d.CreatedBy, &paused, &finished, &retry, &d.Spec)
+		&d.Revision, &d.ControlRevision, &d.BatchSize, &pauseAfterCanary, &d.State, &created, &d.CreatedBy, &paused, &finished, &retry, &d.Spec)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrDeploymentNotFound
 	}
 	if err != nil {
 		return Deployment{}, fmt.Errorf("store: scan deployment: %w", err)
 	}
+	d.PauseAfterCanary = pauseAfterCanary != 0
 	d.CreatedAt, d.PausedAt, d.FinishedAt, d.RetryOf = parseTime(created), parseTimePtr(paused), parseTimePtr(finished), retry.String
 	return d, nil
 }
@@ -1663,7 +1674,7 @@ func (s *Store) OpenDeploymentBatch(id string, batchNo int, now time.Time) ([]Jo
 	}
 	defer tx.Rollback()
 	d, err := scanDeployment(tx.QueryRow(`SELECT p.deployment_id,p.channel,p.desired_id,p.resource_kind,p.resource_id,
-	 p.revision,p.control_revision,p.batch_size,p.state,p.created_at,p.created_by,p.paused_at,p.finished_at,p.retry_of,d.spec
+	 p.revision,p.control_revision,p.batch_size,p.pause_after_canary,p.state,p.created_at,p.created_by,p.paused_at,p.finished_at,p.retry_of,d.spec
  FROM deployments p JOIN desired_state d ON d.desired_id=p.desired_id WHERE p.deployment_id=? AND p.state=?`, id, DeploymentRunning))
 	if err != nil {
 		return nil, err
@@ -2011,14 +2022,38 @@ func (s *Store) PauseDeploymentAtBoundary(id string, expectedOpenedBatch int, ki
 	return true, nil
 }
 
-// ContinueDeployment 只跳過失敗批次並開下一批；不重用或重開舊 job_id。
+func deploymentBatchHasFailureTerminalTx(tx *sql.Tx, id string, batch int) (bool, error) {
+	var n int
+	err := tx.QueryRow(`SELECT COUNT(*) FROM deployment_targets t
+ JOIN jobs j ON j.job_id=t.job_id
+ WHERE t.deployment_id=? AND t.batch_no=? AND j.state IN (?,?,?,?)`,
+		id, batch, deploy.Failed, deploy.ManualIntervention, deploy.LeaseExpired, deploy.Rejected).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("store: inspect deployment batch failures: %w", err)
+	}
+	return n > 0, nil
+}
+
+// deploymentContinuePolicy separates the product Continue from the explicit
+// skip. The zero value is the historical store transition: it may open the
+// next batch or finish after a failed batch. Operator Continue sets
+// RefuseFailedBatch. The skip action sets SkipFailedBatch and a reason.
+type deploymentContinuePolicy struct {
+	RefuseFailedBatch bool
+	SkipFailedBatch   bool
+	SkipReason        string
+}
+
+// ContinueDeployment is the mechanical ledger transition used by store tests
+// and older callers. Operator Continue does not use it: that path refuses a
+// failed batch. Skip failed batch is a separate operator action.
 func (s *Store) ContinueDeployment(id string, now time.Time) (Deployment, []Job, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return Deployment{}, nil, err
 	}
 	defer tx.Rollback()
-	d, jobs, err := s.continueDeploymentTx(tx, id, now)
+	d, jobs, err := s.continueDeploymentTx(tx, id, now, deploymentContinuePolicy{})
 	if err != nil {
 		return Deployment{}, nil, err
 	}
@@ -2030,9 +2065,9 @@ func (s *Store) ContinueDeployment(id string, now time.Time) (Deployment, []Job,
 
 // continueDeploymentTx is the sole state/job/event transition. The caller
 // owns commit so canonical operator idempotency and audit evidence can join it.
-func (s *Store) continueDeploymentTx(tx *sql.Tx, id string, now time.Time) (Deployment, []Job, error) {
+func (s *Store) continueDeploymentTx(tx *sql.Tx, id string, now time.Time, policy deploymentContinuePolicy) (Deployment, []Job, error) {
 	d, err := scanDeployment(tx.QueryRow(`SELECT p.deployment_id,p.channel,p.desired_id,p.resource_kind,p.resource_id,
-	 p.revision,p.control_revision,p.batch_size,p.state,p.created_at,p.created_by,p.paused_at,p.finished_at,p.retry_of,d.spec
+	 p.revision,p.control_revision,p.batch_size,p.pause_after_canary,p.state,p.created_at,p.created_by,p.paused_at,p.finished_at,p.retry_of,d.spec
  FROM deployments p JOIN desired_state d ON d.desired_id=p.desired_id WHERE p.deployment_id=?`, id))
 	if err != nil {
 		return Deployment{}, nil, err
@@ -2087,6 +2122,24 @@ func (s *Store) continueDeploymentTx(tx *sql.Tx, id string, now time.Time) (Depl
 	if !currentTerminal {
 		return Deployment{}, nil, fmt.Errorf("%w: paused deployment %s 的 batch %d 尚有非終態 job",
 			ErrDeploymentBatchNotReady, id, opened)
+	}
+	failedBatch, err := deploymentBatchHasFailureTerminalTx(tx, id, opened)
+	if err != nil {
+		return Deployment{}, nil, err
+	}
+	if policy.RefuseFailedBatch && failedBatch {
+		return Deployment{}, nil, fmt.Errorf("%w: plain Continue refuses a failed batch; use the separately labelled skip failed batch action", ErrDeploymentContinueRefused)
+	}
+	if policy.SkipFailedBatch {
+		if !failedBatch {
+			return Deployment{}, nil, fmt.Errorf("%w: skip failed batch requires a failure terminal on the opened batch", ErrDeploymentContinueRefused)
+		}
+		if strings.TrimSpace(policy.SkipReason) == "" {
+			return Deployment{}, nil, fmt.Errorf("%w: skip failed batch requires a reason", ErrDeploymentContinueRefused)
+		}
+		if opened >= total {
+			return Deployment{}, nil, fmt.Errorf("%w: skip failed batch does not finish a deployment; abandon stops without opening more jobs", ErrDeploymentContinueRefused)
+		}
 	}
 	d.PausedAt = nil
 	var jobs []Job
@@ -2157,13 +2210,18 @@ func (s *Store) continueDeploymentTx(tx *sql.Tx, id string, now time.Time) (Depl
 		return Deployment{}, nil, fmt.Errorf("store: clear deployment boundary pause: %w", err)
 	}
 	d.ControlRevision++
+	kind := HubDeploymentContinued
 	detail := fmt.Sprintf("deployment %s Continue next batch；開了 %d 張單", id, len(jobs))
+	if policy.SkipFailedBatch {
+		kind = HubDeploymentSkippedFailedBatch
+		detail = fmt.Sprintf("deployment %s skip failed batch；reason=%s；開了 %d 張單；失敗的工作單不重開", id, policy.SkipReason, len(jobs))
+	}
 	eventAt := now.UTC()
 	if d.FinishedAt != nil {
 		eventAt = d.FinishedAt.UTC()
 	}
 	if _, err := tx.Exec(`INSERT INTO hub_events (at,kind,detail) VALUES (?,?,?)`,
-		fmtTime(eventAt), HubDeploymentContinued, detail); err != nil {
+		fmtTime(eventAt), kind, detail); err != nil {
 		return Deployment{}, nil, fmt.Errorf("store: record deployment continue event: %w", err)
 	}
 	return d, jobs, nil

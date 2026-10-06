@@ -117,6 +117,10 @@ func deploymentClientTestDetail() operator.DeploymentDetailResult {
 		},
 		Actions: operator.DeploymentActionEligibilitySet{
 			Continue: operator.DeploymentActionEligibility{
+				Outcome: "open_next_batch", AffectedTargets: 1,
+				Blockers: []string{"failed_batch_requires_explicit_skip"},
+			},
+			SkipFailedBatch: operator.DeploymentActionEligibility{
 				Eligible: true, Outcome: "open_next_batch", AffectedTargets: 1, Blockers: []string{},
 			},
 			Retry: operator.DeploymentActionEligibility{
@@ -555,10 +559,21 @@ func TestDeploymentClientAcceptsCanonicalExhaustedRevisionBlockers(t *testing.T)
 func deploymentClientMarkExhausted(result *operator.DeploymentDetailResult) {
 	result.Item.ControlRevision = store.MaxDeploymentControlRevision
 	actions := []*operator.DeploymentActionEligibility{
-		&result.Actions.Continue, &result.Actions.Retry, &result.Actions.Abandon,
+		&result.Actions.Continue, &result.Actions.SkipFailedBatch, &result.Actions.Retry, &result.Actions.Abandon,
 	}
 	for _, action := range actions {
 		action.Eligible = false
+		insertBefore := -1
+		for i, blocker := range action.Blockers {
+			if blocker == "failed_batch_requires_explicit_skip" {
+				insertBefore = i
+				break
+			}
+		}
+		if insertBefore >= 0 {
+			action.Blockers = append(action.Blockers[:insertBefore], append([]string{"control_revision_exhausted"}, action.Blockers[insertBefore:]...)...)
+			continue
+		}
 		action.Blockers = append(action.Blockers, "control_revision_exhausted")
 	}
 }
@@ -581,6 +596,10 @@ func deploymentClientMakeRunning(result *operator.DeploymentDetailResult, lastAc
 		Outcome: "create_retry_attempt", Blockers: []string{
 			"deployment_not_retryable", "nonterminal_jobs", "no_terminal_failure_targets",
 		},
+	}
+	result.Actions.SkipFailedBatch = operator.DeploymentActionEligibility{
+		Outcome: "open_next_batch", AffectedTargets: 1,
+		Blockers: []string{"deployment_not_paused", "nonterminal_jobs", "opened_batch_not_failed"},
 	}
 	result.Actions.Abandon = operator.DeploymentActionEligibility{
 		Outcome: "finish_without_unopened_batches", AffectedTargets: 1,

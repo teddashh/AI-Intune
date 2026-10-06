@@ -187,6 +187,42 @@ func TestDeploymentDriverIsIdempotentAndFinishes(t *testing.T) {
 	}
 }
 
+func TestDeploymentDriverHoldsSucceededCanaryUntilExplicitContinue(t *testing.T) {
+	f, d, jobs := newDriverDeployment(t, []string{"first"}, []string{"second"})
+	if _, err := f.store.DB().Exec(`UPDATE deployments SET pause_after_canary=1 WHERE deployment_id=?`, d.DeploymentID); err != nil {
+		t.Fatal(err)
+	}
+	now := jobsTestNow
+	succeedDriverJob(t, f.store, jobs[0], now)
+	h := &hub{store: f.store}
+	h.advanceDeployments(now)
+	h.advanceDeployments(now)
+	v, err := f.store.DeploymentView(d.DeploymentID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.State != store.DeploymentPaused || v.OpenedBatch != 1 || !v.PauseAfterCanary {
+		t.Fatalf("canary hold did not pause after batch 1: %+v", v)
+	}
+	all, err := f.store.ListJobs("", 20)
+	if err != nil || len(all) != 1 {
+		t.Fatalf("canary hold opened the next batch: len=%d err=%v", len(all), err)
+	}
+	events, _ := f.store.HubEventsBetween(time.Time{}, now.Add(24*time.Hour))
+	held := 0
+	for _, event := range events {
+		if event.Kind == store.HubDeploymentCanaryHeld {
+			held++
+		}
+		if event.Kind == store.HubDeploymentContinued || event.Kind == store.HubDeploymentPaused {
+			t.Fatalf("canary hold recorded %s: %+v", event.Kind, events)
+		}
+	}
+	if held != 1 {
+		t.Fatalf("canary hold events=%+v", events)
+	}
+}
+
 func TestDeploymentDriverPausesDeterministicBoundaryBlocksWithOneVisibleEvent(t *testing.T) {
 	tests := []struct {
 		name       string
