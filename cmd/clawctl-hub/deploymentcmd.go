@@ -1193,8 +1193,12 @@ func writeDeploymentPromotion(out io.Writer, promotion operator.DeploymentPromot
 		return err
 	}
 	for _, target := range promotion.IndependentTargets {
+		jobID := target.JobID
+		if jobID == "" {
+			jobID = "-"
+		}
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
-			terminalSafe(target.DisplayName), terminalSafe(target.JobID), terminalSafe(target.State),
+			terminalSafe(target.DisplayName), terminalSafe(jobID), terminalSafe(target.State),
 			terminalSafe(deploymentPromotionNextStepText(target.NextStep))); err != nil {
 			return err
 		}
