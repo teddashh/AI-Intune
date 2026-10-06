@@ -149,7 +149,14 @@ func runMachinesCommandWithDeps(ctx context.Context, argv []string, out, errOut 
 		if err != nil {
 			return fmt.Errorf("讀取 machine detail 失敗（HTTP operator API）：%w", err)
 		}
-		return writeMachineDetail(out, result, jsonOutput.value, "HTTP operator API")
+		if jsonOutput.value {
+			return writeMachineDetail(out, result, true, "HTTP operator API", nil)
+		}
+		assigned, err := client.GetMachineAssignedUser(ctx, machineID)
+		if err != nil {
+			return writeMachineDetail(out, result, false, "HTTP operator API", nil)
+		}
+		return writeMachineDetail(out, result, false, "HTTP operator API", &assigned)
 	}
 	if action == "evidence" {
 		result, err := client.MachineEvidence(ctx, machineID, limit.value)
@@ -212,7 +219,14 @@ func runMachinesDirect(ctx context.Context, action, machineID string, request op
 			if err != nil {
 				return fmt.Errorf("讀取 machine detail 失敗（direct DB operator service）：%w", err)
 			}
-			return writeMachineDetail(out, result, jsonOutput, "direct DB operator service")
+			if jsonOutput {
+				return writeMachineDetail(out, result, true, "direct DB operator service", nil)
+			}
+			assigned, err := service.MachineAssignedUser(machineID)
+			if err != nil {
+				return writeMachineDetail(out, result, false, "direct DB operator service", nil)
+			}
+			return writeMachineDetail(out, result, false, "direct DB operator service", &operatorclient.MachineAssignedUserResponse{UserID: assigned.UserID, UserLogin: assigned.UserLogin, Revision: assigned.Revision})
 		}
 		if action == "evidence" {
 			result, err := service.MachineEvidence(operator.MachineEvidenceRequest{
@@ -262,7 +276,7 @@ func writeMachineList(out io.Writer, result operator.MachineListResult, jsonOutp
 	return nil
 }
 
-func writeMachineDetail(out io.Writer, result operator.MachineDetailResult, jsonOutput bool, source string) error {
+func writeMachineDetail(out io.Writer, result operator.MachineDetailResult, jsonOutput bool, source string, assigned *operatorclient.MachineAssignedUserResponse) error {
 	if jsonOutput {
 		return writeMachinesJSON(out, result)
 	}
@@ -275,14 +289,18 @@ func writeMachineDetail(out io.Writer, result operator.MachineDetailResult, json
 	if machine.Channel != nil {
 		channel = terminalSafe(*machine.Channel)
 	}
+	assignedLabel := "無法取得"
+	if assigned != nil {
+		assignedLabel = fmt.Sprintf("%s（版本 %d）", assignedUserCLILabel(assigned.UserID, assigned.UserLogin), assigned.Revision)
+	}
 	reporting := "unknown（retired 不評估）"
 	if machine.Reporting != nil {
 		reporting = fmt.Sprintf("%t", *machine.Reporting)
 	}
 	if _, err := fmt.Fprintf(out,
-		"%s；Hub 評估時間 %s。\n%s  %s\nmachine_id: %s\nexpected: %t\nchannel: %s (revision %d)\nreporting: %s\nlast check-in: %s\nlast observation: %s\n",
+		"%s；Hub 評估時間 %s。\n%s  %s\nmachine_id: %s\nexpected: %t\nchannel: %s (revision %d)\n指派使用者: %s\nreporting: %s\nlast check-in: %s\nlast observation: %s\n",
 		source, result.EvaluatedAt.Format(time.RFC3339Nano), terminalSafe(machine.DisplayName), stateLabel,
-		terminalSafe(machine.MachineID), machine.Expected, channel, machine.ChannelRevision, reporting,
+		terminalSafe(machine.MachineID), machine.Expected, channel, machine.ChannelRevision, assignedLabel, reporting,
 		machineReadTime(machine.LastCheckinReceivedAt), machineReadTime(machine.LastObservationReceivedAt)); err != nil {
 		return err
 	}

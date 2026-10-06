@@ -18,6 +18,7 @@ import (
 )
 
 const machineChannelRevisionTrigger = "tr_machine_registry_channel_revision"
+const machineAssignedUserRevisionTrigger = "tr_machine_registry_assigned_user_revision"
 
 const (
 	machineLifecycleRevisionGuardTrigger       = "tr_machine_registry_lifecycle_revision_guard"
@@ -76,6 +77,27 @@ BEGIN
   SELECT RAISE(ABORT, 'machine lifecycle revision cannot change without lifecycle state');
 END`); err != nil {
 		return fmt.Errorf("create machine lifecycle revision-only guard trigger: %w", err)
+	}
+	return nil
+}
+
+// ensureMachineAssignedUserRevisionTrigger fences writers that change the
+// assigned user without its revision. New writers increment explicitly; the
+// WHEN clause therefore leaves their revision alone.
+func ensureMachineAssignedUserRevisionTrigger(db *sql.DB) error {
+	_, err := db.Exec(`CREATE TRIGGER IF NOT EXISTS ` + machineAssignedUserRevisionTrigger + `
+AFTER UPDATE OF assigned_user_id, assigned_user_login ON machine_registry
+FOR EACH ROW
+WHEN (NEW.assigned_user_id IS NOT OLD.assigned_user_id
+   OR NEW.assigned_user_login IS NOT OLD.assigned_user_login)
+ AND NEW.assigned_user_revision = OLD.assigned_user_revision
+BEGIN
+  UPDATE machine_registry
+     SET assigned_user_revision = OLD.assigned_user_revision + 1
+   WHERE machine_id = NEW.machine_id;
+END`)
+	if err != nil {
+		return fmt.Errorf("create machine assigned user revision trigger: %w", err)
 	}
 	return nil
 }

@@ -50,6 +50,7 @@ var allAuditActions = [...]AuditAction{
 	AuditMachineProfile,
 	AuditMachineProfileAssign,
 	AuditMachineChannel,
+	AuditMachineAssignedUser,
 	AuditMachineLifecycle,
 	AuditMachineRename,
 	AuditMachineNotes,

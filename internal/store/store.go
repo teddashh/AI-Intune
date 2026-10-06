@@ -130,7 +130,11 @@ type Machine struct {
 	Channel           string `json:"channel,omitempty"`  // 空字串 = DB 的 NULL，尚未指派
 	ChannelRevision   int64  `json:"channel_revision"`   // channel mutation 的 optimistic concurrency token
 	LifecycleRevision int64  `json:"lifecycle_revision"` // active/retired mutation 的 optimistic concurrency token
-	Hostname          string `json:"hostname,omitempty"`
+	// 空字串 = DB 的 NULL。ID 是配對鍵；login 只是顯示，可以被改成跟別人一樣。
+	AssignedUserID       string `json:"assigned_user_id,omitempty"`
+	AssignedUserLogin    string `json:"assigned_user_login,omitempty"`
+	AssignedUserRevision int64  `json:"assigned_user_revision"` // 指派使用者 mutation 的 optimistic concurrency token
+	Hostname             string `json:"hostname,omitempty"`
 	// Expected 是尚待移除的舊名冊欄位；production writers 一律寫 true。
 	// 分母只看 active/retired lifecycle，不再讀這個值。
 	Expected    bool   `json:"expected"`
@@ -611,6 +615,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("store: migrate lifecycle revision triggers: %w", err)
 	}
+	if err := ensureMachineAssignedUserRevisionTrigger(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("store: migrate assigned user revision trigger: %w", err)
+	}
 	if err := backfillIdentityHints(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("store: migrate identity hints: %w", err)
@@ -835,9 +843,12 @@ func addMissingColumns(db *sql.DB) error {
 			"last_error_text": "TEXT",
 		},
 		"machine_registry": {
-			"channel":            "TEXT",
-			"channel_revision":   "INTEGER NOT NULL DEFAULT 0",
-			"lifecycle_revision": "INTEGER NOT NULL DEFAULT 0",
+			"channel":                "TEXT",
+			"channel_revision":       "INTEGER NOT NULL DEFAULT 0",
+			"lifecycle_revision":     "INTEGER NOT NULL DEFAULT 0",
+			"assigned_user_id":       "TEXT",
+			"assigned_user_login":    "TEXT",
+			"assigned_user_revision": "INTEGER NOT NULL DEFAULT 0",
 		},
 		// desired_state revision is immutable deployment material identity.  This
 		// separate token fences stale lifecycle/open-batch operator requests.
@@ -1326,7 +1337,8 @@ SELECT machine_id, agent_token_hash FROM machine_registry
 
 // ---------------------------------------------------------------- 名冊
 
-const machineCols = `rowid, machine_id, display_name, channel, channel_revision, lifecycle_revision, hostname, expected, unix_user, os, arch,
+const machineCols = `rowid, machine_id, display_name, channel, channel_revision, lifecycle_revision,
+	assigned_user_id, assigned_user_login, assigned_user_revision, hostname, expected, unix_user, os, arch,
 	tailscale_ip, machine_id_hint, linger_enabled, notes, created_at, enrolled_at, retired_at`
 
 type rowScanner interface{ Scan(dest ...any) error }
@@ -1336,16 +1348,20 @@ type rowScanner interface{ Scan(dest ...any) error }
 func scanMachine(sc rowScanner) (Machine, error) {
 	var m Machine
 	var channel, hostname, unixUser, osName, arch, tsIP, hint, notes sql.NullString
+	var assignedUserID, assignedUserLogin sql.NullString
 	var createdAt sql.NullString
 	var enrolledAt, retiredAt sql.NullString
 	var expected int64
 	var linger sql.NullInt64
-	err := sc.Scan(&m.RegistrySequence, &m.MachineID, &m.DisplayName, &channel, &m.ChannelRevision, &m.LifecycleRevision, &hostname, &expected, &unixUser, &osName,
+	err := sc.Scan(&m.RegistrySequence, &m.MachineID, &m.DisplayName, &channel, &m.ChannelRevision, &m.LifecycleRevision,
+		&assignedUserID, &assignedUserLogin, &m.AssignedUserRevision, &hostname, &expected, &unixUser, &osName,
 		&arch, &tsIP, &hint, &linger, &notes, &createdAt, &enrolledAt, &retiredAt)
 	if err != nil {
 		return Machine{}, err
 	}
 	m.Channel = channel.String
+	m.AssignedUserID = assignedUserID.String
+	m.AssignedUserLogin = assignedUserLogin.String
 	m.Hostname, m.UnixUser, m.OS, m.Arch = hostname.String, unixUser.String, osName.String, arch.String
 	m.TailscaleIP, m.MachineIDHint, m.Notes = tsIP.String, hint.String, notes.String
 	m.Expected = expected != 0
@@ -1443,11 +1459,14 @@ func (s *Store) UpsertMachine(m Machine) error {
 		}
 	}
 
+	// ⚠ assigned_user_* 不採用這次寫入的值。名冊編輯與報到帶進來的是零值，
+	// 寫進去會把 operator 的指派與 revision 洗成未指派。
 	if _, err := tx.Exec(`
 INSERT INTO machine_registry
-  (machine_id, display_name, lifecycle_revision, hostname, expected, unix_user, os, arch, tailscale_ip,
+  (machine_id, display_name, lifecycle_revision, assigned_user_id, assigned_user_login, assigned_user_revision,
+   hostname, expected, unix_user, os, arch, tailscale_ip,
    machine_id_hint, linger_enabled, notes, created_at, enrolled_at, retired_at)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+VALUES (?,?,?,NULL,NULL,0,?,?,?,?,?,?,?,?,?,?,?,?)
 ON CONFLICT(machine_id) DO UPDATE SET
   display_name    = excluded.display_name,
   hostname        = excluded.hostname,
@@ -1462,6 +1481,9 @@ ON CONFLICT(machine_id) DO UPDATE SET
   created_at      = COALESCE(machine_registry.created_at, excluded.created_at),
   enrolled_at     = excluded.enrolled_at,
 	retired_at      = excluded.retired_at,
+	assigned_user_id = machine_registry.assigned_user_id,
+	assigned_user_login = machine_registry.assigned_user_login,
+	assigned_user_revision = machine_registry.assigned_user_revision,
 	lifecycle_revision = CASE
 	  WHEN excluded.retired_at IS NOT machine_registry.retired_at
 	  THEN machine_registry.lifecycle_revision + 1

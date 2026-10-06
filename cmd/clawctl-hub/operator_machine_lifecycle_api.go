@@ -28,16 +28,6 @@ type machineLifecycleOperatorRequest struct {
 	Reason             string                         `json:"reason"`
 }
 
-func (h *hub) controlPlaneService() *operator.Service {
-	if h.operatorService != nil {
-		return h.operatorService
-	}
-	if h.tailnet != nil {
-		return operator.NewWithTailnet(h.store, h.tailnet)
-	}
-	return operator.NewWithTailnet(h.store, nil)
-}
-
 func (h *hub) handleGetOperatorMachineLifecycle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if r.URL.ForceQuery || r.URL.RawQuery != "" {

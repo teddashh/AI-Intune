@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS machine_registry (
   channel         TEXT,                   -- NULL＝未指派；只准 canary | stable
   channel_revision INTEGER NOT NULL DEFAULT 0, -- operator optimistic concurrency token
   lifecycle_revision INTEGER NOT NULL DEFAULT 0, -- active/retired optimistic concurrency token
+  assigned_user_id TEXT,                  -- tailnet 使用者的穩定 ID；NULL＝未指派。login 可以改成跟別人一樣，配對只認這個 ID
+  assigned_user_login TEXT,               -- 顯示用的 login，例如 operator@example.com
+  assigned_user_revision INTEGER NOT NULL DEFAULT 0, -- operator optimistic concurrency token
   hostname        TEXT,                   -- ⚠ 實測 5 台裡 3 台跟 tailnet 名稱對不上
   expected        INTEGER NOT NULL DEFAULT 1,   -- 分母。0 才不算
   unix_user       TEXT,                   -- 實測每台都不一樣：example-user/ubuntu/opc/example-user-b

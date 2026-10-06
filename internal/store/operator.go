@@ -45,6 +45,9 @@ var (
 	ErrTailnetPeerNotFound             = errors.New("store: tailnet peer was not found")
 	ErrTailnetPeerPreviewStale         = errors.New("store: tailnet peer preview is stale")
 	ErrTailnetSourceUnavailable        = errors.New("store: tailnet source is unavailable")
+	ErrBadAssignedUser                 = errors.New("store: assigned user must be a tailnet user id or none")
+	ErrAssignedUserNotInRoster         = errors.New("store: assigned user is not in the tailnet directory")
+	ErrAssignedUserLoginUnresolved     = errors.New("store: assigned user login is unresolved")
 	ErrRetentionPolicyInvalid          = errors.New("store: retention policy is invalid")
 	ErrRetentionPreviewStale           = errors.New("store: retention preview is stale")
 	ErrRetentionNothingToPrune         = errors.New("store: retention preview has no rows to prune")
@@ -97,6 +100,8 @@ const (
 	OperatorCodeTailnetPeerNotFound                = "TAILNET_PEER_NOT_FOUND"
 	OperatorCodeTailnetPeerPreviewStale            = "TAILNET_PEER_PREVIEW_STALE"
 	OperatorCodeTailnetSourceUnavailable           = "TAILNET_SOURCE_UNAVAILABLE"
+	OperatorCodeBadAssignedUser                    = "BAD_ASSIGNED_USER"
+	OperatorCodeAssignedUserNotInRoster            = "ASSIGNED_USER_NOT_IN_ROSTER"
 	OperatorCodeRetentionPolicyInvalid             = "RETENTION_POLICY_INVALID"
 	OperatorCodeRetentionPreviewStale              = "RETENTION_PREVIEW_STALE"
 	OperatorCodeRetentionNothingToPrune            = "RETENTION_NOTHING_TO_PRUNE"
@@ -263,6 +268,10 @@ func (e *OperatorRequestError) Unwrap() error {
 		return ErrTailnetPeerPreviewStale
 	case OperatorCodeTailnetSourceUnavailable:
 		return ErrTailnetSourceUnavailable
+	case OperatorCodeBadAssignedUser:
+		return ErrBadAssignedUser
+	case OperatorCodeAssignedUserNotInRoster:
+		return ErrAssignedUserNotInRoster
 	case OperatorCodeRetentionPolicyInvalid:
 		return ErrRetentionPolicyInvalid
 	case OperatorCodeRetentionPreviewStale:

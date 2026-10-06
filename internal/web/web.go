@@ -461,6 +461,9 @@ type page struct {
 	// ChannelIdempotencyKey is minted per machine-page render. Resubmitting the
 	// same rendered form replays; reloading gets a fresh operator attempt.
 	ChannelIdempotencyKey string
+	AssignedUser          operator.MachineAssignedUserResult
+	AssignedUserDirectory tailnet.UserDirectory
+	AssignedUserPreview   *assignedUserPreview
 	LifecyclePreview      *lifecyclePreviewView
 
 	// 工作單證據頁
@@ -1191,6 +1194,11 @@ func (s *Server) machine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	access := accessFromRequest(r)
+	assignedUser, err := s.operator.MachineAssignedUser(machine.Item.MachineID)
+	if err != nil {
+		s.fail(w, "讀取指派使用者失敗", err)
+		return
+	}
 	catalogue, err := s.operator.MachineActions(operator.MachineActionsRequest{
 		Detail: machine, Connect: connect, Lifecycle: lifecycle,
 		Granted: operator.MachineActionGrant{Operate: access.CanOperate, Admin: access.CanAdmin},
@@ -1199,6 +1207,8 @@ func (s *Server) machine(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "讀取裝置動作目錄失敗", err)
 		return
 	}
+	assignedUser.UserLogin = assignedUserWebLabel(assignedUser.UserID, assignedUser.UserLogin)
+	directory := assignedUserDirectory(s.tailnet.Get(r.Context()))
 	channelKey, err := operator.NewIdempotencyKey("web-machine-channel")
 	if err != nil {
 		s.fail(w, "產生 channel 表單 request key 失敗", err)
@@ -1235,6 +1245,8 @@ func (s *Server) machine(w http.ResponseWriter, r *http.Request) {
 		LatestMachineCheckin:    latestMachineCheckin,
 		Jobs:                    jobList.Items,
 		ChannelIdempotencyKey:   channelKey,
+		AssignedUser:            assignedUser,
+		AssignedUserDirectory:   directory,
 		// L2NotWired：成果判定有沒有接通。
 		// ⚠ 目前永遠是 true —— 上游的 terminal_outcome 全機隊都是 NULL，
 		// 而 status='ok' 只代表回合正常結束。這一行必須常駐在單機頁上，

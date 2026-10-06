@@ -118,12 +118,12 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		t.Fatalf("non-operator registered=%d policies=%d, want 17/17",
 			len(nonOperatorRegistered), len(nonOperatorRoutePolicies))
 	}
-	if len(operatorRegistered) != 196 || len(operatorRoutePolicies) != 196 {
-		t.Fatalf("operator registered=%d policies=%d, want 196/196",
+	if len(operatorRegistered) != 200 || len(operatorRoutePolicies) != 200 {
+		t.Fatalf("operator registered=%d policies=%d, want 200/200",
 			len(operatorRegistered), len(operatorRoutePolicies))
 	}
-	if len(nonOperatorRegistered)+len(operatorRegistered) != 213 {
-		t.Fatalf("all registered routes=%d, want 213", len(nonOperatorRegistered)+len(operatorRegistered))
+	if len(nonOperatorRegistered)+len(operatorRegistered) != 217 {
+		t.Fatalf("all registered routes=%d, want 217", len(nonOperatorRegistered)+len(operatorRegistered))
 	}
 	counts := map[operatorauth.Permission]int{}
 	representations := map[operatorRepresentation]int{}
@@ -131,18 +131,18 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		counts[policy.Permission]++
 		representations[policy.Representation]++
 	}
-	if counts[operatorauth.View] != 82 || counts[operatorauth.Operate] != 21 || counts[operatorauth.Admin] != 93 {
-		t.Fatalf("permission counts=%v, want view=82 operate=21 admin=93", counts)
+	if counts[operatorauth.View] != 83 || counts[operatorauth.Operate] != 21 || counts[operatorauth.Admin] != 96 {
+		t.Fatalf("permission counts=%v, want view=83 operate=21 admin=96", counts)
 	}
-	if representations[operatorJSON] != 105 || representations[operatorHTML] != 90 || representations[operatorPlain] != 1 {
-		t.Fatalf("representation counts=%v, want JSON=105 HTML=90 plain=1", representations)
+	if representations[operatorJSON] != 107 || representations[operatorHTML] != 92 || representations[operatorPlain] != 1 {
+		t.Fatalf("representation counts=%v, want JSON=107 HTML=92 plain=1", representations)
 	}
 	profiles := map[operatorSecurityProfile]int{}
 	for _, policy := range operatorRoutePolicies {
 		profiles[policy.SecurityProfile]++
 	}
-	if profiles[operatorSecurityLocked] != 196 || len(profiles) != 1 {
-		t.Fatalf("security profiles=%v, want locked=196", profiles)
+	if profiles[operatorSecurityLocked] != 200 || len(profiles) != 1 {
+		t.Fatalf("security profiles=%v, want locked=200", profiles)
 	}
 }
 
@@ -345,6 +345,7 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		{"POST /v1/operator/disk-clean/abandonment-preview", "/v1/operator/disk-clean/abandonment-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"POST /v1/operator/disk-clean/abandonments", "/v1/operator/disk-clean/abandonments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"GET /v1/operator/machines/{id}/channel", "/v1/operator/machines/machine-1/channel", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"GET /v1/operator/machines/{id}/assigned-user", "/v1/operator/machines/machine-1/assigned-user", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"GET /v1/operator/machines/{id}/enrollment-token", "/v1/operator/machines/machine-1/enrollment-token", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"POST /v1/operator/machines/{id}/diagnostic-noop-preview", "/v1/operator/machines/machine-1/diagnostic-noop-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"POST /v1/operator/machines/{id}/diagnostic-noop-jobs", "/v1/operator/machines/machine-1/diagnostic-noop-jobs", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
@@ -405,6 +406,8 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		{"POST /machines/{id}/revoke-token/preview", "/machines/machine-1/revoke-token/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /machines/{id}/revoke-token", "/machines/machine-1/revoke-token", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /machines/{id}/channel", "/machines/machine-1/channel", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
+		{"POST /machines/{id}/assigned-user", "/machines/machine-1/assigned-user", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
+		{"POST /machines/{id}/assigned-user-preview", "/machines/machine-1/assigned-user-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /machines/{id}/display-name-preview", "/machines/machine-1/display-name-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /machines/{id}/display-name", "/machines/machine-1/display-name", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /machines/{id}/notes-preview", "/machines/machine-1/notes-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
@@ -417,6 +420,7 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		{"POST /tenant/maintenance/restore-drill-preview", "/tenant/maintenance/restore-drill-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /tenant/maintenance/restore-drills", "/tenant/maintenance/restore-drills", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"PUT /v1/operator/machines/{id}/channel", "/v1/operator/machines/machine-1/channel", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"PUT /v1/operator/machines/{id}/assigned-user", "/v1/operator/machines/machine-1/assigned-user", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"POST /v1/operator/enrollment-tokens/preview", "/v1/operator/enrollment-tokens/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"POST /v1/operator/enrollment-tokens", "/v1/operator/enrollment-tokens", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"POST /v1/operator/machines/{id}/enrollment-token/revocation-preview", "/v1/operator/machines/machine-1/enrollment-token/revocation-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
