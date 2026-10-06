@@ -43,7 +43,7 @@
   <h3>本頁每個 catalog evidence 的預覽</h3>
   {{range .Previews}}<p><span class="mono">{{.Artifact.Version}}</span>：{{.Summary}}{{if .Promote}}<br>{{.Promote}}{{end}}</p>
   {{if .PromotionTargets}}<table><thead><tr><th>Canary 機器</th><th>工作單</th><th>獨立證據</th><th>下一步</th></tr></thead><tbody>
-  {{range .PromotionTargets}}<tr><td>{{.DisplayName}}</td><td><a class="mono" href="/jobs/{{.JobID}}">{{short .JobID 8}}</a></td><td>{{.State}}</td><td>{{if eq .NextStep "none"}}無{{else if eq .NextStep "assign_verifier"}}到工作單指派跨故障域 verifier{{else if eq .NextStep "wait_for_verifier"}}等待已指派 verifier 完整回報{{else if eq .NextStep "rerun_verifier"}}重新執行已指派 verifier{{else if eq .NextStep "assign_active_verifier"}}到工作單指派仍有效的 verifier{{else if eq .NextStep "reassign_verifier"}}重新指派 verifier{{else if eq .NextStep "upgrade_and_reassign_verifier"}}升級後重新指派 verifier{{else if eq .NextStep "repair_and_rerun_canary"}}修復後重跑 canary{{else}}確認 artifact 後重跑 canary{{end}}</td></tr>{{end}}
+  {{range .PromotionTargets}}<tr><td>{{.DisplayName}}</td>{{if .JobID}}<td><a class="mono" href="/jobs/{{.JobID}}">{{short .JobID 8}}</a></td>{{else}}<td>—</td>{{end}}<td>{{.State}}</td><td>{{if eq .NextStep "none"}}無{{else if eq .NextStep "assign_verifier"}}到工作單指派跨故障域 verifier{{else if eq .NextStep "wait_for_verifier"}}等待已指派 verifier 完整回報{{else if eq .NextStep "rerun_verifier"}}重新執行已指派 verifier{{else if eq .NextStep "assign_active_verifier"}}到工作單指派仍有效的 verifier{{else if eq .NextStep "reassign_verifier"}}重新指派 verifier{{else if eq .NextStep "upgrade_and_reassign_verifier"}}升級後重新指派 verifier{{else if eq .NextStep "repair_and_rerun_canary"}}修復後重跑 canary{{else}}確認 artifact 後重跑 canary{{end}}</td></tr>{{end}}
   </tbody></table>{{end}}
   {{else}}<p class="empty">沒有預覽。</p>{{end}}
 </div>

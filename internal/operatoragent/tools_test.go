@@ -200,7 +200,7 @@ func TestWriteToolsDoNotCallHubWithoutPreviewDigest(t *testing.T) {
 		raw  string
 		code string
 	}{
-		{"enroll_ticket_create", `{"display_name":"peach","ttl_seconds":3600,"reason":"enroll","idempotency_key":"k1"}`, "preview_digest_required"},
+		{"enroll_ticket_create", `{"display_name":"pnode","ttl_seconds":3600,"reason":"enroll","idempotency_key":"k1"}`, "preview_digest_required"},
 		{"deployment_create", `{"channel":"canary","version":"2026.9.8","artifact_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","reason":"ship","confirm_channel":"canary","confirm_version":"2026.9.8","idempotency_key":"k1"}`, "preview_digest_required"},
 		{"deployment_continue", `{"deployment_id":"dep-1","expected_control_revision":4,"expected_opened_batch":1,"confirm_channel":"canary","reason":"go","idempotency_key":"k1"}`, "preview_digest_required"},
 		{"deployment_abandon", `{"deployment_id":"dep-1","expected_control_revision":4,"expected_opened_batch":1,"confirm_deployment_id":"dep-1","reason":"stop","idempotency_key":"k1"}`, "preview_digest_required"},
@@ -498,7 +498,7 @@ func TestMCPInitializeListAndRefusedWrite(t *testing.T) {
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"grok","version":"1"}}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"enroll_ticket_create","arguments":{"display_name":"peach","ttl_seconds":60,"reason":"enroll","idempotency_key":"k1"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"enroll_ticket_create","arguments":{"display_name":"pnode","ttl_seconds":60,"reason":"enroll","idempotency_key":"k1"}}}`,
 	}
 	in.WriteString(strings.Join(messages, "\n") + "\n")
 	if err := Serve(context.Background(), &in, &out, &Service{Hub: f}); err != nil {

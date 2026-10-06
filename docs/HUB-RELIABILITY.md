@@ -2,7 +2,8 @@
 
 This page describes how the Hub behaves under SQLite lock contention, how the
 daily report notification retries, and which metrics and alert rules cover
-both. It complements [DEPLOY-OSS.md](DEPLOY-OSS.md).
+both. It complements [DEPLOY-OSS.md](DEPLOY-OSS.md) and
+[OPERATOR-AUTH.md](OPERATOR-AUTH.md).
 
 ## SQLite: one writer, a reader pool
 
