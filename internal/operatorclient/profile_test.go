@@ -42,7 +42,7 @@ func profileClientReport(now time.Time) operator.ProfileReport {
 			PackageID: id, Version: version, State: state,
 			Title:               operator.ProfilePackageStateTitle(state),
 			Meaning:             operator.ProfilePackageStateMeaning(state),
-			NextStep:            operator.ProfilePackageStateNextStep(state),
+			NextStep:            operator.ProfilePackageNextStep(state, seenMisattributedOn),
 			Intents:             intents,
 			SeenOn:              seenOn,
 			SeenMisattributedOn: seenMisattributedOn,
@@ -297,6 +297,16 @@ func TestTheProfileClientRefusesAReportThatContradictsItself(t *testing.T) {
 		"一格的句子跟套件狀態不一樣": func(r *operator.ProfileReport) {
 			r.Profiles[0].Packages[0].NextStep = "重開機。"
 		},
+		// ⚠⚠ 看得到的版號量的是沒在跑的那一份，這一格卻照狀態那一句收工：畫面上會是一格
+		// 指派過也看得到、沒有下一步的套件，而它其實只是在硬碟上放著。
+		"量錯檔案的那一格照狀態那一句收工": func(r *operator.ProfileReport) {
+			pkg := &profileClientRow(r, "openclaw-standard", 1).Packages[0]
+			pkg.NextStep = operator.ProfilePackageStateNextStep(pkg.State)
+		},
+		"沒有量錯檔案的一格叫人去核對執行檔": func(r *operator.ProfileReport) {
+			pkg := &profileClientRow(r, "edge-standard", 1).Packages[0]
+			pkg.NextStep = operator.ProfilePackageNextStep(pkg.State, 1)
+		},
 		"有兩列同一版 profile": func(r *operator.ProfileReport) {
 			r.Profiles[1].Revision = r.Profiles[0].Revision
 		},
@@ -346,6 +356,7 @@ func TestTheProfileClientRefusesAReportThatContradictsItself(t *testing.T) {
 		"說看得到卻說 0 台看得到": func(r *operator.ProfileReport) {
 			pkg := &profileClientRow(r, "openclaw-standard", 2).Packages[0]
 			pkg.SeenOn, pkg.SeenMisattributedOn = 0, 0
+			pkg.NextStep = operator.ProfilePackageNextStep(pkg.State, 0)
 			r.SeenMisattributed = 1
 		},
 		"說沒有看到過卻說有機器看得到": func(r *operator.ProfileReport) {
@@ -367,11 +378,15 @@ func TestTheProfileClientRefusesAReportThatContradictsItself(t *testing.T) {
 		// 照樣成立，而那一格會在畫面上寫成「0 台看得到，其中 1 台量的是沒在跑的那一份」。
 		// 整份的格數一起加一，讓這個案例只剩下「它不是 SeenOn 的子集」那一關能擋。
 		"量錯檔案的台數比看得到的台數多": func(r *operator.ProfileReport) {
-			profileClientRow(r, "lab-standard", 1).Packages[0].SeenMisattributedOn = 1
+			pkg := &profileClientRow(r, "lab-standard", 1).Packages[0]
+			pkg.SeenMisattributedOn = 1
+			pkg.NextStep = operator.ProfilePackageNextStep(pkg.State, 1)
 			r.SeenMisattributed++
 		},
 		"量錯檔案的台數是負數": func(r *operator.ProfileReport) {
-			r.Profiles[0].Packages[0].SeenMisattributedOn = -1
+			pkg := &r.Profiles[0].Packages[0]
+			pkg.SeenMisattributedOn = -1
+			pkg.NextStep = operator.ProfilePackageNextStep(pkg.State, -1)
 			// 負數不會被逐格重數；總數一起扣一，讓這個案例只剩負數 guard 能擋。
 			r.SeenMisattributed--
 		},

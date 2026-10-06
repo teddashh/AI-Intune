@@ -16,9 +16,31 @@ func TestAgentUnitMakesManagedRuntimeStateWritable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []byte("ReadWritePaths=%h/.config/clawctl %h/.config/systemd/user/openclaw-gateway.service.d %h/.cache/clawctl %h/.local/share/clawctl %h/.openclaw")
+	want := []byte("ReadWritePaths=@@CLAWCTL_AGENT_HOME@@/.config/clawctl @@CLAWCTL_AGENT_HOME@@/.config/systemd/user/openclaw-gateway.service.d @@CLAWCTL_AGENT_HOME@@/.cache/clawctl @@CLAWCTL_AGENT_HOME@@/.local/share/clawctl @@CLAWCTL_AGENT_HOME@@/.openclaw")
 	if !bytes.Contains(raw, want) {
 		t.Fatalf("agent unit missing exact managed runtime write path: %s", want)
+	}
+}
+
+func TestAgentUnitIsRenderedAsAnUnprivilegedSystemService(t *testing.T) {
+	raw, err := os.ReadFile("../../ops/clawctl-agent.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range [][]byte{
+		[]byte("User=@@CLAWCTL_AGENT_USER@@"),
+		[]byte("Environment=HOME=@@CLAWCTL_AGENT_HOME@@"),
+		[]byte("Environment=XDG_RUNTIME_DIR=/run/user/@@CLAWCTL_AGENT_UID@@"),
+		[]byte("ProtectSystem=strict"),
+		[]byte("ProtectHome=read-only"),
+		[]byte("WantedBy=multi-user.target"),
+	} {
+		if !bytes.Contains(raw, want) {
+			t.Fatalf("agent system unit template missing contract: %s", want)
+		}
+	}
+	if bytes.Contains(raw, []byte("WantedBy=default.target")) {
+		t.Fatal("agent must not be installed as a user-manager service")
 	}
 }
 

@@ -313,8 +313,22 @@ func TestAVersionAssignedAndSeenCarriesBothSides(t *testing.T) {
 	if pkg.Intents != 1 || pkg.SeenOn != 1 {
 		t.Errorf("2026.5.20：指派 %d 次、看到 %d 台，應該是 1 與 1", pkg.Intents, pkg.SeenOn)
 	}
-	if pkg.NextStep != "" {
-		t.Errorf("兩邊都成立的那一格被交代了一件事去做：%q", pkg.NextStep)
+	if pkg.SeenMisattributedOn != pkg.SeenOn || pkg.NextStep == "" {
+		t.Errorf("這一格只量到沒在跑的檔案，必須交代下一步：seen=%d misattributed=%d next=%q",
+			pkg.SeenOn, pkg.SeenMisattributedOn, pkg.NextStep)
+	}
+}
+
+func TestAssignedAndSeenRunningFileHasNoExtraAction(t *testing.T) {
+	pkg := profilePackageFor("openclaw", "2026.6.6",
+		map[profileVersionKey]store.InstallIntentVersion{
+			{packageID: "openclaw", version: "2026.6.6"}: {Intents: 1},
+		},
+		map[profileVersionKey]profileSeenCount{
+			{packageID: "openclaw", version: "2026.6.6"}: {on: 1},
+		})
+	if pkg.State != ProfilePackageAssignedAndSeen || pkg.NextStep != "" {
+		t.Fatalf("執行檔與量測檔一致時不應有額外動作：state=%q next=%q", pkg.State, pkg.NextStep)
 	}
 }
 
@@ -696,14 +710,14 @@ func TestAVersionMeasuredOnAFileNobodyRunsStillCountsAsSeen(t *testing.T) {
 }
 
 // ⚠⚠ 兩邊都成立、而看到的那一台量的是一個已經從磁碟上不見的檔案——這是這一頁上最讓
-// 人放下心的一格。它沒有下一步（那是這個狀態的意思），所以那個數字是畫面上唯一講得出
-// 「這一格的證據有多硬」的東西。
+// 人放下心的一格。狀態仍保留「指派過也看得到」的事實，但同一列必須指出下一步；否則
+// 操作者會把一個沒在跑的檔案誤讀成執行中的版本。
 func TestTheMostReassuringProfileCellCanRestEntirelyOnAFileNobodyRuns(t *testing.T) {
 	report := profileReportOf(t, profileFixture(t))
 	row := profileRowNamed(t, report, "openclaw-standard", 1)
 	pkg := profilePackageOf(t, row, "openclaw")
-	if pkg.State != ProfilePackageAssignedAndSeen || pkg.NextStep != "" {
-		t.Fatalf("2026.5.20 該是指派過也看得到、而且沒有下一步：state=%q next=%q",
+	if pkg.State != ProfilePackageAssignedAndSeen || !strings.Contains(pkg.NextStep, "到每機安裝狀態核對執行檔與其版號") {
+		t.Fatalf("2026.5.20 該是指派過也看得到，但必須指出執行檔與量測檔不符：state=%q next=%q",
 			pkg.State, pkg.NextStep)
 	}
 	if pkg.SeenOn != 1 || pkg.SeenMisattributedOn != 1 {
@@ -726,6 +740,9 @@ func TestTheMachineWhoseRunningFileIsTheMeasuredOneIsNotCounted(t *testing.T) {
 	}
 	if pkg.SeenMisattributedOn > pkg.SeenOn {
 		t.Errorf("量錯檔案的台數比看到的台數還多：%d > %d", pkg.SeenMisattributedOn, pkg.SeenOn)
+	}
+	if pkg.NextStep == "" {
+		t.Error("同一個版號有其他機器量錯檔案時，套件列必須指出下一步")
 	}
 }
 

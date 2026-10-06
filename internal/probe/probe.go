@@ -86,7 +86,8 @@ const (
 	cronCountsWindow  = 24 * time.Hour
 )
 
-// watchedUnits 是要觀測的 systemd --user unit。
+// watchedUnits 是要觀測的 systemd units。Agent 本身是 system unit；其餘
+// runtime units 維持 user units。
 // ⚠ 沒裝的 unit 也要回報（Present=false），因為「名冊是分母」：
 // 一台以為裝了 bat-server 其實沒裝的機器不可以從畫面上消失。
 var watchedUnits = []string{
@@ -208,7 +209,7 @@ func Collect(ctx context.Context) (model.ObservationBatch, error) {
 
 	// CLI 工具先收，因為 openclaw 的 CLI 版號可以直接沿用，
 	// 不必再花一次 25 秒的 timeout 額度跑第二遍 `openclaw --version`。
-	tools, bat := processObservations(ctx, procs, processScan)
+	tools, bat := processObservations(ctx, procs, processScan, home)
 
 	// ⚠ units 先算出來給 journal 用：只有 Present 的 unit 才值得跑 journalctl。
 	units := systemdUnits(ctx, watchedUnits)
@@ -233,8 +234,8 @@ func Collect(ctx context.Context) (model.ObservationBatch, error) {
 // processObservations 把同一輪 process 掃描交給 CLI 工具與 BAT。
 // ⚠ 兩邊必須拿到同一個 processScan：任何一邊改回從 len(procs) 推論，
 // 同一台機器就會在 CLI 工具與 BAT 兩個表面講出不同的掃描品質。
-func processObservations(ctx context.Context, procs []procInfo, processScan string) ([]model.CLITool, model.BAT) {
-	return cliTools(ctx, procs, processScan), batServer(procs, processScan)
+func processObservations(ctx context.Context, procs []procInfo, processScan, home string) ([]model.CLITool, model.BAT) {
+	return cliTools(ctx, procs, processScan), batServer(procs, processScan, home)
 }
 
 // Heartbeat 是 2 分鐘一次的心跳，必須小而快。
@@ -389,7 +390,12 @@ func systemdUnits(ctx context.Context, names []string) []model.Unit {
 
 func showUnit(ctx context.Context, name string, unixTS bool) (model.Unit, bool) {
 	u := model.Unit{Name: name}
-	args := []string{"--user", "show", name}
+	args := []string{"show", name}
+	commandName := "systemctl show " + name
+	if name != "clawctl-agent.service" {
+		args = append([]string{"--user"}, args...)
+		commandName = "systemctl --user show " + name
+	}
 	if unixTS {
 		// @<epoch> 比 "Wed 2026-09-02 00:40:26 EDT" 好解析太多：時區縮寫在
 		// DST 換季之後會解錯一小時。
@@ -401,7 +407,7 @@ func showUnit(ctx context.Context, name string, unixTS bool) (model.Unit, bool) 
 
 	out, stderr, err := run(ctx, cmdTimeout, "systemctl", args...)
 	if err != nil || out == "" {
-		u.Reason = commandFailure("systemctl --user show "+name, out, stderr, err)
+		u.Reason = commandFailure(commandName, out, stderr, err)
 		return u, false
 	}
 	props := parseProps(out)
@@ -1410,7 +1416,7 @@ func cliTools(ctx context.Context, procs []procInfo, processScan string) []model
 // searchPath 是「人打這個指令的時候，shell 會去哪裡找」。
 //
 // ⚠⚠ 這個型別存在的唯一理由，是 2026-09-03 在 samplehub1 量到的一件事：
-// clawctl-agent 是 systemd --user 起來的，它的 PATH 是
+// clawctl-agent 是 systemd 起來的，它的 daemon PATH 是
 //
 //	/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:...
 //

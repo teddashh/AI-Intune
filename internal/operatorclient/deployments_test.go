@@ -241,6 +241,124 @@ func TestDeploymentClientValidatesIndependentPromotionEvidence(t *testing.T) {
 	}
 }
 
+func deploymentClientCanaryNotSucceededTarget(machineID, jobID, next string) operator.DeploymentPromotionIndependentTargetPreview {
+	return operator.DeploymentPromotionIndependentTargetPreview{
+		MachineID: machineID, DisplayName: machineID, JobID: jobID,
+		State: "canary_not_succeeded", NextStep: next,
+	}
+}
+
+func TestDeploymentClientAcceptsCanaryNotSucceededWithoutAJob(t *testing.T) {
+	evaluatedAt := deploymentClientTestTime(12, 0)
+	one := operator.DeploymentPromotionPreview{
+		Allowed: false, Blockers: []string{"stable_promotion_locked"}, IndependentRequired: true,
+		IndependentTargets: []operator.DeploymentPromotionIndependentTargetPreview{
+			deploymentClientCanaryNotSucceededTarget("machine-a", "", operator.PromotionNextStepRepairAndRerunCanary),
+		},
+	}
+	if err := validateDeploymentPromotionPreview(one, evaluatedAt); err != nil {
+		t.Fatalf("empty job on canary_not_succeeded rejected: %v", err)
+	}
+	two := one
+	two.IndependentTargets = []operator.DeploymentPromotionIndependentTargetPreview{
+		deploymentClientCanaryNotSucceededTarget("machine-a", "", operator.PromotionNextStepRepairAndRerunCanary),
+		deploymentClientCanaryNotSucceededTarget("machine-b", "", operator.PromotionNextStepRepairAndRerunCanary),
+	}
+	if err := validateDeploymentPromotionPreview(two, evaluatedAt); err != nil {
+		t.Fatalf("two empty jobs rejected: %v", err)
+	}
+	withJob := one
+	withJob.IndependentTargets = []operator.DeploymentPromotionIndependentTargetPreview{
+		deploymentClientCanaryNotSucceededTarget("machine-a", "failed-job", operator.PromotionNextStepRepairAndRerunCanary),
+	}
+	if err := validateDeploymentPromotionPreview(withJob, evaluatedAt); err != nil {
+		t.Fatalf("failed-job id on canary_not_succeeded rejected: %v", err)
+	}
+}
+
+func TestDeploymentClientRefusesCanaryNotSucceededContractBreaks(t *testing.T) {
+	evaluatedAt := deploymentClientTestTime(12, 0)
+	blocked := func(targets ...operator.DeploymentPromotionIndependentTargetPreview) operator.DeploymentPromotionPreview {
+		passed := 0
+		for _, target := range targets {
+			if target.State == "passed" {
+				passed++
+			}
+		}
+		return operator.DeploymentPromotionPreview{
+			Allowed: false, Blockers: []string{"stable_promotion_locked"}, IndependentRequired: true,
+			IndependentPassedTargets: passed, IndependentTargets: targets,
+		}
+	}
+	for _, state := range []struct {
+		state string
+		next  string
+	}{
+		{"unassigned", operator.PromotionNextStepAssignVerifier},
+		{"awaiting_report", operator.PromotionNextStepWaitForVerifier},
+		{"incomplete_report", operator.PromotionNextStepRerunVerifier},
+		{"producer_revoked", operator.PromotionNextStepAssignActiveVerifier},
+		{"digest_mismatch", operator.PromotionNextStepRerunCanary},
+		{"release_mismatch", operator.PromotionNextStepRepairAndRerunCanary},
+		{"release_unreported", operator.PromotionNextStepUpgradeAndReassignVerifier},
+		{"stale", operator.PromotionNextStepReassignVerifier},
+		{"failed", operator.PromotionNextStepRepairAndRerunCanary},
+		{"passed", operator.PromotionNextStepNone},
+	} {
+		t.Run("empty job "+state.state, func(t *testing.T) {
+			preview := blocked(operator.DeploymentPromotionIndependentTargetPreview{
+				MachineID: "machine-a", DisplayName: "alpha", JobID: "", State: state.state, NextStep: state.next,
+			})
+			if err := validateDeploymentPromotionPreview(preview, evaluatedAt); err == nil {
+				t.Fatalf("empty job_id accepted for %s", state.state)
+			}
+		})
+	}
+	for _, next := range []string{
+		operator.PromotionNextStepNone,
+		operator.PromotionNextStepAssignVerifier,
+		operator.PromotionNextStepWaitForVerifier,
+		operator.PromotionNextStepRerunVerifier,
+		operator.PromotionNextStepAssignActiveVerifier,
+		operator.PromotionNextStepRerunCanary,
+		operator.PromotionNextStepUpgradeAndReassignVerifier,
+		operator.PromotionNextStepReassignVerifier,
+	} {
+		t.Run("next "+next, func(t *testing.T) {
+			preview := blocked(deploymentClientCanaryNotSucceededTarget("machine-a", "", next))
+			if err := validateDeploymentPromotionPreview(preview, evaluatedAt); err == nil {
+				t.Fatalf("canary_not_succeeded accepted next step %s", next)
+			}
+		})
+	}
+	t.Run("allowed with canary_not_succeeded", func(t *testing.T) {
+		preview := blocked(deploymentClientCanaryNotSucceededTarget("machine-a", "", operator.PromotionNextStepRepairAndRerunCanary))
+		preview.Allowed = true
+		preview.Blockers = []string{}
+		if err := validateDeploymentPromotionPreview(preview, evaluatedAt); err == nil {
+			t.Fatal("allowed promotion accepted a canary_not_succeeded target")
+		}
+	})
+	t.Run("duplicate job", func(t *testing.T) {
+		preview := blocked(
+			deploymentClientCanaryNotSucceededTarget("machine-a", "failed-job", operator.PromotionNextStepRepairAndRerunCanary),
+			deploymentClientCanaryNotSucceededTarget("machine-b", "failed-job", operator.PromotionNextStepRepairAndRerunCanary),
+		)
+		if err := validateDeploymentPromotionPreview(preview, evaluatedAt); err == nil {
+			t.Fatal("duplicate non-empty job_id accepted")
+		}
+	})
+	t.Run("duplicate machine", func(t *testing.T) {
+		preview := blocked(
+			deploymentClientCanaryNotSucceededTarget("machine-a", "", operator.PromotionNextStepRepairAndRerunCanary),
+			deploymentClientCanaryNotSucceededTarget("machine-a", "", operator.PromotionNextStepRepairAndRerunCanary),
+		)
+		if err := validateDeploymentPromotionPreview(preview, evaluatedAt); err == nil {
+			t.Fatal("duplicate machine_id accepted")
+		}
+	})
+}
+
 func deploymentClientTestJSON(t *testing.T, value any) string {
 	t.Helper()
 	raw, err := json.Marshal(value)

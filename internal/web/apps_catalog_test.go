@@ -30,13 +30,18 @@ func writeCatalogWebArtifact(t *testing.T, dir, name, version, engines string) a
 		var bundle bytes.Buffer
 		gz := gzip.NewWriter(&bundle)
 		tw := tar.NewWriter(gz)
-		for _, target := range []string{"linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64"} {
+		for _, target := range []string{"linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64",
+			"windows-amd64", "windows-arm64"} {
+			nodeName := "node-runtime/" + target + "/bin/node"
+			if strings.HasPrefix(target, "windows-") {
+				nodeName += ".exe"
+			}
 			for _, entry := range []struct {
 				name string
 				mode int64
 				body string
 			}{
-				{name: "node-runtime/" + target + "/bin/node", mode: 0o755, body: "node-" + target},
+				{name: nodeName, mode: 0o755, body: "node-" + target},
 				{name: "node-runtime/" + target + "/lib/node_modules/npm/bin/npm-cli.js", mode: 0o644, body: "npm-" + target},
 			} {
 				if err := tw.WriteHeader(&tar.Header{Name: entry.name, Typeflag: tar.TypeReg,

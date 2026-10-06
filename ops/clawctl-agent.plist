@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  這是 user LaunchAgent，不是 system daemon；理由與 systemd user unit 相同：
+  這是 user LaunchAgent，不是 system daemon；與 Linux system unit 的明確 User= 相同：
   coding CLI 的憑證權限為 0600，且屬於執行 agent 的使用者。root daemon 雖然
   讀得到，但那會造成不必要的權限擴張。
 

@@ -244,8 +244,8 @@ func discoverProcess(i *model.OpenClawInstall, deps installDeps, unitIndexJS str
 		i.ProcessReason = "讀不到 /proc/<MainPID>/cmdline：" + err.Error()
 		return
 	}
-	// ⚠ 只讀 cmdline；/proc/<pid>/exe 需要 ptrace 權限，從 systemd user unit
-	// 執行時四台都可能讀不到，拿它當入場券會製造「0 個 process」假象。
+	// ⚠ 只讀 cmdline；/proc/<pid>/exe 需要 ptrace 權限，agent 以非特權
+	// User= 執行時四台都可能讀不到，拿它當入場券會製造「0 個 process」假象。
 	for _, arg := range strings.Split(strings.TrimRight(string(b), "\x00"), "\x00") {
 		if strings.HasSuffix(arg, "/dist/index.js") {
 			i.ProcessIndexJS = arg

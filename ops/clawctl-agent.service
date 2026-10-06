@@ -1,25 +1,28 @@
-# clawctl-agent —— systemd **user** unit
+# clawctl-agent —— systemd system unit template
 #
-# ⚠ 這必須是 user unit，不是 system unit。
+# install-agent.sh / upgrade-agent.sh 會在放進 /etc/systemd/system 前渲染
+# @@CLAWCTL_AGENT_USER@@、@@CLAWCTL_AGENT_UID@@ 與 @@CLAWCTL_AGENT_HOME@@。
 #
-# 原因是實測出來的：coding CLI 的憑證全部是 0600 且屬於那個使用者
-# （samplehub1 是 example-user、sampleagent1/2 是 ubuntu、sampleagent3 是 opc、sampleagent4 是 example-user-b）。
-# root daemon 讀得到（root 讀什麼都行），但那是不必要的權限擴張，而且
-# 「現在是哪個帳號在用」這個判斷本來就需要使用者的 session 脈絡。
-#
-# ⚠ 安裝後一定要 `loginctl enable-linger <user>`，否則使用者一登出
-# 這個 unit 就被停掉，然後 Hub 上會出現一整排 Unreachable，
-# 而那些機器其實好好的。install-agent.sh 會做這件事。
+# Agent 仍以這個普通使用者執行，所以只能讀該使用者的 0600 憑證；
+# 差別是 unit 由 system manager 建立 mount namespace。這讓
+# ProtectSystem=strict / ProtectHome=read-only 在 systemd 249/252/259 都由有權限的
+# manager 實際套用，而不是在 user manager 下被略過。
 
 [Unit]
 Description=clawctl agent (fleet observation)
 Documentation=https://github.com/teddashh/AI-Intune
 After=network-online.target
 Wants=network-online.target
+After=user@__CLAWCTL_AGENT_UID__.service
+Wants=user@__CLAWCTL_AGENT_UID__.service
 
 [Service]
 Type=notify
-ExecStart=%h/.local/bin/clawctl-agent
+User=@@CLAWCTL_AGENT_USER@@
+Environment=HOME=@@CLAWCTL_AGENT_HOME@@
+Environment=XDG_RUNTIME_DIR=/run/user/@@CLAWCTL_AGENT_UID@@
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/@@CLAWCTL_AGENT_UID@@/bus
+ExecStart=@@CLAWCTL_AGENT_HOME@@/.local/bin/clawctl-agent
 Restart=always
 RestartSec=5
 
@@ -45,22 +48,18 @@ KillMode=control-group
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.config/clawctl %h/.config/systemd/user/openclaw-gateway.service.d %h/.cache/clawctl %h/.local/share/clawctl %h/.openclaw
+ReadWritePaths=@@CLAWCTL_AGENT_HOME@@/.config/clawctl @@CLAWCTL_AGENT_HOME@@/.config/systemd/user/openclaw-gateway.service.d @@CLAWCTL_AGENT_HOME@@/.cache/clawctl @@CLAWCTL_AGENT_HOME@@/.local/share/clawctl @@CLAWCTL_AGENT_HOME@@/.openclaw
 # ⚠ PrivateTmp 必須是 false：OpenClaw 的 log 在 /tmp/openclaw/（tmpfs），
 # 那是輔助線索的來源。
 PrivateTmp=false
 # ⚠ 這裡刻意**沒有** PrivateDevices=true。
 #
-# 它看起來是免費的加固，實際上會讓整個 unit 起不來：PrivateDevices 隱含
-# CapabilityBoundingSet=~CAP_MKNOD，而一個非特權的 systemd --user manager
-# 沒有權限動 capability bounding set。結果是：
+# Agent 需要觀測主機現有的 device 面，所以不用 PrivateDevices=true。
+# 此外舊 user unit 時期實測過，PrivateDevices 隱含的 capability 操作會讓
+# 那些 unit 以 status=218/CAPABILITIES 起不來。
 #
 #     Failed to drop capabilities: Operation not permitted
 #     Failed at step CAPABILITIES ... status=218/CAPABILITIES
-#
-# 這個 bug 只有在真的用 systemd 裝一次才會出現 —— 手動跑 binary 是好的，
-# 單元測試也全過。同理不要加 ProtectKernelTunables / ProtectKernelModules /
-# ProtectClock，它們全都隱含 capability 操作。
 RestrictSUIDSGID=true
 LockPersonality=true
 
@@ -73,4 +72,4 @@ MemoryHigh=224M
 MemoryMax=256M
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

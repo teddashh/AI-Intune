@@ -52,6 +52,7 @@ func (s *Service) PreviewStandardCatalogManifest(ctx context.Context,
 		targets := []artifact.NodeRuntimeTarget{
 			{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"},
 			{OS: "darwin", Arch: "amd64"}, {OS: "darwin", Arch: "arm64"},
+			{OS: "windows", Arch: "amd64"}, {OS: "windows", Arch: "arm64"},
 		}
 		if err := artifact.ValidateNodeRuntimeBundleTargetsContext(ctx, s.artifactsDir, *entry.Record, targets...); err != nil {
 			return StandardCatalogManifestPreviewResult{}, catalogManifestRejection(store.OperatorCodeCatalogArtifactMismatch)
@@ -126,6 +127,8 @@ func (s *Service) standardManifestFromRecord(record artifact.Sidecar,
 		manifest.Platforms = append(manifest.Platforms,
 			appcatalog.Platform{OS: "darwin", Arch: "amd64"},
 			appcatalog.Platform{OS: "darwin", Arch: "arm64"},
+			appcatalog.Platform{OS: "windows", Arch: "amd64"},
+			appcatalog.Platform{OS: "windows", Arch: "arm64"},
 		)
 		manifest.Kind, manifest.Title = appcatalog.KindRuntime, "Node.js"
 		manifest.Source = appcatalog.Source{

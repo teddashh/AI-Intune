@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,26 @@ import (
 
 	"github.com/teddashh/AI-Intune/internal/model"
 )
+
+func TestReadJournalSelectsSystemManagerOnlyForAgent(t *testing.T) {
+	dir := t.TempDir()
+	argsFile := filepath.Join(dir, "args")
+	writeExec(t, filepath.Join(dir, "journalctl"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >>\"$ARGS_FILE\"\n")
+	t.Setenv("PATH", dir)
+	t.Setenv("ARGS_FILE", argsFile)
+
+	readJournal(context.Background(), "clawctl-agent.service")
+	readJournal(context.Background(), "openclaw-gateway.service")
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "-u clawctl-agent.service ") ||
+		!strings.HasPrefix(lines[1], "--user -u openclaw-gateway.service ") {
+		t.Fatalf("unexpected journal manager selection: %q", lines)
+	}
+}
 
 // 這一批測試守的是一條**產品線**，不是一段程式：
 // journal 摘要不准變成「掃 log 關鍵字判健康」。

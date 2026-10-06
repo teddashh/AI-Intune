@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -751,11 +752,54 @@ func TestUpdatesShowsFetchedArtifactsAndMissingPackagePreview(t *testing.T) {
 			t.Errorf("Updates 缺少 %q", want)
 		}
 	}
-	if strings.Contains(body, "<button") {
-		t.Fatal("Updates 不該有任何按鈕")
+	if strings.Count(body, "<button") != 1 || strings.Count(body, `<button class="language-switch"`) != 1 {
+		t.Fatal("Updates 除了導覽語言切換之外不該有任何按鈕")
 	}
 	if strings.Count(body, "stable promote 鎖著（stable_promotion_locked）") != 1 {
 		t.Fatalf("stable 應有且只有一行 gate、canary 不該加：%s", body)
+	}
+}
+
+func TestUpdatesShowsCanaryNotSucceededWithoutEmptyJobLink(t *testing.T) {
+	s, _ := newServer(t)
+	targets := []operator.DeploymentPromotionIndependentTargetPreview{{
+		MachineID: "machine-pass", DisplayName: "canary-one", JobID: "job-passed",
+		State: "passed", NextStep: operator.PromotionNextStepNone,
+	}, {
+		MachineID: "machine-miss", DisplayName: "canary-missing", JobID: "",
+		State: "canary_not_succeeded", NextStep: operator.PromotionNextStepRepairAndRerunCanary,
+	}}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/updates", nil)
+	s.render(rec, req, "updates.html", page{
+		Title: "更新", Nav: "updates", Updates: &updatesPage{
+			Channels: []channelUpdate{{
+				Name: "stable",
+				Previews: []channelPreview{{
+					Artifact: updateArtifactRow{Version: "2026.9.2"},
+					Summary:  "影響 0 台",
+					Promote: fmt.Sprintf("stable promote 鎖著（stable_promotion_locked）；跨故障域 verifier %d / %d 台通過",
+						1, len(targets)),
+					PromotionTargets: targets,
+				}},
+			}},
+		},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"跨故障域 verifier 1 / 2 台通過",
+		`href="/jobs/job-passed"`,
+		"<td>canary-missing</td><td>—</td><td>canary_not_succeeded</td><td>修復後重跑 canary</td>",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("updates 缺少 %q：%s", want, body)
+		}
+	}
+	if strings.Contains(body, `href="/jobs/"`) {
+		t.Fatalf("updates 有空的工作單連結：%s", body)
 	}
 }
 

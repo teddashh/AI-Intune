@@ -11,16 +11,17 @@ import (
 type IndependentGateState string
 
 const (
-	IndependentGateUnassigned        IndependentGateState = "unassigned"
-	IndependentGateAwaitingReport    IndependentGateState = "awaiting_report"
-	IndependentGateIncompleteReport  IndependentGateState = "incomplete_report"
-	IndependentGateProducerRevoked   IndependentGateState = "producer_revoked"
-	IndependentGateDigestMismatch    IndependentGateState = "digest_mismatch"
-	IndependentGateReleaseMismatch   IndependentGateState = "release_mismatch"
-	IndependentGateReleaseUnreported IndependentGateState = "release_unreported"
-	IndependentGateStale             IndependentGateState = "stale"
-	IndependentGateFailed            IndependentGateState = "failed"
-	IndependentGatePassed            IndependentGateState = "passed"
+	IndependentGateUnassigned         IndependentGateState = "unassigned"
+	IndependentGateAwaitingReport     IndependentGateState = "awaiting_report"
+	IndependentGateIncompleteReport   IndependentGateState = "incomplete_report"
+	IndependentGateProducerRevoked    IndependentGateState = "producer_revoked"
+	IndependentGateDigestMismatch     IndependentGateState = "digest_mismatch"
+	IndependentGateReleaseMismatch    IndependentGateState = "release_mismatch"
+	IndependentGateReleaseUnreported  IndependentGateState = "release_unreported"
+	IndependentGateStale              IndependentGateState = "stale"
+	IndependentGateFailed             IndependentGateState = "failed"
+	IndependentGateCanaryNotSucceeded IndependentGateState = "canary_not_succeeded"
+	IndependentGatePassed             IndependentGateState = "passed"
 )
 
 type CanaryTarget struct {
@@ -163,6 +164,11 @@ func PromoteGate(f PromoteFacts, now time.Time, loc *time.Location) PromoteDecis
 			}
 			d.IndependentTargets = append(d.IndependentTargets, IndependentGateTarget{
 				MachineID: target.MachineID, DisplayName: name, JobID: target.JobID, State: state,
+			})
+		} else {
+			d.IndependentTargets = append(d.IndependentTargets, IndependentGateTarget{
+				MachineID: target.MachineID, DisplayName: name, JobID: target.JobID,
+				State: IndependentGateCanaryNotSucceeded,
 			})
 		}
 		if target.Retired {

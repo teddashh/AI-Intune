@@ -152,6 +152,7 @@ if [[ "${CLAWCTL_INSTALL_AGENT_CHECK_HUB:-}" == "1" ]]; then
   exit 0
 fi
 [[ $EUID -ne 0 ]] || fail "Run this installer as the account that will run clawctl-agent"
+AGENT_USER="$(id -un)"
 UNAME_S="$(uname -s)"
 if [[ "$UNAME_S" != Linux ]]; then
   [[ "$UNAME_S" != Darwin ]] || fail "This installer is for Linux. On macOS run ops/install-agent-macos.sh --hub $HUB"
@@ -203,6 +204,24 @@ new_secret_file() {
   printf '%s\n' "$value" >"$path"
   SECRET_FILES+=("$path")
   printf -v "$output_name" '%s' "$path"
+}
+
+render_agent_unit() {
+  local source=$1 destination=$2 agent_user agent_uid escaped_home
+  agent_user="$AGENT_USER"
+  agent_uid="$(id -u)"
+  [[ "$agent_user" =~ ^[a-zA-Z_][a-zA-Z0-9_.-]*\$?$ ]] || fail "Unsupported agent user name: $agent_user"
+  [[ "$agent_uid" =~ ^[1-9][0-9]*$ ]] || fail "Agent must use a non-root numeric UID"
+  [[ "$HOME" =~ ^/[a-zA-Z0-9._/-]+$ && "$HOME" != *"/../"* && "$HOME" != */.. ]] ||
+    fail "Agent home contains characters that cannot be safely rendered into systemd: $HOME"
+  escaped_home=${HOME//\\/\\\\}
+  escaped_home=${escaped_home//&/\\&}
+  sed -e "s|@@CLAWCTL_AGENT_USER@@|$agent_user|g" \
+      -e "s|@@CLAWCTL_AGENT_UID@@|$agent_uid|g" \
+      -e "s|__CLAWCTL_AGENT_UID__|$agent_uid|g" \
+      -e "s|@@CLAWCTL_AGENT_HOME@@|$escaped_home|g" \
+      "$source" >"$destination"
+  ! grep -Fq 'CLAWCTL_AGENT_' "$destination" || fail "Agent systemd unit rendering is incomplete"
 }
 
 ensure_owned_directory() {
@@ -353,6 +372,7 @@ CONFIG_HOME="$HOME/.config"
 CONFIG_DIR="$CONFIG_HOME/clawctl"
 UNIT_PARENT="$CONFIG_HOME/systemd"
 UNIT_DIR="$UNIT_PARENT/user"
+SYSTEM_UNIT_DIR="${CLAWCTL_SYSTEM_UNIT_DIR:-/etc/systemd/system}"
 LOCAL_HOME="$HOME/.local"
 SHARE_DIR="$LOCAL_HOME/share"
 RUNTIME_DIR="$SHARE_DIR/clawctl"
@@ -366,7 +386,8 @@ OPENCLAW_DIR="$RUNTIME_DIR/openclaw"
 OPENCLAW_DROPIN_DIR="$UNIT_DIR/openclaw-gateway.service.d"
 OPENCLAW_STATE_DIR="$HOME/.openclaw"
 CONFIG_FILE="$CONFIG_DIR/agent.json"
-UNIT_FILE="$UNIT_DIR/clawctl-agent.service"
+LEGACY_UNIT_FILE="$UNIT_DIR/clawctl-agent.service"
+SYSTEM_UNIT_FILE="$SYSTEM_UNIT_DIR/clawctl-agent.service"
 HERMES_UNIT_FILE="$UNIT_DIR/clawctl-hermes.service"
 OPENCLAW_UNIT_FILE="$UNIT_DIR/openclaw-gateway.service"
 BIN_FILE="$BIN_DIR/clawctl-agent"
@@ -398,8 +419,12 @@ AGENT_VERSION="$("$BIN_SRC" version)"
 [[ -n "$AGENT_VERSION" ]] || fail "clawctl-agent version is empty"
 install -m 0755 "$BIN_SRC" "$BIN_FILE.new"
 mv -f "$BIN_FILE.new" "$BIN_FILE"
-install -m 0644 "$SCRIPT_DIR/clawctl-agent.service" "$UNIT_FILE.new"
-mv -f "$UNIT_FILE.new" "$UNIT_FILE"
+RENDERED_AGENT_UNIT="$(mktemp)"
+SECRET_FILES+=("$RENDERED_AGENT_UNIT")
+render_agent_unit "$SCRIPT_DIR/clawctl-agent.service" "$RENDERED_AGENT_UNIT"
+sudo install -d -m 0755 "$SYSTEM_UNIT_DIR"
+sudo install -m 0644 "$RENDERED_AGENT_UNIT" "$SYSTEM_UNIT_FILE.new"
+sudo mv -f "$SYSTEM_UNIT_FILE.new" "$SYSTEM_UNIT_FILE"
 install -m 0644 "$SCRIPT_DIR/clawctl-hermes.service" "$HERMES_UNIT_FILE.new"
 mv -f "$HERMES_UNIT_FILE.new" "$HERMES_UNIT_FILE"
 if [[ ! -e "$OPENCLAW_UNIT_FILE" && ! -L "$OPENCLAW_UNIT_FILE" ]] ||
@@ -409,9 +434,12 @@ if [[ ! -e "$OPENCLAW_UNIT_FILE" && ! -L "$OPENCLAW_UNIT_FILE" ]] ||
 fi
 echo "Agent installed: $AGENT_VERSION"
 
-STEP="linger enable"
-sudo loginctl enable-linger "$USER"
-[[ "$(loginctl show-user "$USER" --property=Linger --value)" == "yes" ]] || fail "linger is not enabled for $USER"
+# Agent 是 system service，但它管理的 Hermes、OpenClaw 與 BAT 仍是 user
+# services。先開 linger 並拉起 user manager，agent 才能透過上面的 bus
+# 環境變數在登出後繼續管理它們。
+STEP="user manager persistence"
+sudo loginctl enable-linger "$AGENT_USER"
+[[ "$(loginctl show-user "$AGENT_USER" --property=Linger --value)" == "yes" ]] || fail "linger is not enabled for $AGENT_USER"
 sudo systemctl start "user@$EUID.service"
 export XDG_RUNTIME_DIR="/run/user/$EUID"
 
@@ -442,20 +470,36 @@ fi
 [[ "$(stat -c '%a' "$CONFIG_FILE")" == "600" ]] || fail "Agent config mode is not 0600"
 
 STEP="agent service"
-systemctl --user daemon-reload
-systemctl --user enable clawctl-agent.service
-systemctl --user reset-failed clawctl-agent.service 2>/dev/null || true
+sudo systemctl daemon-reload
+[[ "$(systemctl show clawctl-agent.service --property=LoadState --value)" == "loaded" ]] || fail "clawctl-agent system unit did not load"
+[[ "$(systemctl show clawctl-agent.service --property=FragmentPath --value)" == "$SYSTEM_UNIT_FILE" ]] || fail "clawctl-agent system unit path mismatch before migration"
+[[ "$(systemctl show clawctl-agent.service --property=User --value)" == "$AGENT_USER" ]] || fail "clawctl-agent systemd User contract mismatch before migration"
+[[ "$(systemctl show clawctl-agent.service --property=ProtectSystem --value)" == "strict" ]] || fail "clawctl-agent ProtectSystem sandbox is not loaded before migration"
+[[ "$(systemctl show clawctl-agent.service --property=ProtectHome --value)" == "read-only" ]] || fail "clawctl-agent ProtectHome sandbox is not loaded before migration"
+sudo systemctl enable clawctl-agent.service
+if [[ -e "$LEGACY_UNIT_FILE" || -L "$LEGACY_UNIT_FILE" ]]; then
+  [[ -f "$LEGACY_UNIT_FILE" && ! -L "$LEGACY_UNIT_FILE" ]] || fail "Legacy agent unit path is not safe: $LEGACY_UNIT_FILE"
+  systemctl --user disable --now clawctl-agent.service
+  rm -f -- "$LEGACY_UNIT_FILE"
+  systemctl --user daemon-reload
+fi
+sudo systemctl reset-failed clawctl-agent.service 2>/dev/null || true
 SERVICE_STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-systemctl --user restart clawctl-agent.service
-systemctl --user is-active --quiet clawctl-agent.service
+sudo systemctl restart clawctl-agent.service
+systemctl is-active --quiet clawctl-agent.service
 
 STEP="Hub readiness"
 "$BIN_FILE" verify --hub "$HUB" --since "$SERVICE_STARTED_AT" --timeout 2m
-RESTARTS_AFTER="$(systemctl --user show clawctl-agent.service --property=NRestarts --value)"
+RESTARTS_AFTER="$(systemctl show clawctl-agent.service --property=NRestarts --value)"
 [[ "$RESTARTS_AFTER" == "0" ]] || fail "clawctl-agent restarted during installation"
-MAIN_PID="$(systemctl --user show clawctl-agent.service --property=MainPID --value)"
+MAIN_PID="$(systemctl show clawctl-agent.service --property=MainPID --value)"
 [[ "$MAIN_PID" =~ ^[1-9][0-9]*$ ]] || fail "clawctl-agent has no MainPID"
 [[ "$(ps -o comm= -p "$MAIN_PID" | xargs)" == "clawctl-agent" ]] || fail "clawctl-agent MainPID identity mismatch"
+[[ "$(ps -o uid= -p "$MAIN_PID" | xargs)" == "$EUID" ]] || fail "clawctl-agent process owner mismatch"
+[[ "$(systemctl show clawctl-agent.service --property=FragmentPath --value)" == "$SYSTEM_UNIT_FILE" ]] || fail "clawctl-agent is not loaded as the managed system unit"
+[[ "$(systemctl show clawctl-agent.service --property=User --value)" == "$(id -un)" ]] || fail "clawctl-agent systemd User contract mismatch"
+[[ "$(systemctl show clawctl-agent.service --property=ProtectSystem --value)" == "strict" ]] || fail "clawctl-agent ProtectSystem sandbox is not loaded"
+[[ "$(systemctl show clawctl-agent.service --property=ProtectHome --value)" == "read-only" ]] || fail "clawctl-agent ProtectHome sandbox is not loaded"
 AGENT_COUNT="$(ps -eo comm= | awk '$1=="clawctl-agent" { n++ } END { print n+0 }')"
 [[ "$AGENT_COUNT" == "1" ]] || fail "Expected one clawctl-agent process; found $AGENT_COUNT"
 

@@ -195,6 +195,73 @@ func TestDeploymentReviewShowsIndependentGateStateAndExactNextStep(t *testing.T)
 	}
 }
 
+func TestDeploymentReviewShowsCanaryNotSucceededWithoutEmptyJobLink(t *testing.T) {
+	s, _ := newServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/deployments?view=new", nil)
+	promotion := operator.DeploymentPromotionPreview{
+		Allowed: false, Blockers: []string{"stable_promotion_locked"}, IndependentRequired: true,
+		IndependentPassedTargets: 1,
+		IndependentTargets: []operator.DeploymentPromotionIndependentTargetPreview{{
+			MachineID: "machine-pass", DisplayName: "canary-one", JobID: "job-passed",
+			State: "passed", NextStep: operator.PromotionNextStepNone,
+		}, {
+			MachineID: "machine-miss", DisplayName: "canary-missing", JobID: "",
+			State: "canary_not_succeeded", NextStep: operator.PromotionNextStepRepairAndRerunCanary,
+		}},
+	}
+	pages := []struct {
+		name string
+		body string
+	}{
+		{name: "create", body: func() string {
+			rec := httptest.NewRecorder()
+			s.render(rec, req, "deployment_create_review.html", page{
+				Title: "確認建立 deployment", Nav: "deployments", DeploymentCreateReview: &deploymentCreateReview{
+					Preview: operator.DeploymentCreatePreviewResult{
+						SchemaVersion: operator.DeploymentPreviewSchemaVersion, Channel: "stable",
+						Targets: []operator.DeploymentPlanTargetPreview{}, Promotion: &promotion,
+						Blockers: []string{"stable_promotion_locked"},
+					},
+				},
+			})
+			if rec.Code != http.StatusOK {
+				t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			return rec.Body.String()
+		}()},
+		{name: "action", body: func() string {
+			rec := httptest.NewRecorder()
+			s.render(rec, req, "deployment_action_review.html", page{
+				Title: "確認部署動作", Nav: "deployments", DeploymentActionReview: &deploymentActionReview{
+					Title: "確認繼續", Preview: operator.DeploymentActionPreviewResult{
+						Action: "continue", Promotion: &promotion,
+						Eligibility: operator.DeploymentActionEligibility{Blockers: []string{"stable_promotion_locked"}},
+						Deployment:  operator.DeploymentSummary{DeploymentID: "deployment-one", Channel: "stable"},
+					},
+				},
+			})
+			if rec.Code != http.StatusOK {
+				t.Fatalf("action status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			return rec.Body.String()
+		}()},
+	}
+	for _, pageBody := range pages {
+		for _, want := range []string{
+			"跨故障域 verifier 1 / 2 台通過",
+			`href="/jobs/job-passed"`,
+			"<td>canary-missing</td><td>—</td><td>canary_not_succeeded</td><td>修復後重跑 canary</td>",
+		} {
+			if !strings.Contains(pageBody.body, want) {
+				t.Errorf("%s review 缺少 %q：%s", pageBody.name, want, pageBody.body)
+			}
+		}
+		if strings.Contains(pageBody.body, `href="/jobs/"`) {
+			t.Errorf("%s review 有空的工作單連結：%s", pageBody.name, pageBody.body)
+		}
+	}
+}
+
 func deploymentCreateApplyForm(t *testing.T, body, channel, version string) url.Values {
 	t.Helper()
 	return url.Values{

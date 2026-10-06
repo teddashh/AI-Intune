@@ -14,6 +14,7 @@ package model
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"time"
 )
 
@@ -189,6 +190,15 @@ type OpenClawSpec struct {
 }
 
 const NodeRuntimeBundleLayoutV1 = "node-runtime-bundle:v1"
+
+// BATServerRoot holds AI-Intune's bat-server releases, token, data, and unit file.
+func BATServerRoot(home string) string {
+	return filepath.Join(home, ".local", "share", "clawctl", "bat-server")
+}
+
+func BATServerDataDir(home string) string {
+	return filepath.Join(BATServerRoot(home), "data")
+}
 
 const HermesOCIBundleLayoutV1 = "hermes-oci-bundle:v1"
 

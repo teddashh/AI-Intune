@@ -37,7 +37,7 @@ func TestReadsRealFleetArgv(t *testing.T) {
 				{pid: 1, comm: "systemd", argv: []string{"/sbin/init"}},
 				{pid: 42, comm: "MainThread", argv: argv},
 			}
-			b := batServer(procs, model.ProcessScanRestricted)
+			b := batServer(procs, model.ProcessScanRestricted, "/home/bat-test")
 			if !b.Running {
 				t.Fatalf("沒認出 bat-server，argv=%v", argv)
 			}
@@ -67,7 +67,7 @@ func TestBATMatchIsEvidenceRegardlessOfProcessScan(t *testing.T) {
 		"",
 	} {
 		t.Run(firstNonEmpty(processScan, "empty"), func(t *testing.T) {
-			b := batServer(procs, processScan)
+			b := batServer(procs, processScan, "/home/bat-test")
 			if !b.Running || b.Port != 9876 || b.Bind != "tailscale" {
 				t.Fatalf("processScan=%q 改變了已命中的 BAT 證據：%+v", processScan, b)
 			}
@@ -82,13 +82,13 @@ func TestBATMatchIsEvidenceRegardlessOfProcessScan(t *testing.T) {
 // **「我沒看到」跟「它不存在」是兩件事，而空白兩者都像。**
 func TestBATAbsenceIsNotSilence(t *testing.T) {
 	t.Run("讀不到 /proc", func(t *testing.T) {
-		b := batServer(nil, model.ProcessScanUnavailable)
+		b := batServer(nil, model.ProcessScanUnavailable, "/home/bat-test")
 		if b.Running || !strings.Contains(b.Reason, "/proc") {
 			t.Errorf("掃不到 process 時要說是偵測關掉了，實際：%+v", b)
 		}
 	})
 	t.Run("讀得到但 0 個 process 是 restricted", func(t *testing.T) {
-		b := batServer([]procInfo{}, model.ProcessScanRestricted)
+		b := batServer([]procInfo{}, model.ProcessScanRestricted, "/home/bat-test")
 		if b.Running {
 			t.Fatal("空的 process 表不該認成 bat-server")
 		}
@@ -101,7 +101,7 @@ func TestBATAbsenceIsNotSilence(t *testing.T) {
 		}
 	})
 	t.Run("restricted 掃描不宣告 bat-server 缺席", func(t *testing.T) {
-		b := batServer([]procInfo{{pid: 1, argv: []string{"/sbin/init"}}}, model.ProcessScanRestricted)
+		b := batServer([]procInfo{{pid: 1, argv: []string{"/sbin/init"}}}, model.ProcessScanRestricted, "/home/bat-test")
 		if b.Running {
 			t.Fatal("認錯了 process")
 		}
@@ -114,7 +114,7 @@ func TestBATAbsenceIsNotSilence(t *testing.T) {
 		}
 	})
 	t.Run("complete 掃描才可以宣告沒有 bat-server", func(t *testing.T) {
-		b := batServer([]procInfo{{pid: 1, argv: []string{"/sbin/init"}}}, model.ProcessScanComplete)
+		b := batServer([]procInfo{{pid: 1, argv: []string{"/sbin/init"}}}, model.ProcessScanComplete, "/home/bat-test")
 		if b.Running {
 			t.Fatal("認錯了 process")
 		}
@@ -124,7 +124,7 @@ func TestBATAbsenceIsNotSilence(t *testing.T) {
 	})
 	t.Run("未知掃描狀態 fail closed", func(t *testing.T) {
 		for _, processScan := range []string{"", "future-value"} {
-			b := batServer([]procInfo{{pid: 1, argv: []string{"/sbin/init"}}}, processScan)
+			b := batServer([]procInfo{{pid: 1, argv: []string{"/sbin/init"}}}, processScan, "/home/bat-test")
 			if b.Running || !strings.Contains(b.Reason, "查不出 bat-server 是否在跑") {
 				t.Errorf("processScan=%q 沒有 fail closed：%+v", processScan, b)
 			}
@@ -134,7 +134,7 @@ func TestBATAbsenceIsNotSilence(t *testing.T) {
 		}
 	})
 	t.Run("認不得 port 就不要猜一個", func(t *testing.T) {
-		b := batServer([]procInfo{{pid: 9, argv: []string{"/opt/bat-server/bat-server", "--config=/etc/bat.toml"}}}, model.ProcessScanRestricted)
+		b := batServer([]procInfo{{pid: 9, argv: []string{"/opt/bat-server/bat-server", "--config=/etc/bat.toml"}}}, model.ProcessScanRestricted, "/home/bat-test")
 		if b.Port != 0 {
 			t.Errorf("認不得卻填了 port %d —— 上一個填出來的預設值就是四台全錯的 8080", b.Port)
 		}
@@ -150,7 +150,7 @@ func TestFlagFormsBothWork(t *testing.T) {
 		{"bat-server", "--port=9876", "--bind=tailscale"},
 		{"bat-server", "--port", "9876", "--bind", "tailscale"},
 	} {
-		b := batServer([]procInfo{{pid: 3, argv: argv}}, model.ProcessScanRestricted)
+		b := batServer([]procInfo{{pid: 3, argv: argv}}, model.ProcessScanRestricted, "/home/bat-test")
 		if b.Port != 9876 || b.Bind != "tailscale" {
 			t.Errorf("argv=%v → port=%d bind=%q", argv, b.Port, b.Bind)
 		}
@@ -160,7 +160,7 @@ func TestFlagFormsBothWork(t *testing.T) {
 // TestBATRestrictedReasonCrossPackageBinding 把探針真正產生的 BAT 喂給 model，
 // 防止 Connect 畫面的 why 測試只驗到手填 fixture。
 func TestBATRestrictedReasonCrossPackageBinding(t *testing.T) {
-	b := batServer([]procInfo{{pid: 1, argv: []string{"/sbin/init"}}}, model.ProcessScanRestricted)
+	b := batServer([]procInfo{{pid: 1, argv: []string{"/sbin/init"}}}, model.ProcessScanRestricted, "/home/bat-test")
 	url, why := model.ConnectURL(b, "100.64.0.1")
 	if url != "" {
 		t.Fatalf("restricted 掃描不該給連線位址：%q", url)
@@ -247,7 +247,7 @@ func TestListeningOnMeasurement(t *testing.T) {
 		return batServerWithSocketPaths([]procInfo{{
 			pid:  42,
 			argv: []string{"/opt/bat-server/bat-server", "--port=9876", "--bind=tailscale"},
-		}}, model.ProcessScanComplete, paths)
+		}}, model.ProcessScanComplete, paths, "/home/bat-test")
 	}
 
 	t.Run("兩張表讀成功且沒有 LISTEN", func(t *testing.T) {
@@ -402,5 +402,30 @@ func TestConnectURLMatchesTheFleet(t *testing.T) {
 				t.Error("沒有位址、也沒有理由 —— 那是一格看起來像「這裡不重要」的留白")
 			}
 		})
+	}
+}
+
+func TestFindBATSkipsAIIntuneProcess(t *testing.T) {
+	home := "/home/bat-test"
+	mydata := model.BATServerDataDir(home)
+
+	ownerEq := procInfo{pid: 2, argv: []string{"/opt/bat-server/bat-server", "--bind=tailscale", "--port=9876", "--data-dir=/owner/data"}}
+	ownerSpace := procInfo{pid: 3, argv: []string{"/opt/bat-server/bat-server", "--bind", "tailscale", "--port", "9876", "--data-dir", "/owner/data"}}
+
+	aiEq := procInfo{pid: 4, argv: []string{"bat-server", "--bind=localhost", "--port=19876", "--data-dir=" + mydata}}
+	aiSpace := procInfo{pid: 5, argv: []string{"bat-server", "--bind", "localhost", "--port", "19876", "--data-dir", mydata}}
+
+	for _, ai := range []procInfo{aiEq, aiSpace} {
+		for _, owner := range []procInfo{ownerEq, ownerSpace} {
+			got, ok := findBAT([]procInfo{ai, owner}, home)
+			if !ok || got.pid != owner.pid {
+				t.Fatalf("expected owner pid %d, got ok=%v, p=%v", owner.pid, ok, got)
+			}
+		}
+
+		res := batServer([]procInfo{ai}, model.ProcessScanComplete, home)
+		if res.Reason == "" || res.Reason != "掃了 1 個 process，沒有一個是 bat-server" {
+			t.Fatalf("expected no bat-server for AI process, got %+v", res)
+		}
 	}
 }

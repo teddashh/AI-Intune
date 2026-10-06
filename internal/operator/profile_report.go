@@ -210,6 +210,20 @@ func ProfilePackageStateNextStep(stateValue ProfilePackageState) string {
 	return profilePackageStateSentences[stateValue].nextStep
 }
 
+const profilePackageMisattributedNextStep = "版號量的是沒在跑的那一份；到每機安裝狀態核對執行檔與其版號。"
+
+// ProfilePackageNextStep 是一格自己的下一步。
+//
+// ⚠⚠ 看得到的那幾台只要有一台量的是沒在跑的那一份，「看得到」就不能照狀態那一句收工：
+// 先核對執行檔。Hub 與用戶端都走這一個函式，同一格不會有兩種說法。摘要那一列講的是
+// 整個狀態，照樣用 ProfilePackageStateNextStep。
+func ProfilePackageNextStep(stateValue ProfilePackageState, seenMisattributedOn int) string {
+	if seenMisattributedOn > 0 {
+		return profilePackageMisattributedNextStep
+	}
+	return profilePackageStateSentences[stateValue].nextStep
+}
+
 // ProfileMachineRef 是一台現在穿著這一版的機器。
 type ProfileMachineRef struct {
 	MachineID   string `json:"machine_id"`
@@ -640,7 +654,8 @@ func profilePackageFor(packageID, version string,
 	pkg.SeenOn, pkg.SeenMisattributedOn = seen[key].on, seen[key].misattributed
 	pkg.State = profilePackageStateFor(everAssigned, pkg.SeenOn > 0)
 	sentences := profilePackageStateSentences[pkg.State]
-	pkg.Title, pkg.Meaning, pkg.NextStep = sentences.title, sentences.meaning, sentences.nextStep
+	pkg.Title, pkg.Meaning = sentences.title, sentences.meaning
+	pkg.NextStep = ProfilePackageNextStep(pkg.State, pkg.SeenMisattributedOn)
 	return pkg
 }
 

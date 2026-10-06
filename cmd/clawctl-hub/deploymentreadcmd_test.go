@@ -45,6 +45,32 @@ func TestDeploymentPromotionCLIShowsIndependentJobAndNextStep(t *testing.T) {
 	}
 }
 
+func TestDeploymentPromotionCLIShowsEmptyJobAsDash(t *testing.T) {
+	var out bytes.Buffer
+	err := writeDeploymentPromotion(&out, operator.DeploymentPromotionPreview{
+		Allowed: false, Blockers: []string{"stable_promotion_locked"}, IndependentRequired: true,
+		IndependentPassedTargets: 1,
+		IndependentTargets: []operator.DeploymentPromotionIndependentTargetPreview{{
+			MachineID: "canary-machine", DisplayName: "canary-one", JobID: "job-passed",
+			State: "passed", NextStep: operator.PromotionNextStepNone,
+		}, {
+			MachineID: "canary-missing", DisplayName: "canary-missing", JobID: "",
+			State: "canary_not_succeeded", NextStep: operator.PromotionNextStepRepairAndRerunCanary,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"independent=1/2", "canary-one", "job-passed", "canary-missing",
+		"canary_not_succeeded", "修復後重跑 canary", `"-"`,
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("promotion CLI 缺少 %q：\n%s", want, out.String())
+		}
+	}
+}
+
 func TestDeploymentJobCountsLeadWithSucceeded(t *testing.T) {
 	got := formatJobCounts(map[deploy.JobState]int{deploy.Succeeded: 18, deploy.NotStarted: 12})
 	if got != "18 succeeded / 12 not_started" {

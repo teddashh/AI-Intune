@@ -47,7 +47,7 @@ func TerminalJobOutcome(state deploy.JobState) string {
 
 const (
 	DeploymentReadSchemaVersion    = 3
-	DeploymentPreviewSchemaVersion = 3
+	DeploymentPreviewSchemaVersion = 4
 	DefaultDeploymentReadLimit     = 50
 	MaxDeploymentReadLimit         = 100
 	// DefaultDeploymentBatchSize is the later-batch size when a caller omits
@@ -1126,6 +1126,8 @@ func promotionIndependentNextStep(state rollout.IndependentGateState) string {
 	case rollout.IndependentGateStale:
 		return PromotionNextStepReassignVerifier
 	case rollout.IndependentGateFailed:
+		return PromotionNextStepRepairAndRerunCanary
+	case rollout.IndependentGateCanaryNotSucceeded:
 		return PromotionNextStepRepairAndRerunCanary
 	default:
 		return PromotionNextStepAssignVerifier

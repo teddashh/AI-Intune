@@ -669,13 +669,20 @@ func validateDeploymentPromotionPreview(value operator.DeploymentPromotionPrevie
 	passed := 0
 	blockedByIndependent := false
 	for _, target := range value.IndependentTargets {
+		jobOK := validateDeploymentClientIdentifier("promotion job_id", target.JobID, 256) == nil
+		if target.State == "canary_not_succeeded" && target.JobID == "" {
+			jobOK = true
+		}
+		duplicateJob := target.JobID != "" && seenJobs[target.JobID]
 		if validateDeploymentClientIdentifier("promotion machine_id", target.MachineID, 256) != nil ||
 			validateDeploymentClientText("promotion display_name", target.DisplayName, 256, false) != nil ||
-			validateDeploymentClientIdentifier("promotion job_id", target.JobID, 256) != nil ||
-			seenMachines[target.MachineID] || seenJobs[target.JobID] {
+			!jobOK || seenMachines[target.MachineID] || duplicateJob {
 			return errors.New("operator client: deployment promotion target identity is invalid or duplicated")
 		}
-		seenMachines[target.MachineID], seenJobs[target.JobID] = true, true
+		seenMachines[target.MachineID] = true
+		if target.JobID != "" {
+			seenJobs[target.JobID] = true
+		}
 		wantStep, ok := promotionIndependentNextStep(target.State)
 		if !ok || target.NextStep != wantStep {
 			return errors.New("operator client: deployment promotion independent state/next_step is invalid")
@@ -720,6 +727,8 @@ func promotionIndependentNextStep(state string) (string, bool) {
 	case "stale":
 		return operator.PromotionNextStepReassignVerifier, true
 	case "failed":
+		return operator.PromotionNextStepRepairAndRerunCanary, true
+	case "canary_not_succeeded":
 		return operator.PromotionNextStepRepairAndRerunCanary, true
 	case "passed":
 		return operator.PromotionNextStepNone, true

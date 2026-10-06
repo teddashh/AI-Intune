@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/deploy"
 	"github.com/teddashh/AI-Intune/internal/model"
 	"github.com/teddashh/AI-Intune/internal/rollout"
 )
@@ -633,6 +634,57 @@ func TestStableCreateCannotCrossAnIndependentReleaseMismatch(t *testing.T) {
 	_, jobs, applied, err := s.createStableOpenClawDeployment(n, time.UTC)
 	if !errors.Is(err, ErrPromoteLocked) || applied.Allowed || len(jobs) != 0 {
 		t.Fatalf("create jobs=%+v decision=%+v err=%v", jobs, applied, err)
+	}
+	assertDeploymentWriteCounts(t, s, before)
+}
+
+func TestStablePromotionCountsFailedCanaryMachineInTheDenominator(t *testing.T) {
+	s := rolloutStore(t)
+	now := time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC)
+	finished := now.Add(-48 * time.Hour)
+	digest := strings.Repeat("a", 64)
+	s.nowFn = func() time.Time { return now }
+	addRolloutMachine(t, s, "cnode", "samplehub1", false)
+	addRolloutMachine(t, s, "pnode", "sampleagent4", false)
+	canary, canaryJobs := createPromoteDeployment(t, s, "canary", "2026.9.2", digest, "", []NewDeploymentTarget{
+		{MachineID: "cnode", BatchNo: 1},
+		{MachineID: "pnode", BatchNo: 1},
+	})
+	setPromoteJobState(t, s, canaryJobs["cnode"], deploy.Succeeded, finished)
+	setPromoteJobState(t, s, canaryJobs["pnode"], deploy.Failed, finished)
+	finishPromoteDeployment(t, s, canary.DeploymentID, DeploymentRunning, finished)
+	n := NewDeployment{
+		Channel: "stable", ResourceKind: "openclaw", ResourceID: "openclaw",
+		Spec:      `{"kind":"openclaw","version":"2026.9.2","artifact":{"sha256":"` + digest + `"}}`,
+		BatchSize: 1, CreatedBy: "denominator-test",
+		Targets: []NewDeploymentTarget{{MachineID: "cnode", BatchNo: 1}},
+		Job:     NewJob{ArtifactDigest: "sha256:" + digest, ExecutionTimeout: 600},
+	}
+	decision, err := s.PreviewStableOpenClawPromotion("2026.9.2", n.Job.ArtifactDigest, s.now())
+	if err != nil || decision.Allowed || len(decision.IndependentTargets) != 2 {
+		t.Fatalf("preview decision=%+v err=%v", decision, err)
+	}
+	byMachine := map[string]rollout.IndependentGateTarget{}
+	for _, target := range decision.IndependentTargets {
+		byMachine[target.MachineID] = target
+	}
+	passed, failed := byMachine["cnode"], byMachine["pnode"]
+	if passed.State != rollout.IndependentGatePassed || passed.JobID != canaryJobs["cnode"].JobID ||
+		failed.State != rollout.IndependentGateCanaryNotSucceeded || failed.JobID != canaryJobs["pnode"].JobID ||
+		failed.JobID == "" {
+		t.Fatalf("targets=%+v", decision.IndependentTargets)
+	}
+	before := deploymentWriteCounts(t, s)
+	_, opened, applied, err := s.CreateStableOpenClawDeployment(n)
+	if !errors.Is(err, ErrPromoteLocked) || applied.Allowed || len(opened) != 0 ||
+		len(applied.IndependentTargets) != len(decision.IndependentTargets) {
+		t.Fatalf("create jobs=%+v decision=%+v err=%v", opened, applied, err)
+	}
+	for i, target := range applied.IndependentTargets {
+		want := decision.IndependentTargets[i]
+		if target.MachineID != want.MachineID || target.JobID != want.JobID || target.State != want.State {
+			t.Fatalf("create target[%d]=%+v preview=%+v", i, target, want)
+		}
 	}
 	assertDeploymentWriteCounts(t, s, before)
 }

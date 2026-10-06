@@ -16,13 +16,17 @@ const (
 	navigationLocaleCookie                              = "clawctl_navigation_locale"
 	navigationLocaleCookieMaxAge                        = 365 * 24 * 60 * 60
 	navigationReturnTargetMaxBytes                      = 4096
+	// The longest valid switch form: the longer locale and a maximum-length
+	// return_to with every byte percent-encoded.
+	navigationLanguageFormMaxBytes = len("locale=zh-Hant&return_to=") + 3*navigationReturnTargetMaxBytes
 )
 
 type navigationLocaleView struct {
 	Tag             string
 	ContentTag      string
 	PageTitle       string
-	ToggleHref      string
+	ToggleLocale    string
+	ToggleReturnTo  string
 	ToggleLabel     string
 	ToggleTitle     string
 	SkipLabel       string
@@ -128,8 +132,8 @@ func navigationLocaleFor(r *http.Request, title string) navigationLocaleView {
 			BreadcrumbHome:  "AI-Intune admin center",
 		}
 	}
-	view.ToggleHref = "/preferences/navigation-language/" + string(target) +
-		"?return_to=" + url.QueryEscape(requestURI)
+	view.ToggleLocale = string(target)
+	view.ToggleReturnTo = requestURI
 	return view
 }
 
@@ -265,12 +269,23 @@ func localizeAccessView(access *accessView, locale navigationLocale) {
 }
 
 func (s *Server) setNavigationLanguage(w http.ResponseWriter, r *http.Request) {
-	locale, ok := parseNavigationLocale(r.PathValue("locale"))
+	w.Header().Set("Cache-Control", "no-store")
+	if r.URL.RawQuery != "" || r.URL.ForceQuery {
+		http.Error(w, "導覽語言請求無效。", http.StatusBadRequest)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, int64(navigationLanguageFormMaxBytes))
+	if err := r.ParseForm(); err != nil || len(r.PostForm) != 2 ||
+		len(r.PostForm["locale"]) != 1 || len(r.PostForm["return_to"]) != 1 {
+		http.Error(w, "導覽語言請求無效。", http.StatusBadRequest)
+		return
+	}
+	locale, ok := parseNavigationLocale(r.PostForm.Get("locale"))
 	if !ok {
 		http.Error(w, "不支援的導覽語言。", http.StatusBadRequest)
 		return
 	}
-	returnTarget, err := navigationReturnTarget(r.URL.Query())
+	returnTarget, err := navigationReturnTarget(r.PostForm.Get("return_to"))
 	if err != nil {
 		http.Error(w, "導覽語言請求無效。", http.StatusBadRequest)
 		return
@@ -279,16 +294,10 @@ func (s *Server) setNavigationLanguage(w http.ResponseWriter, r *http.Request) {
 		Name: navigationLocaleCookie, Value: string(locale), Path: "/",
 		MaxAge: navigationLocaleCookieMaxAge, HttpOnly: true, SameSite: http.SameSiteLaxMode,
 	})
-	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, returnTarget, http.StatusSeeOther)
 }
 
-func navigationReturnTarget(query url.Values) (string, error) {
-	values, ok := query["return_to"]
-	if !ok || len(query) != 1 || len(values) != 1 {
-		return "", errors.New("return target is required exactly once")
-	}
-	target := values[0]
+func navigationReturnTarget(target string) (string, error) {
 	if len(target) == 0 || len(target) > navigationReturnTargetMaxBytes ||
 		strings.HasPrefix(target, "//") ||
 		strings.ContainsAny(target, "\\#\r\n") {
