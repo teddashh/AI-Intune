@@ -1175,3 +1175,116 @@ func TestLaunchJobsReturnsBeforeSweepFinishesAndRunsJobsOnlyAfter(t *testing.T) 
 		t.Fatal("掃描完了卻沒起工作單迴圈")
 	}
 }
+
+func checkWindowsProductionExecutorsKeepNodeAndRejectLinuxOnlyKinds(t *testing.T) {
+	openclaw, nodeRuntime, hermes, claude, codex, grok, batServer, antigravity := executorsForGOOS("windows", "http://hub.example", "token", func() time.Time { return jobsTestNow })
+	if _, ok := nodeRuntime.(nodeRuntimeExecutor); !ok {
+		t.Fatalf("windows node=%T", nodeRuntime)
+	}
+	if _, ok := claude.(claudeCodeExecutor); !ok {
+		t.Fatalf("windows claude=%T", claude)
+	}
+	if _, ok := codex.(codexExecutor); !ok {
+		t.Fatalf("windows codex=%T", codex)
+	}
+	if _, ok := grok.(grokExecutor); !ok {
+		t.Fatalf("windows grok=%T", grok)
+	}
+	if _, ok := batServer.(unsupportedPlatformExecutor); !ok {
+		t.Fatalf("windows bat-server=%T", batServer)
+	}
+	if _, ok := antigravity.(antigravityExecutor); !ok {
+		t.Fatalf("windows antigravity=%T", antigravity)
+	}
+	jobs := map[string]model.JobResponse{
+		agentadapter.ExecutorKindOpenClaw: testJob("win-openclaw", 1, agentadapter.ExecutorKindOpenClaw, "sha256:abc"),
+		agentadapter.ExecutorKindHermes:   testJob("win-hermes", 1, agentadapter.ExecutorKindHermes, "sha256:abc"),
+	}
+	executors := map[string]executor{
+		agentadapter.ExecutorKindOpenClaw: openclaw,
+		agentadapter.ExecutorKindHermes:   hermes,
+	}
+	wired := newKindExecutor(noopExecutor{}, deviceSyncExecutor{}, openclaw, nodeRuntime, hermes)
+	for kind, exec := range executors {
+		if _, ok := exec.(unsupportedPlatformExecutor); !ok {
+			t.Fatalf("%s on windows is %T, want unsupportedPlatformExecutor", kind, exec)
+		}
+		_, err := exec.Run(t.Context(), jobs[kind])
+		if !errors.Is(err, errUnsupported) {
+			t.Fatalf("%s err=%v", kind, err)
+		}
+		if !strings.Contains(err.Error(), kind) || !strings.Contains(err.Error(), "windows") {
+			t.Fatalf("%s rejection=%q", kind, err)
+		}
+		for _, banned := range []string{"POSIX", "not implemented", "TODO", "尚未", "gap"} {
+			if strings.Contains(err.Error(), banned) {
+				t.Fatalf("%s rejection leaked %q: %v", kind, banned, err)
+			}
+		}
+		if _, err := wired.Run(t.Context(), jobs[kind]); !errors.Is(err, errUnsupported) {
+			t.Fatalf("kindExecutor %s err=%v", kind, err)
+		}
+	}
+}
+
+func checkLinuxProductionExecutorsKeepPOSIXKinds(t *testing.T) {
+	openclaw, nodeRuntime, hermes, claude, codex, grok, batServer, antigravity := executorsForGOOS("linux", "http://hub.example", "token", func() time.Time { return jobsTestNow })
+	if _, ok := claude.(claudeCodeExecutor); !ok {
+		t.Fatalf("linux claude=%T", claude)
+	}
+	if _, ok := codex.(codexExecutor); !ok {
+		t.Fatalf("linux codex=%T", codex)
+	}
+	if _, ok := grok.(grokExecutor); !ok {
+		t.Fatalf("linux grok=%T", grok)
+	}
+	if _, ok := openclaw.(openclawExecutor); !ok {
+		t.Fatalf("linux openclaw=%T", openclaw)
+	}
+	if _, ok := nodeRuntime.(nodeRuntimeExecutor); !ok {
+		t.Fatalf("linux node=%T", nodeRuntime)
+	}
+	if _, ok := hermes.(hermesExecutor); !ok {
+		t.Fatalf("linux hermes=%T", hermes)
+	}
+	if _, ok := batServer.(batServerExecutor); !ok {
+		t.Fatalf("linux bat-server=%T", batServer)
+	}
+	if _, ok := antigravity.(antigravityExecutor); !ok {
+		t.Fatalf("linux antigravity=%T", antigravity)
+	}
+}
+
+func checkDarwinProductionExecutorsKeepNodeAndRejectLinuxOnlyKinds(t *testing.T) {
+	openclaw, nodeRuntime, hermes, claude, codex, grok, batServer, antigravity := executorsForGOOS("darwin", "http://hub.example", "token", func() time.Time { return jobsTestNow })
+	if _, ok := nodeRuntime.(nodeRuntimeExecutor); !ok {
+		t.Fatalf("darwin node=%T", nodeRuntime)
+	}
+	if _, ok := claude.(claudeCodeExecutor); !ok {
+		t.Fatalf("darwin claude=%T", claude)
+	}
+	if _, ok := codex.(codexExecutor); !ok {
+		t.Fatalf("darwin codex=%T", codex)
+	}
+	if _, ok := grok.(grokExecutor); !ok {
+		t.Fatalf("darwin grok=%T", grok)
+	}
+	if _, ok := openclaw.(unsupportedPlatformExecutor); !ok {
+		t.Fatalf("darwin openclaw=%T", openclaw)
+	}
+	if _, ok := hermes.(unsupportedPlatformExecutor); !ok {
+		t.Fatalf("darwin hermes=%T", hermes)
+	}
+	if _, ok := batServer.(unsupportedPlatformExecutor); !ok {
+		t.Fatalf("darwin bat-server=%T", batServer)
+	}
+	if _, ok := antigravity.(antigravityExecutor); !ok {
+		t.Fatalf("darwin antigravity=%T", antigravity)
+	}
+}
+
+func TestPlatformProductionExecutors(t *testing.T) {
+	t.Run("WindowsProductionExecutorsKeepNodeAndRejectLinuxOnlyKinds", checkWindowsProductionExecutorsKeepNodeAndRejectLinuxOnlyKinds)
+	t.Run("LinuxProductionExecutorsKeepPOSIXKinds", checkLinuxProductionExecutorsKeepPOSIXKinds)
+	t.Run("DarwinProductionExecutorsKeepNodeAndRejectLinuxOnlyKinds", checkDarwinProductionExecutorsKeepNodeAndRejectLinuxOnlyKinds)
+}
