@@ -32,13 +32,13 @@ type AgentReadiness struct {
 }
 
 func (s *Store) AgentReadiness(machineID string) (AgentReadiness, error) {
-	if err := inspectAgentReadinessCheckinTimes(s.db, machineID); err != nil {
+	if err := inspectAgentReadinessCheckinTimes(s.rdb, machineID); err != nil {
 		return AgentReadiness{}, err
 	}
 	var result AgentReadiness
 	var receivedAt, sentAt, agentStartedAt, agentVersion sql.NullString
 	var jobsEnabled, deviceSyncV1 sql.NullInt64
-	err := s.db.QueryRow(`
+	err := s.rdb.QueryRow(`
 SELECT m.machine_id,c.received_at,c.sent_at,c.agent_started_at,c.agent_version,c.jobs_enabled,cap.supported
   FROM machine_registry m
   LEFT JOIN machine_checkins c ON c.rowid=(
@@ -87,7 +87,7 @@ SELECT m.machine_id,c.received_at,c.sent_at,c.agent_started_at,c.agent_version,c
 		result.DeviceSyncV1 = &supported
 	}
 	var identityPayload, identityReceivedAt, identityMeasuredAt string
-	err = s.db.QueryRow(`
+	err = s.rdb.QueryRow(`
 SELECT payload,received_at,measured_at FROM observed_state
  WHERE machine_id=? AND kind=? AND subject=? AND source=?
  ORDER BY received_at DESC,measured_at DESC,rowid DESC LIMIT 1`,

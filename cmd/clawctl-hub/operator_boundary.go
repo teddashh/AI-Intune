@@ -30,12 +30,26 @@ type operatorRepresentation uint8
 const (
 	operatorHTML operatorRepresentation = iota + 1
 	operatorJSON
+	// operatorPlain is the denial body for GET /metrics. A scraper should see
+	// text, not an HTML page and not an operator JSON error.
+	operatorPlain
 )
 
 type operatorRoutePolicy struct {
 	Permission     operatorauth.Permission
 	Representation operatorRepresentation
 	SourceKind     string
+}
+
+func operatorRepresentationValid(pattern string, representation operatorRepresentation) bool {
+	switch representation {
+	case operatorHTML, operatorJSON:
+		return true
+	case operatorPlain:
+		return pattern == "GET /metrics"
+	default:
+		return false
+	}
 }
 
 type nonOperatorRouteClass uint8
@@ -73,14 +87,14 @@ var nonOperatorRoutePolicies = map[string]nonOperatorRoutePolicy{
 	"GET /v1/artifacts/{sha256}":       {nonOperatorAgent},
 	"HEAD /v1/artifacts/{sha256}":      {nonOperatorAgent},
 	"GET /healthz":                     {nonOperatorHealth},
-	"GET /metrics":                     {nonOperatorMetrics},
 }
 
 // operatorRoutePolicies is an explicit manifest, not a path-prefix rule.
 // A newly registered control route therefore fails closed until somebody
 // classifies that exact ServeMux pattern in review.
 var operatorRoutePolicies = map[string]operatorRoutePolicy{
-	"GET /{$}": {operatorauth.View, operatorHTML, operator.SourceKindWeb},
+	"GET /metrics": {operatorauth.View, operatorPlain, operator.SourceKindWeb},
+	"GET /{$}":     {operatorauth.View, operatorHTML, operator.SourceKindWeb},
 	"GET /preferences/navigation-language/{locale}": {operatorauth.View, operatorHTML, operator.SourceKindWeb},
 	"GET /machines":                                                       {operatorauth.View, operatorHTML, operator.SourceKindWeb},
 	"GET /machines/enrollment":                                            {operatorauth.View, operatorHTML, operator.SourceKindWeb},
@@ -316,8 +330,7 @@ func newHubHTTPHandler(h *hub, ui *web.Server, authorizer operatorRequestAuthori
 		return nil, fmt.Errorf("operator authority %q 必須是 canonical literal-ip:port", authority)
 	}
 	root := http.NewServeMux()
-	nonOperatorRegistered := h.machineAndPublicRoutes(root,
-		literalAuthorityHandler(authority, http.HandlerFunc(h.handleMetrics)))
+	nonOperatorRegistered := h.machineAndPublicRoutes(root)
 
 	operatorMux := http.NewServeMux()
 	operatorRegistered := h.operatorRoutes(operatorMux)
@@ -381,9 +394,9 @@ func validateNonOperatorRoutePolicies(registered []string, policies map[string]n
 				return fmt.Errorf("non-operator health route %q 不合法", pattern)
 			}
 		case nonOperatorMetrics:
-			if pattern != "GET /metrics" {
-				return fmt.Errorf("non-operator metrics route %q 不合法", pattern)
-			}
+			// /metrics is an operator view route. Keeping the class lets tests
+			// prove a public registration is rejected, including aliases.
+			return fmt.Errorf("non-operator route %q 不得公開 /metrics；它要 operator view", pattern)
 		default:
 			return fmt.Errorf("non-operator route %q 的 plane policy 不合法", pattern)
 		}
@@ -433,7 +446,7 @@ func validateOperatorRoutePolicies(registered []string, policies map[string]oper
 			return fmt.Errorf("operator route %q 沒有 capability policy", pattern)
 		}
 		if policy.Permission < operatorauth.View || policy.Permission > operatorauth.Admin ||
-			(policy.Representation != operatorHTML && policy.Representation != operatorJSON) ||
+			!operatorRepresentationValid(pattern, policy.Representation) ||
 			(policy.SourceKind != operator.SourceKindWeb && policy.SourceKind != operator.SourceKindOperatorAPI) {
 			return fmt.Errorf("operator route %q 的 policy 不合法", pattern)
 		}
@@ -658,27 +671,15 @@ func setOperatorSecurityHeaders(header http.Header) {
 	header.Set("X-Frame-Options", "DENY")
 }
 
-// literalAuthorityHandler protects read-only but inventory-bearing endpoints
-// that intentionally stay independent of LocalAPI operator auth. A hostile
-// browser origin can otherwise DNS-rebind a name to the Hub and read /metrics
-// with a truthful same-origin request. The check has no persistence or logging:
-// attacker-controlled rejection traffic must remain constant-cost.
-func literalAuthorityHandler(authority string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		requestAuthority, valid := canonicalLiteralAuthority(r.Host)
-		if !valid || requestAuthority != authority {
-			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func writeOperatorBoundaryError(w http.ResponseWriter, representation operatorRepresentation, status int, code, detail string) {
-	if representation == operatorJSON {
+	switch representation {
+	case operatorJSON:
 		writeErr(w, status, code, detail)
+		return
+	case operatorPlain:
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(status)
+		_, _ = fmt.Fprintf(w, "%s: %s\n", code, detail)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -22,6 +22,7 @@ func retentionClientPreview(now time.Time) operator.RetentionPrunePreview {
 			{Table: "machine_checkins", Deleted: 5, Older: now.Add(-14 * 24 * time.Hour)},
 			{Table: "ticket_occupancy_observation", Older: now.Add(-400 * 24 * time.Hour)},
 			{Table: "canary_silent_failures", Kept: 2, Older: now.Add(-30 * 24 * time.Hour)},
+			{Table: "notifications", Older: now.Add(-30 * 24 * time.Hour)},
 		},
 		TotalDeleted: 8, KeptNewest: 3, Confirmation: "DELETE 8 ROWS",
 	}

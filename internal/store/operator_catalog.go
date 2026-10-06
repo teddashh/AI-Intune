@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -68,7 +69,7 @@ func (s *Store) ApplyOperatorCatalogManifest(req OperatorCatalogManifestRequest,
 	}
 	audit := operatorCatalogManifestAudit(req)
 
-	lookupTx, err := s.db.Begin()
+	lookupTx, err := s.beginWrite(context.Background(), "apply_operator_catalog_manifest")
 	if err != nil {
 		return OperatorCatalogManifestResult{}, fmt.Errorf("store: begin catalog manifest idempotency lookup: %w", err)
 	}
@@ -114,7 +115,7 @@ func (s *Store) ApplyOperatorCatalogManifest(req OperatorCatalogManifestRequest,
 		}
 	}
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_catalog_manifest_2")
 	if err != nil {
 		return OperatorCatalogManifestResult{}, fmt.Errorf("store: begin catalog manifest publication: %w", err)
 	}
@@ -227,7 +228,7 @@ func loadOperatorCatalogManifestCached(q operatorRowQuerier, key string) (operat
 	return cached, true, nil
 }
 
-func (s *Store) rejectOperatorCatalogManifestTx(tx *sql.Tx, req OperatorCatalogManifestRequest,
+func (s *Store) rejectOperatorCatalogManifestTx(tx dbTx, req OperatorCatalogManifestRequest,
 	audit AuditEntry, code string, now time.Time,
 ) (OperatorCatalogManifestResult, error) {
 	detail, ok := canonicalOperatorCatalogManifestRejectionDetail(code)
@@ -309,7 +310,7 @@ func isCanonicalOperatorCatalogManifestRejection(code string) bool {
 	return ok
 }
 
-func (s *Store) replayOperatorCatalogManifest(tx *sql.Tx, req OperatorCatalogManifestRequest,
+func (s *Store) replayOperatorCatalogManifest(tx dbTx, req OperatorCatalogManifestRequest,
 	audit AuditEntry, cached operatorCachedRequest,
 ) (OperatorCatalogManifestResult, error) {
 	audit.At = s.now().UTC().Truncate(time.Second)
@@ -394,7 +395,7 @@ func (s *Store) replayOperatorCatalogManifest(tx *sql.Tx, req OperatorCatalogMan
 	}, nil
 }
 
-func (s *Store) rejectInvalidOperatorCatalogManifestCache(tx *sql.Tx,
+func (s *Store) rejectInvalidOperatorCatalogManifestCache(tx dbTx,
 	audit AuditEntry,
 ) (OperatorCatalogManifestResult, error) {
 	audit.Subject = "catalog manifest idempotency receipt"
@@ -445,7 +446,7 @@ func operatorCatalogManifestSuccessDetail(receipt operatorCatalogManifestReceipt
 		receipt.ManifestDigest, receipt.ArtifactSHA256, receipt.AlreadyPublished)
 }
 
-func validateOperatorCatalogManifestOriginalAudit(tx *sql.Tx, req OperatorCatalogManifestRequest,
+func validateOperatorCatalogManifestOriginalAudit(tx dbTx, req OperatorCatalogManifestRequest,
 	createdAt string, ok bool, detail string,
 ) (bool, error) {
 	audit := operatorCatalogManifestAudit(req)
@@ -519,7 +520,7 @@ func (s *Store) ApplyOperatorMachineProfile(req OperatorMachineProfileRequest,
 	}
 	audit := operatorMachineProfileAudit(req)
 
-	lookupTx, err := s.db.Begin()
+	lookupTx, err := s.beginWrite(context.Background(), "apply_operator_machine_profile")
 	if err != nil {
 		return OperatorMachineProfileResult{}, fmt.Errorf("store: begin machine profile idempotency lookup: %w", err)
 	}
@@ -565,7 +566,7 @@ func (s *Store) ApplyOperatorMachineProfile(req OperatorMachineProfileRequest,
 		}
 	}
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_machine_profile_2")
 	if err != nil {
 		return OperatorMachineProfileResult{}, fmt.Errorf("store: begin machine profile publication: %w", err)
 	}
@@ -648,7 +649,7 @@ func (s *Store) ApplyOperatorMachineProfile(req OperatorMachineProfileRequest,
 	}, nil
 }
 
-func catalogManifestRecordsTx(tx *sql.Tx) ([]CatalogManifestRecord, error) {
+func catalogManifestRecordsTx(tx dbTx) ([]CatalogManifestRecord, error) {
 	rows, err := tx.Query(`SELECT package_id,package_version,manifest_json,manifest_digest,published_at,published_by
 	 FROM catalog_manifests ORDER BY package_id,package_version LIMIT ?`, maxStoredCatalogRecords+1)
 	if err != nil {
@@ -712,7 +713,7 @@ func loadOperatorMachineProfileCached(q operatorRowQuerier, key string) (operato
 	return cached, true, nil
 }
 
-func (s *Store) rejectOperatorMachineProfileTx(tx *sql.Tx, req OperatorMachineProfileRequest,
+func (s *Store) rejectOperatorMachineProfileTx(tx dbTx, req OperatorMachineProfileRequest,
 	audit AuditEntry, code string, now time.Time,
 ) (OperatorMachineProfileResult, error) {
 	detail, ok := canonicalOperatorMachineProfileRejectionDetail(code)
@@ -794,7 +795,7 @@ func isCanonicalOperatorMachineProfileRejection(code string) bool {
 	return ok
 }
 
-func (s *Store) replayOperatorMachineProfile(tx *sql.Tx, req OperatorMachineProfileRequest,
+func (s *Store) replayOperatorMachineProfile(tx dbTx, req OperatorMachineProfileRequest,
 	audit AuditEntry, cached operatorCachedRequest,
 ) (OperatorMachineProfileResult, error) {
 	audit.At = s.now().UTC().Truncate(time.Second)
@@ -879,7 +880,7 @@ func (s *Store) replayOperatorMachineProfile(tx *sql.Tx, req OperatorMachineProf
 	}, nil
 }
 
-func (s *Store) rejectInvalidOperatorMachineProfileCache(tx *sql.Tx,
+func (s *Store) rejectInvalidOperatorMachineProfileCache(tx dbTx,
 	audit AuditEntry,
 ) (OperatorMachineProfileResult, error) {
 	audit.Subject = "machine profile idempotency receipt"
@@ -927,7 +928,7 @@ func operatorMachineProfileSuccessDetail(receipt operatorMachineProfileReceipt) 
 	return fmt.Sprintf("profile_digest=%s，already_published=%t", receipt.ProfileDigest, receipt.AlreadyPublished)
 }
 
-func validateOperatorMachineProfileOriginalAudit(tx *sql.Tx, req OperatorMachineProfileRequest,
+func validateOperatorMachineProfileOriginalAudit(tx dbTx, req OperatorMachineProfileRequest,
 	createdAt string, ok bool, detail string,
 ) (bool, error) {
 	audit := operatorMachineProfileAudit(req)

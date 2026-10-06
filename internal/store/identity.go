@@ -20,7 +20,7 @@ type identityRowsQueryer interface {
 // is deliberately no delete or replace path: a conflict is an identity/security
 // fact, not a transient health sample. Retiring this registry identity and
 // enrolling a new one is the existing explicit remediation.
-func recordIdentityHintTx(tx *sql.Tx, machineID, hint string, receivedAt time.Time) error {
+func recordIdentityHintTx(tx dbTx, machineID, hint string, receivedAt time.Time) error {
 	if hint == "" {
 		return nil
 	}

@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -133,7 +134,7 @@ func (s *Store) OperatorRetentionStatus(now time.Time, policy RetentionPolicy) (
 	if err != nil {
 		return OperatorRetentionStatus{}, err
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "operator_retention_status")
 	if err != nil {
 		return OperatorRetentionStatus{}, fmt.Errorf("store: begin retention status: %w", err)
 	}
@@ -176,7 +177,7 @@ func (s *Store) PreviewOperatorPrune(evaluatedAt time.Time, policy RetentionPoli
 		return OperatorPrunePreview{}, operatorError(OperatorCodeRetentionPolicyInvalid,
 			"evaluated_at 必須是 UTC 秒級時間")
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "preview_operator_prune")
 	if err != nil {
 		return OperatorPrunePreview{}, fmt.Errorf("store: begin retention preview: %w", err)
 	}
@@ -191,7 +192,7 @@ func (s *Store) PreviewOperatorPrune(evaluatedAt time.Time, policy RetentionPoli
 	return preview, nil
 }
 
-func operatorPrunePreviewTx(tx *sql.Tx, evaluatedAt time.Time, policy RetentionPolicy,
+func operatorPrunePreviewTx(tx dbTx, evaluatedAt time.Time, policy RetentionPolicy,
 	wire OperatorRetentionPolicy,
 ) (OperatorPrunePreview, error) {
 	revision, err := retentionRevisionTx(tx)
@@ -215,7 +216,7 @@ func operatorPrunePreviewTx(tx *sql.Tx, evaluatedAt time.Time, policy RetentionP
 	return preview, nil
 }
 
-func retentionRevisionTx(tx *sql.Tx) (int64, error) {
+func retentionRevisionTx(tx dbTx) (int64, error) {
 	var revision int64
 	if err := tx.QueryRow(`SELECT COALESCE(MAX(prune_id),0) FROM retention_log`).Scan(&revision); err != nil {
 		return 0, fmt.Errorf("store: read retention revision: %w", err)
@@ -260,7 +261,7 @@ func (s *Store) ApplyOperatorPrune(req OperatorPruneRequest) (OperatorPruneResul
 	audit.Action, audit.Subject = AuditRetentionPrune, "retention"
 	audit.Reason, audit.IdempotencyKey, audit.RequestDigest = req.Reason, req.IdempotencyKey, req.RequestDigest
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_prune")
 	if err != nil {
 		return OperatorPruneResult{}, fmt.Errorf("store: begin operator retention prune: %w", err)
 	}
@@ -347,7 +348,7 @@ func (s *Store) ApplyOperatorPrune(req OperatorPruneRequest) (OperatorPruneResul
 	return result, nil
 }
 
-func loadOperatorRetentionCached(tx *sql.Tx, key string) (operatorCachedRequest, bool, error) {
+func loadOperatorRetentionCached(tx dbTx, key string) (operatorCachedRequest, bool, error) {
 	var cached operatorCachedRequest
 	err := tx.QueryRow(`SELECT operation,request_digest,outcome,response_json,error_code,error_detail,created_at
  FROM operator_idempotency WHERE idempotency_key=?`, key).Scan(
@@ -362,7 +363,7 @@ func loadOperatorRetentionCached(tx *sql.Tx, key string) (operatorCachedRequest,
 	return cached, true, nil
 }
 
-func (s *Store) rejectOperatorPruneTx(tx *sql.Tx, req OperatorPruneRequest, audit AuditEntry,
+func (s *Store) rejectOperatorPruneTx(tx dbTx, req OperatorPruneRequest, audit AuditEntry,
 	code string, at time.Time,
 ) (OperatorPruneResult, error) {
 	detail, ok := canonicalOperatorRetentionRejectionDetail(code)
@@ -387,7 +388,7 @@ func (s *Store) rejectOperatorPruneTx(tx *sql.Tx, req OperatorPruneRequest, audi
 	return OperatorPruneResult{}, rejection
 }
 
-func (s *Store) replayOperatorPrune(tx *sql.Tx, req OperatorPruneRequest, audit AuditEntry,
+func (s *Store) replayOperatorPrune(tx dbTx, req OperatorPruneRequest, audit AuditEntry,
 	cached operatorCachedRequest,
 ) (OperatorPruneResult, error) {
 	if cached.Operation != operatorRetentionOperation || cached.Digest != req.RequestDigest {
@@ -450,7 +451,7 @@ func (s *Store) replayOperatorPrune(tx *sql.Tx, req OperatorPruneRequest, audit 
 	return result, nil
 }
 
-func (s *Store) rejectInvalidOperatorRetentionCache(tx *sql.Tx, audit AuditEntry) (OperatorPruneResult, error) {
+func (s *Store) rejectInvalidOperatorRetentionCache(tx dbTx, audit AuditEntry) (OperatorPruneResult, error) {
 	audit.At, audit.Subject, audit.Reason, audit.OK, audit.Detail =
 		s.now().UTC().Truncate(time.Second), "retention idempotency cache", "", false, operatorRetentionCacheInvalid
 	if err := s.recordAuditTx(tx, audit); err != nil {
@@ -520,7 +521,7 @@ func validOperatorRetentionCounts(counts []PruneCount, evaluatedAt time.Time, po
 	return true
 }
 
-func validateOperatorRetentionAudit(tx *sql.Tx, req OperatorPruneRequest, at string, ok bool,
+func validateOperatorRetentionAudit(tx dbTx, req OperatorPruneRequest, at string, ok bool,
 	detail string,
 ) (bool, error) {
 	outcome := "failed"
@@ -535,7 +536,7 @@ func validateOperatorRetentionAudit(tx *sql.Tx, req OperatorPruneRequest, at str
 	return count == 1, err
 }
 
-func validateOperatorRetentionSuccessEvidence(tx *sql.Tx, receipt operatorRetentionReceipt,
+func validateOperatorRetentionSuccessEvidence(tx dbTx, receipt operatorRetentionReceipt,
 	req OperatorPruneRequest,
 ) (bool, error) {
 	valid, err := validateOperatorRetentionAudit(tx, req, fmtTime(receipt.AppliedAt), true,

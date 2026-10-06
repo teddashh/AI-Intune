@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -108,7 +109,7 @@ type operatorRowQuerier interface {
 // OperatorPendingEnrollToken returns only non-secret ticket metadata. An
 // expired but unused ticket is still pending and remains visible.
 func (s *Store) OperatorPendingEnrollToken(machineID string) (OperatorPendingEnrollTokenResult, error) {
-	identity, err := loadOperatorPendingEnrollToken(s.db, machineID, s.now().UTC())
+	identity, err := loadOperatorPendingEnrollToken(s.rdb, machineID, s.now().UTC())
 	if err != nil {
 		return OperatorPendingEnrollTokenResult{}, err
 	}
@@ -119,7 +120,7 @@ func (s *Store) OperatorPendingEnrollToken(machineID string) (OperatorPendingEnr
 // hidden exact ticket identity and every promised impact.
 func (s *Store) PreviewOperatorEnrollTokenRevocation(machineID string) (OperatorEnrollTokenRevocationPreviewResult, error) {
 	now := s.now().UTC()
-	identity, err := loadOperatorPendingEnrollToken(s.db, machineID, now)
+	identity, err := loadOperatorPendingEnrollToken(s.rdb, machineID, now)
 	if err != nil {
 		return OperatorEnrollTokenRevocationPreviewResult{}, err
 	}
@@ -246,7 +247,7 @@ func (s *Store) ApplyOperatorEnrollTokenRevocation(req OperatorEnrollTokenRevoca
 	audit.IdempotencyKey = req.IdempotencyKey
 	audit.RequestDigest = req.RequestDigest
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_enroll_token_revocation")
 	if err != nil {
 		return OperatorEnrollTokenRevocationResult{}, fmt.Errorf("store: begin operator enrollment token revocation: %w", err)
 	}
@@ -394,7 +395,7 @@ func operatorEnrollTokenRevocationResult(receipt operatorEnrollTokenRevocationRe
 	}
 }
 
-func (s *Store) replayOperatorEnrollTokenRevocation(tx *sql.Tx,
+func (s *Store) replayOperatorEnrollTokenRevocation(tx dbTx,
 	req OperatorEnrollTokenRevocationRequest, audit AuditEntry, cached operatorCachedRequest,
 ) (OperatorEnrollTokenRevocationResult, error) {
 	wantOperation := operatorEnrollTokenRevocationOperation(req.MachineID)
@@ -469,7 +470,7 @@ func (s *Store) replayOperatorEnrollTokenRevocation(tx *sql.Tx,
 	return result, nil
 }
 
-func (s *Store) rejectInvalidOperatorEnrollTokenRevocationCache(tx *sql.Tx,
+func (s *Store) rejectInvalidOperatorEnrollTokenRevocationCache(tx dbTx,
 	audit AuditEntry,
 ) (OperatorEnrollTokenRevocationResult, error) {
 	audit.Reason = ""
@@ -485,7 +486,7 @@ func (s *Store) rejectInvalidOperatorEnrollTokenRevocationCache(tx *sql.Tx,
 		errors.New("store: operator enrollment token revocation idempotency cache is invalid")
 }
 
-func validateOperatorEnrollTokenRevocationRejectionEvidence(tx *sql.Tx,
+func validateOperatorEnrollTokenRevocationRejectionEvidence(tx dbTx,
 	cached operatorCachedRequest, req OperatorEnrollTokenRevocationRequest,
 ) (bool, error) {
 	var count int
@@ -498,7 +499,7 @@ func validateOperatorEnrollTokenRevocationRejectionEvidence(tx *sql.Tx,
 	return count == 1, err
 }
 
-func validateOperatorEnrollTokenRevocationSuccessEvidence(tx *sql.Tx,
+func validateOperatorEnrollTokenRevocationSuccessEvidence(tx dbTx,
 	receipt operatorEnrollTokenRevocationReceipt, req OperatorEnrollTokenRevocationRequest,
 ) (bool, error) {
 	var machineCount, pendingCount int

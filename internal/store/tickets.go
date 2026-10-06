@@ -134,7 +134,7 @@ func (s *Store) TicketLedgerContext(ctx context.Context, now time.Time, window t
 	from := to.Add(-window)
 	rep := TicketReport{From: from, To: to}
 
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.rdb.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return TicketReport{}, fmt.Errorf("store: ticket snapshot: %w", err)
 	}

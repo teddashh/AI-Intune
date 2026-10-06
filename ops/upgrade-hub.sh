@@ -415,6 +415,8 @@ run_operator_auth_preflight() {
 #   1. process 剛好 1 個   —— 舊的沒死掉的話，你會拿到兩個 Hub 搶同一個 DB
 #   2. /healthz 回 alive   —— 有東西在聽那個 port
 #   3. /metrics 的 build_info 是新版本
+#        呼叫端必須持有 operator view grant，否則這一道是 403，
+#        那代表權限而不是 candidate 壞掉。
 #        ⚠ 這一道才是真正證明「換上去的是新的」。前面那個
 #        `clawctl-hub version` 問的是**磁碟上那個檔案**，這一道問的是
 #        **正在服務的那個 process**。它們是兩個不同的宣稱，
@@ -499,6 +501,10 @@ verify() {
   if [[ "$code" == "404" && "$legacy_metrics_optional" == "1" ]]; then
     echo "  ⚠ 這一版沒有 /metrics（比 §5.19 早），問不到「正在服務的是哪一版」。"
     echo "    這一道驗收這次是空的 —— 剩下四道有過，但少了最直接的那個證據。"
+  elif [[ "$code" == "403" ]]; then
+    echo "  ⚠ /metrics HTTP 403: this caller does not hold the operator view grant, so the serving version cannot be read."
+    echo "    This is not a bad candidate binary. Scrape /metrics from a tailnet node that holds the <prefix>-view grant."
+    ok=1
   elif [[ "$code" != "200" ]]; then
     echo "  ✗ /metrics HTTP $code，不是 200；candidate 缺少可驗的版本證據。"
     ok=1

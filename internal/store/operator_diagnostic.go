@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -138,7 +139,7 @@ func (s *Store) PreviewOperatorDiagnosticNoop(machineID string, timeoutSeconds i
 		return OperatorDiagnosticNoopPreviewResult{}, operatorDiagnosticNoopRejection(OperatorCodeBadDiagnosticTimeout)
 	}
 	now := s.now().UTC().Truncate(time.Second)
-	snapshot, err := loadOperatorDiagnosticNoopSnapshot(s.db, machineID)
+	snapshot, err := loadOperatorDiagnosticNoopSnapshot(s.rdb, machineID)
 	if err != nil {
 		return OperatorDiagnosticNoopPreviewResult{}, err
 	}
@@ -334,7 +335,7 @@ func (s *Store) ApplyOperatorDiagnosticNoop(req OperatorDiagnosticNoopRequest) (
 	audit := req.Audit
 	audit.Action, audit.MachineID, audit.Subject = AuditDiagnosticNoop, req.MachineID, req.MachineID
 	audit.Reason, audit.IdempotencyKey, audit.RequestDigest = req.Reason, req.IdempotencyKey, req.RequestDigest
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_diagnostic_noop")
 	if err != nil {
 		return OperatorDiagnosticNoopResult{}, fmt.Errorf("store: begin operator diagnostic noop: %w", err)
 	}
@@ -485,7 +486,7 @@ func operatorDiagnosticNoopResult(receipt operatorDiagnosticNoopReceipt) Operato
 	}
 }
 
-func (s *Store) replayOperatorDiagnosticNoop(tx *sql.Tx, req OperatorDiagnosticNoopRequest,
+func (s *Store) replayOperatorDiagnosticNoop(tx dbTx, req OperatorDiagnosticNoopRequest,
 	audit AuditEntry, cached operatorCachedRequest,
 ) (OperatorDiagnosticNoopResult, error) {
 	if cached.Operation != operatorDiagnosticNoopOperation(req.MachineID) || cached.Digest != req.RequestDigest {
@@ -588,7 +589,7 @@ func validateOperatorDiagnosticNoopReceipt(receipt operatorDiagnosticNoopReceipt
 	return nil
 }
 
-func validateOperatorDiagnosticNoopSuccessEvidence(tx *sql.Tx, receipt operatorDiagnosticNoopReceipt,
+func validateOperatorDiagnosticNoopSuccessEvidence(tx dbTx, receipt operatorDiagnosticNoopReceipt,
 	req OperatorDiagnosticNoopRequest,
 ) (bool, error) {
 	var rows int
@@ -612,7 +613,7 @@ func validateOperatorDiagnosticNoopSuccessEvidence(tx *sql.Tx, receipt operatorD
 		operatorDiagnosticNoopSuccessAuditDetail(receipt))
 }
 
-func validateOperatorDiagnosticNoopAudit(tx *sql.Tx, req OperatorDiagnosticNoopRequest,
+func validateOperatorDiagnosticNoopAudit(tx dbTx, req OperatorDiagnosticNoopRequest,
 	createdAt string, ok bool, detail string,
 ) (bool, error) {
 	var count int

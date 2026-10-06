@@ -518,6 +518,53 @@ func TestNextJobForMachineReturnsFalseWhenEmpty(t *testing.T) {
 	}
 }
 
+// The common poll must answer from a read-only snapshot. A write transaction
+// already holding the single writer connection must not make that poll wait.
+func TestNextJobForMachineDoesNotWaitOnTheWriter(t *testing.T) {
+	s := newDeployTestStore(t)
+	registerDeployMachine(t, s, "machine-a")
+	desiredID, _ := desiredForDeployTest(t, s)
+	if _, err := s.CreateJob("machine-a", desiredID, 41, NewJob{}); err != nil {
+		t.Fatalf("建立 revision 41 工作單失敗：%v", err)
+	}
+	held, err := s.DB().Begin()
+	if err != nil {
+		t.Fatalf("佔住 writer：%v", err)
+	}
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			_ = held.Rollback()
+		}
+	}
+	defer release()
+
+	type result struct {
+		job Job
+		ok  bool
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		job, ok, err := s.NextJobForMachine("machine-a")
+		done <- result{job, ok, err}
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatalf("writer 被佔住時讀下一張工作單失敗：%v", got.err)
+		}
+		if !got.ok || got.job.Revision != 41 {
+			t.Fatalf("writer 被佔住時下一張工作單 = ok:%v revision:%d，預期 revision 41", got.ok, got.job.Revision)
+		}
+	case <-time.After(time.Second):
+		release()
+		<-done
+		t.Fatal("NextJobForMachine 在 writer 被佔住時超過 1 秒還沒回來")
+	}
+}
+
 func TestCreateJobStoresOrderedMachineLocalPrerequisitesAtomically(t *testing.T) {
 	s := newDeployTestStore(t)
 	registerDeployMachine(t, s, "machine-a")

@@ -59,7 +59,7 @@ type ProfileAssignment struct {
 // 沒有被指派過的機器不會出現在結果裡 —— 它們要從名冊那一側補進來，因為名冊才是
 // 分母。讓這個查詢決定有哪些機器，等於讓「有指派的」變成分母。
 func (s *Store) FleetProfileAssignments() ([]ProfileAssignment, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT a.machine_id, a.assignment_id, a.assignment_revision, a.profile_id, a.profile_revision,
        a.profile_digest, a.assigned_at, a.assigned_by,
        p.position, p.package_id, p.package_version, p.desired_id, p.job_id, p.direct

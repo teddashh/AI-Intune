@@ -190,7 +190,7 @@ func (s *Store) ListAuditReadsContext(ctx context.Context, filter AuditReadFilte
 	if err := validateAuditReadFilter(filter); err != nil {
 		return AuditReadPage{}, err
 	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.rdb.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return AuditReadPage{}, fmt.Errorf("store: begin audit list read: %w", err)
 	}

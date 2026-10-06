@@ -572,8 +572,54 @@ func (h *hub) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err := h.appendNotifyMetrics(&b); err != nil {
+		http.Error(w, "讀取推播狀態失敗: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if h.store != nil {
+		h.store.AppendDBMetrics(&b)
+	}
+
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	_, _ = w.Write([]byte(b.String()))
+}
+
+// appendNotifyMetrics writes the daily-report gauges. A success or attempt
+// timestamp is omitted until that event has happened; consecutive failures
+// and the configured flag are always present so an absent series is not
+// mistaken for "zero failures" or "not configured".
+func (h *hub) appendNotifyMetrics(b *strings.Builder) error {
+	configured := 0
+	if h.notifier() != nil {
+		configured = 1
+	}
+	fmt.Fprintf(b, "# HELP clawctl_notify_configured 1 when a notify command is configured, otherwise 0.\n")
+	fmt.Fprintf(b, "# TYPE clawctl_notify_configured gauge\n")
+	fmt.Fprintf(b, "clawctl_notify_configured %d\n", configured)
+	if h.store == nil {
+		fmt.Fprintf(b, "# HELP clawctl_notify_consecutive_failures Undelivered attempts since the latest delivered row for this kind.\n")
+		fmt.Fprintf(b, "# TYPE clawctl_notify_consecutive_failures gauge\n")
+		fmt.Fprintf(b, "clawctl_notify_consecutive_failures{kind=%s} 0\n", quote("daily"))
+		return nil
+	}
+	stats, err := h.store.NotifyKindStats("daily")
+	if err != nil {
+		return err
+	}
+	if stats.HasSuccess {
+		fmt.Fprintf(b, "# HELP clawctl_notify_last_success_timestamp_seconds Unix time of the latest delivered notification for this kind.\n")
+		fmt.Fprintf(b, "# TYPE clawctl_notify_last_success_timestamp_seconds gauge\n")
+		fmt.Fprintf(b, "clawctl_notify_last_success_timestamp_seconds{kind=%s} %d\n", quote("daily"), stats.LastSuccess.Unix())
+	}
+	if stats.HasAttempt {
+		fmt.Fprintf(b, "# HELP clawctl_notify_last_attempt_timestamp_seconds Unix time of the latest notification attempt for this kind.\n")
+		fmt.Fprintf(b, "# TYPE clawctl_notify_last_attempt_timestamp_seconds gauge\n")
+		fmt.Fprintf(b, "clawctl_notify_last_attempt_timestamp_seconds{kind=%s} %d\n", quote("daily"), stats.LastAttempt.Unix())
+	}
+	fmt.Fprintf(b, "# HELP clawctl_notify_consecutive_failures Undelivered attempts since the latest delivered row for this kind.\n")
+	fmt.Fprintf(b, "# TYPE clawctl_notify_consecutive_failures gauge\n")
+	fmt.Fprintf(b, "clawctl_notify_consecutive_failures{kind=%s} %d\n", quote("daily"), stats.ConsecutiveFailures)
+	return nil
 }
 
 type machineMetric struct {

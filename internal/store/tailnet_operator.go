@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -29,7 +30,7 @@ type TailnetPeerIgnore struct {
 }
 
 func (s *Store) TailnetPeerIgnores(now time.Time) ([]TailnetPeerIgnore, error) {
-	rows, err := s.db.Query(`SELECT peer_id,hostname,reason,expires_at,revision,created_at,updated_at,created_by
+	rows, err := s.rdb.Query(`SELECT peer_id,hostname,reason,expires_at,revision,created_at,updated_at,created_by
 	 FROM tailnet_peer_ignores WHERE expires_at>? ORDER BY expires_at,lower(hostname),peer_id`, fmtTime(now.UTC()))
 	if err != nil {
 		return nil, fmt.Errorf("store: list tailnet peer ignores: %w", err)
@@ -47,7 +48,7 @@ func (s *Store) TailnetPeerIgnores(now time.Time) ([]TailnetPeerIgnore, error) {
 }
 
 func (s *Store) TailnetPeerIgnore(peerID string, now time.Time) (TailnetPeerIgnore, bool, error) {
-	row := s.db.QueryRow(`SELECT peer_id,hostname,reason,expires_at,revision,created_at,updated_at,created_by
+	row := s.rdb.QueryRow(`SELECT peer_id,hostname,reason,expires_at,revision,created_at,updated_at,created_by
 	 FROM tailnet_peer_ignores WHERE peer_id=?`, strings.TrimSpace(peerID))
 	item, err := scanTailnetPeerIgnore(row, now)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -130,7 +131,7 @@ func (s *Store) ApplyOperatorTailnetPeerIgnore(req OperatorTailnetPeerIgnoreRequ
 	audit.IdempotencyKey = req.IdempotencyKey
 	audit.RequestDigest = req.RequestDigest
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_tailnet_peer_ignore")
 	if err != nil {
 		return OperatorTailnetPeerIgnoreResult{}, fmt.Errorf("store: begin tailnet peer ignore: %w", err)
 	}
@@ -378,7 +379,7 @@ func tailnetPeerIgnoreSuccessAuditDetail(receipt operatorTailnetPeerIgnoreReceip
 		receipt.Action, receipt.Ignored, receipt.Revision, sha256Hex(string(raw)))
 }
 
-func validateTailnetPeerIgnoreAuditEvidence(tx *sql.Tx, req OperatorTailnetPeerIgnoreRequest,
+func validateTailnetPeerIgnoreAuditEvidence(tx dbTx, req OperatorTailnetPeerIgnoreRequest,
 	at string, ok bool, detail string,
 ) (bool, error) {
 	var count int
@@ -390,7 +391,7 @@ func validateTailnetPeerIgnoreAuditEvidence(tx *sql.Tx, req OperatorTailnetPeerI
 	return count == 1, err
 }
 
-func (s *Store) rejectInvalidTailnetPeerIgnoreCache(tx *sql.Tx, audit AuditEntry) (OperatorTailnetPeerIgnoreResult, error) {
+func (s *Store) rejectInvalidTailnetPeerIgnoreCache(tx dbTx, audit AuditEntry) (OperatorTailnetPeerIgnoreResult, error) {
 	audit.Subject, audit.Reason, audit.OK, audit.Detail = "Tailnet idempotency cache", "", false, operatorTailnetPeerIgnoreCacheInvalid
 	if err := s.recordAuditTx(tx, audit); err != nil {
 		return OperatorTailnetPeerIgnoreResult{}, fmt.Errorf("store: record invalid tailnet cache audit: %w", err)

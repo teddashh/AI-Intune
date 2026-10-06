@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -122,6 +123,11 @@ type pruneJob struct {
 	newestCols []string
 	// groupBy 是「一組」的定義，要跟讀取那一側的 GROUP BY / 索引一致。
 	groupBy string
+	// protectExpr, when set, replaces the generated "older than the newest row
+	// in the group" predicate. It must be true for rows that are eligible to
+	// delete once they are past the horizon. notifications uses it so only the
+	// newest delivered=1 row per kind is kept; undelivered rows are not.
+	protectExpr string
 	// class 說這張表看哪一個保留期。
 	//
 	// ⚠ 寫成資料而不是一個 closure，是因為揭露面要回答「這張表留多久」，
@@ -219,6 +225,20 @@ var pruneJobs = []pruneJob{{
 	// 每台留最新一段：不能因清理把仍是最後證據的失敗洗成全綠。
 	groupBy: "o2.machine_id = canary_silent_failures.machine_id",
 	class:   RetentionObservations,
+}, {
+	table:      "notifications",
+	cutCol:     "sent_at",
+	newestCols: []string{"sent_at"},
+	// 分組是 kind。真正留下的是該 kind 最新一筆 delivered=1，不是最新一筆失敗。
+	// protectExpr 覆寫下面 where() 的預設「留同組最新一列」。
+	groupBy: "o2.kind = notifications.kind",
+	class:   RetentionObservations,
+	protectExpr: `NOT (
+  notifications.delivered = 1 AND notifications.sent_at = (
+    SELECT MAX(n2.sent_at) FROM notifications n2
+    WHERE n2.kind = notifications.kind AND n2.delivered = 1
+  )
+)`,
 }}
 
 // where 生出「該刪的」與「過界但留下來的」兩條 WHERE。
@@ -240,13 +260,18 @@ func (j pruneJob) where() (del, kept string) {
 	//
 	// ⚠ 用 `<` 而不是 `<>`：跟最大值同時間的列會一起留下來。刻意的 ——
 	// 寧可多留一筆，也不要在「同一秒有兩筆」這種邊角上把最後一筆刪掉。
-	protect := make([]string, 0, len(j.newestCols))
-	for _, col := range j.newestCols {
-		protect = append(protect, fmt.Sprintf(
-			`%[1]s.%[2]s < (SELECT MAX(o2.%[2]s) FROM %[1]s o2 WHERE %[3]s)`,
-			j.table, col, j.groupBy))
+	var keep string
+	if j.protectExpr != "" {
+		keep = j.protectExpr
+	} else {
+		protect := make([]string, 0, len(j.newestCols))
+		for _, col := range j.newestCols {
+			protect = append(protect, fmt.Sprintf(
+				`%[1]s.%[2]s < (SELECT MAX(o2.%[2]s) FROM %[1]s o2 WHERE %[3]s)`,
+				j.table, col, j.groupBy))
+		}
+		keep = strings.Join(protect, " AND ")
 	}
-	keep := strings.Join(protect, " AND ")
 
 	// ⚠ 兩條從同一個字串生出來，一個是另一個的 NOT。
 	// 各自手寫的兩句 SQL 會慢慢漂開，然後「留了幾筆」就開始說謊。
@@ -289,32 +314,92 @@ func (r PruneReport) Total() int64 {
 // dryRun 為 true 時**只數不刪** —— 而且數的是同一條 WHERE，
 // 不是另外寫一句近似的 SQL。兩句不一樣的 SQL 會讓預演跟真的做不一樣，
 // 而預演的全部價值就在於它跟真的做一樣。
+// pruneBatchSize is how many rows one writer transaction deletes from one table.
+// Scheduled prune must not hold the single writer for one unbounded DELETE.
+// The operator apply path still deletes inside its own idempotent transaction
+// via pruneReportTx; that path confirms an exact row count and keeps the log
+// in the same transaction.
+const pruneBatchSize = 5000
+
 func (s *Store) Prune(now time.Time, p RetentionPolicy, dryRun bool) (PruneReport, error) {
 	if err := p.Validate(); err != nil {
 		return PruneReport{}, err
 	}
 	now = now.UTC()
-	rep := PruneReport{At: now, DryRun: dryRun}
-	tx, err := s.db.Begin()
+	if dryRun {
+		return s.pruneCount(now, p)
+	}
+	return s.pruneBatched(now, p)
+}
+
+// pruneCount is the dry-run. It uses the reader pool and does not write
+// retention_log. The WHERE is pruneJob.where, the same text the deletes use.
+func (s *Store) pruneCount(now time.Time, p RetentionPolicy) (PruneReport, error) {
+	tx, err := s.rdb.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return rep, fmt.Errorf("store: begin prune: %w", err)
+		return PruneReport{At: now, DryRun: true}, fmt.Errorf("store: begin prune: %w", err)
 	}
 	defer tx.Rollback()
-	rep, err = pruneReportTx(tx, now, p, dryRun)
-	if err != nil {
-		return rep, err
-	}
+	return pruneReportTx(tx, now, p, true)
+}
 
-	if !dryRun {
-		if err := writeRetentionLogTx(tx, rep); err != nil {
-			return rep, err
-		}
+func (s *Store) pruneBatched(now time.Time, p RetentionPolicy) (PruneReport, error) {
+	counted, err := s.pruneCount(now, p)
+	if err != nil {
+		return counted, err
 	}
-	if err := tx.Commit(); err != nil {
-		if dryRun {
-			return rep, fmt.Errorf("store: finish prune preview: %w", err)
+	rep := PruneReport{At: now, DryRun: false}
+	for i, j := range pruneJobs {
+		kept := int64(0)
+		if i < len(counted.Counts) {
+			kept = counted.Counts[i].Kept
 		}
-		return rep, fmt.Errorf("store: commit prune: %w", err)
+		rep.KeptNewest += kept
+		older := now.Add(-j.class.horizon(p))
+		cut := fmtTime(older)
+		del, _ := j.where()
+		var deleted int64
+		for batch := 0; ; batch++ {
+			// Each batch deletes and writes its own retention_log row in one
+			// writer transaction, so a reader never sees evidence gone without
+			// the matching log row, and a log failure rolls the batch back.
+			// The first batch also records kept_newest (and a zero-row
+			// result), so every table still gets at least one row per prune.
+			tx, err := s.beginWrite(context.Background(), "prune")
+			if err != nil {
+				return rep, fmt.Errorf("store: begin prune: %w", err)
+			}
+			res, err := tx.Exec(fmt.Sprintf(
+				`DELETE FROM %s WHERE rowid IN (SELECT rowid FROM %s WHERE %s LIMIT %d)`,
+				j.table, j.table, del, pruneBatchSize), cut)
+			if err != nil {
+				tx.Rollback()
+				return rep, fmt.Errorf("store: prune %s: %w", j.table, err)
+			}
+			n, _ := res.RowsAffected()
+			if n > 0 || batch == 0 {
+				batchKept := int64(0)
+				if batch == 0 {
+					batchKept = kept
+				}
+				if err := writeRetentionLogTx(tx, PruneReport{At: now, Counts: []PruneCount{{
+					Table: j.table, Deleted: n, Kept: batchKept, Older: older,
+				}}}); err != nil {
+					tx.Rollback()
+					return rep, err
+				}
+			}
+			if err := tx.Commit(); err != nil {
+				return rep, fmt.Errorf("store: commit prune: %w", err)
+			}
+			deleted += n
+			if n < int64(pruneBatchSize) {
+				break
+			}
+		}
+		rep.Counts = append(rep.Counts, PruneCount{
+			Table: j.table, Deleted: deleted, Kept: kept, Older: older,
+		})
 	}
 	return rep, nil
 }
@@ -323,7 +408,7 @@ func (s *Store) Prune(now time.Time, p RetentionPolicy, dryRun bool) (PruneRepor
 // scheduled worker and the canonical operator preview/apply transaction.  A
 // preview and its eventual delete therefore cannot drift through duplicated
 // WHERE clauses.
-func pruneReportTx(tx *sql.Tx, now time.Time, p RetentionPolicy, dryRun bool) (PruneReport, error) {
+func pruneReportTx(tx dbTx, now time.Time, p RetentionPolicy, dryRun bool) (PruneReport, error) {
 	rep := PruneReport{At: now.UTC(), DryRun: dryRun}
 	for _, j := range pruneJobs {
 		cut := fmtTime(rep.At.Add(-j.class.horizon(p)))
@@ -360,7 +445,7 @@ func pruneReportTx(tx *sql.Tx, now time.Time, p RetentionPolicy, dryRun bool) (P
 	return rep, nil
 }
 
-func writeRetentionLogTx(tx *sql.Tx, rep PruneReport) error {
+func writeRetentionLogTx(tx dbTx, rep PruneReport) error {
 	// ⚠ 留痕跡。沒有這一筆的話，「被清掉了」跟「從來沒有」長得一樣。
 	// DELETE、它的計數與每一筆 log 必須同一個 transaction。否則讀者能在
 	// 「證據已消失、retention ceiling 尚未增加」的縫裡看見一份假完整歷史；
@@ -390,7 +475,7 @@ VALUES (?,?,?,?,?)`,
 // 一個空的、乾淨的、沒有壞消息的答案，第一個要懷疑的是有沒有問對地方。
 func (s *Store) LastPrune() (at time.Time, rows int64, ok bool, err error) {
 	var atStr string
-	e := s.db.QueryRow(`
+	e := s.rdb.QueryRow(`
 SELECT at, SUM(rows_deleted) FROM retention_log
  WHERE at = (SELECT MAX(at) FROM retention_log) GROUP BY at`).Scan(&atStr, &rows)
 	switch {
@@ -414,7 +499,7 @@ SELECT at, SUM(rows_deleted) FROM retention_log
 // 前兩種在畫面上不是同一句話。
 func (s *Store) OldestObservation(machineID string) (time.Time, bool, error) {
 	var at sql.NullString
-	if err := s.db.QueryRow(
+	if err := s.rdb.QueryRow(
 		`SELECT MIN(measured_at) FROM observed_state WHERE machine_id = ?`,
 		machineID).Scan(&at); err != nil {
 		return time.Time{}, false, fmt.Errorf("store: 讀最舊的觀測: %w", err)

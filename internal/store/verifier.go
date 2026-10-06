@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/subtle"
 	"database/sql"
 	"errors"
@@ -79,7 +80,7 @@ func (s *Store) RegisterVerifier(kind, displayName, failureDomain, hubMachineID 
 		return Verifier{}, "", ErrInvalidVerifier
 	}
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "register_verifier")
 	if err != nil {
 		return Verifier{}, "", fmt.Errorf("store: begin verifier registration: %w", err)
 	}
@@ -190,7 +191,7 @@ func (s *Store) RevokeVerifier(verifierID string, expectedRevision int64, at tim
 	if !validJobReadStoredIdentifier(verifierID, 256) || expectedRevision < 1 || !validJobEvidenceTime(at) {
 		return ErrInvalidVerifier
 	}
-	res, err := s.db.Exec(`
+	res, err := s.execWrite(context.Background(), "revoke_verifier", `
 UPDATE verifiers
    SET revoked_at=?,revision=revision+1
  WHERE verifier_id=? AND revision=? AND revoked_at IS NULL`,
@@ -207,7 +208,7 @@ UPDATE verifiers
 	}
 	var revision int64
 	var revokedAt sql.NullString
-	err = s.db.QueryRow(`SELECT revision,revoked_at FROM verifiers WHERE verifier_id=?`, verifierID).
+	err = s.rdb.QueryRow(`SELECT revision,revoked_at FROM verifiers WHERE verifier_id=?`, verifierID).
 		Scan(&revision, &revokedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrVerifierNotFound
@@ -222,7 +223,7 @@ UPDATE verifiers
 }
 
 func (s *Store) ListVerifiers() ([]Verifier, error) {
-	rows, err := s.db.Query(`SELECT ` + verifierColumns + ` FROM verifiers
+	rows, err := s.rdb.Query(`SELECT ` + verifierColumns + ` FROM verifiers
  ORDER BY display_name,verifier_id`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list verifiers: %w", err)
@@ -246,7 +247,7 @@ func (s *Store) ListVerifiers() ([]Verifier, error) {
 }
 
 func (s *Store) GetVerifier(verifierID string) (Verifier, error) {
-	verifier, err := scanVerifier(s.db.QueryRow(`SELECT `+verifierColumns+`
+	verifier, err := scanVerifier(s.rdb.QueryRow(`SELECT `+verifierColumns+`
  FROM verifiers WHERE verifier_id=?`, verifierID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Verifier{}, ErrVerifierNotFound
@@ -282,7 +283,7 @@ func scanVerifier(scanner verifierScanner) (Verifier, error) {
 // is compared in constant time and a match never exits the scan early.
 func (s *Store) AuthenticateVerifier(bearer string) (Verifier, error) {
 	want := []byte(hashToken(bearer))
-	rows, err := s.db.Query(`SELECT ` + verifierColumns + `,credential_hash FROM verifiers
+	rows, err := s.rdb.Query(`SELECT ` + verifierColumns + `,credential_hash FROM verifiers
  WHERE credential_hash<>'' AND revoked_at IS NULL`)
 	if err != nil {
 		return Verifier{}, fmt.Errorf("store: verifier auth: %w", err)
@@ -344,7 +345,7 @@ func (s *Store) RecordIndependentVerification(req IndependentVerificationRequest
 		return ErrInvalidJobEvidence
 	}
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "record_independent_verification")
 	if err != nil {
 		return fmt.Errorf("store: begin independent verification: %w", err)
 	}
@@ -570,7 +571,7 @@ func validVerifierRow(v Verifier) bool {
 // VerifierEvidenceCounts returns how many independent rows each verifier has
 // produced, keyed by verifier_id. Verifiers that produced none are absent.
 func (s *Store) VerifierEvidenceCounts() (map[string]int64, error) {
-	rows, err := s.db.Query(`SELECT verifier_id,COUNT(*) FROM verification_results
+	rows, err := s.rdb.Query(`SELECT verifier_id,COUNT(*) FROM verification_results
  WHERE evidence_role=? AND verifier_id<>'' GROUP BY verifier_id`, JobVerificationRoleIndependent)
 	if err != nil {
 		return nil, fmt.Errorf("store: count verifier evidence: %w", err)
@@ -595,7 +596,7 @@ func (s *Store) VerifierEvidenceCounts() (map[string]int64, error) {
 // independent evidence for.
 func (s *Store) VerifierJobCount(verifierID string) (int64, error) {
 	var jobs int64
-	if err := s.db.QueryRow(`SELECT COUNT(DISTINCT job_id) FROM verification_results
+	if err := s.rdb.QueryRow(`SELECT COUNT(DISTINCT job_id) FROM verification_results
  WHERE evidence_role=? AND verifier_id=?`, JobVerificationRoleIndependent, verifierID).
 		Scan(&jobs); err != nil {
 		return 0, fmt.Errorf("store: count verifier jobs: %w", err)
@@ -624,7 +625,7 @@ type DeploymentIndependentVerdict struct {
 // reason readIndependentVerdictCounts does: a verdict that saw only part of the
 // evidence could call a target passed while an unread row reported a clash.
 func (s *Store) DeploymentIndependentVerdicts(deploymentID string) (map[string]DeploymentIndependentVerdict, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "deployment_independent_verdicts")
 	if err != nil {
 		return nil, fmt.Errorf("store: begin deployment independent verdicts: %w", err)
 	}

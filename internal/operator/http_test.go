@@ -3,8 +3,10 @@ package operator
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
+	"github.com/teddashh/AI-Intune/internal/model"
 	"github.com/teddashh/AI-Intune/internal/store"
 )
 
@@ -67,5 +69,16 @@ func TestHTTPErrorHidesUnexpectedInternalDetail(t *testing.T) {
 	status, code, detail := HTTPError(errors.New("sqlite secret path /private/hub.db"))
 	if status != http.StatusInternalServerError || code != "INTERNAL" || detail != "控制面操作失敗" {
 		t.Fatalf("unexpected error mapping = (%d,%q,%q)", status, code, detail)
+	}
+}
+
+func TestHTTPErrorMapsWriterBusy(t *testing.T) {
+	err := errors.Join(store.ErrWriterBusy, errors.New("hidden /private/hub.db"))
+	status, code, detail := HTTPError(err)
+	if status != http.StatusServiceUnavailable || code != model.ErrHubBusy || detail != "the hub is busy; retry shortly" {
+		t.Fatalf("busy mapping = (%d,%q,%q)", status, code, detail)
+	}
+	if strings.Contains(detail, "hub.db") || strings.Contains(detail, "/private") {
+		t.Fatalf("busy detail leaked storage text: %q", detail)
 	}
 }

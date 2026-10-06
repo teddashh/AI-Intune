@@ -329,7 +329,7 @@ func (s *Server) previewRetentionPrune(w http.ResponseWriter, r *http.Request) {
 	}
 	if preview.TotalDeleted == 0 {
 		s.renderActionStatus(w, r, http.StatusOK, "資料保留政策", "目前沒有資料需要清理",
-			fmt.Sprintf("已依目前保留政策檢查四張證據表；沒有可刪除列，並保護 %d 筆各組最新證據。", preview.KeptNewest),
+			fmt.Sprintf("已依目前保留政策檢查五張證據表；沒有可刪除列，並保護 %d 筆各組最新證據。", preview.KeptNewest),
 			"/tenant/maintenance")
 		return
 	}

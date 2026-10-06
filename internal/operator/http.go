@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/teddashh/AI-Intune/internal/model"
 	"github.com/teddashh/AI-Intune/internal/store"
 )
 
@@ -11,6 +12,9 @@ import (
 // and JSON transports must not disagree about a domain rejection, and an
 // unexpected storage/runtime error must never be rendered back to the caller.
 func HTTPError(err error) (status int, code, detail string) {
+	if store.IsBusy(err) {
+		return http.StatusServiceUnavailable, model.ErrHubBusy, "the hub is busy; retry shortly"
+	}
 	var rejection *store.OperatorRequestError
 	if !errors.As(err, &rejection) {
 		return http.StatusInternalServerError, "INTERNAL", "控制面操作失敗"

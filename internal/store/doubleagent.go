@@ -103,7 +103,7 @@ type DoubleAgent struct {
 // 把 NULL 當成一個身分，會讓所有舊資料看起來像另一個 agent —— 一整片假警報。
 func (s *Store) AgentRuns(now time.Time) ([]AgentRun, error) {
 	since := fmtTime(now.UTC().Add(-DoubleAgentWindow))
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT c.machine_id, c.agent_started_at, COUNT(*), MIN(c.received_at), MAX(c.received_at)
   FROM machine_checkins c
   LEFT JOIN machine_registry m ON m.machine_id = c.machine_id
@@ -181,7 +181,7 @@ func (s *Store) DoubleAgents(now time.Time) ([]DoubleAgent, error) {
 // ⚠ 名冊裡沒有的 machine_id 不會出現在這張表裡，呼叫端要自己 fallback 成 id ——
 // 一台還沒登記就開始回報的機器，寧可顯示醜的 id，也不要顯示空白。
 func (s *Store) displayNames() (map[string]string, error) {
-	rows, err := s.db.Query(`SELECT machine_id, COALESCE(display_name, '') FROM machine_registry`)
+	rows, err := s.rdb.Query(`SELECT machine_id, COALESCE(display_name, '') FROM machine_registry`)
 	if err != nil {
 		return nil, fmt.Errorf("store: 讀機器名字: %w", err)
 	}

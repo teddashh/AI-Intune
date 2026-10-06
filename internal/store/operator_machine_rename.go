@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -74,20 +75,20 @@ type OperatorMachineRenameResult struct {
 }
 
 func (s *Store) PreviewOperatorMachineRename(machineID, displayName string) (OperatorMachineRenamePreviewResult, error) {
-	current, err := machineRenameCurrentName(s.db, machineID)
+	current, err := machineRenameCurrentName(s.rdb, machineID)
 	if err != nil {
 		return OperatorMachineRenamePreviewResult{}, err
 	}
 	if rejection := validateMachineRenameIntent(displayName, current); rejection != nil {
 		return OperatorMachineRenamePreviewResult{}, rejection
 	}
-	if taken, err := machineDisplayNameTaken(s.db, machineID, displayName); err != nil {
+	if taken, err := machineDisplayNameTaken(s.rdb, machineID, displayName); err != nil {
 		return OperatorMachineRenamePreviewResult{}, err
 	} else if taken {
 		return OperatorMachineRenamePreviewResult{}, machineRenameError(OperatorCodeMachineRenameNameTaken)
 	}
 	var pending int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM enrollment_tokens WHERE used_by=? AND used_at IS NULL`,
+	if err := s.rdb.QueryRow(`SELECT COUNT(*) FROM enrollment_tokens WHERE used_by=? AND used_at IS NULL`,
 		machineID).Scan(&pending); err != nil {
 		return OperatorMachineRenamePreviewResult{}, fmt.Errorf("store: count pending token for rename: %w", err)
 	}
@@ -117,7 +118,7 @@ func (s *Store) ApplyOperatorMachineRename(req OperatorMachineRenameRequest) (Op
 	if audit.Subject == "" {
 		audit.Subject = req.MachineID
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_machine_rename")
 	if err != nil {
 		return OperatorMachineRenameResult{}, fmt.Errorf("store: begin machine rename: %w", err)
 	}
@@ -294,13 +295,13 @@ func machineRenamePreviewDigest(machineID, current, desired string) string {
 	return digestOf(string(raw))
 }
 
-func (s *Store) rejectMachineRename(tx *sql.Tx, req OperatorMachineRenameRequest, audit *AuditEntry,
+func (s *Store) rejectMachineRename(tx dbTx, req OperatorMachineRenameRequest, audit *AuditEntry,
 	operation, code, detail string,
 ) error {
 	return s.policyReject(tx, req.IdempotencyKey, operation, req.RequestDigest, audit, code, detail)
 }
 
-func (s *Store) commitMachineRename(tx *sql.Tx, req OperatorMachineRenameRequest, operation string,
+func (s *Store) commitMachineRename(tx dbTx, req OperatorMachineRenameRequest, operation string,
 	audit *AuditEntry, result OperatorMachineRenameResult,
 ) error {
 	raw, err := json.Marshal(result)

@@ -54,3 +54,7 @@ scrape_configs:
     # 服務 active，畫面上什麼都不缺。
     #
     # 守它的是 rules/clawctl.yml 的 LabelCollisionDetected。
+    #
+    # /metrics requires the operator view grant (<prefix>-view) on the
+    # tailnet node that scrapes. A managed machine receives 403. /healthz
+    # stays public. Do not add a machine label on this job.

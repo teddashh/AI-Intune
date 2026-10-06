@@ -267,7 +267,7 @@ func (s *Store) ReadChangesContext(ctx context.Context, request ChangeReadReques
 	}
 	defer s.releaseChangeRead()
 
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.rdb.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return ChangeReadResult{}, fmt.Errorf("store: begin change read: %w", err)
 	}
@@ -404,7 +404,7 @@ func validChangeReadCeilings(ceilings ChangeReadCeilings) bool {
 		ceilings.RetentionLog >= 0
 }
 
-func currentChangeReadCeilings(ctx context.Context, tx *sql.Tx) (ChangeReadCeilings, error) {
+func currentChangeReadCeilings(ctx context.Context, tx dbTx) (ChangeReadCeilings, error) {
 	var result ChangeReadCeilings
 	queries := []struct {
 		label string
@@ -425,7 +425,7 @@ func currentChangeReadCeilings(ctx context.Context, tx *sql.Tx) (ChangeReadCeili
 	return result, nil
 }
 
-func readChangeCoverage(ctx context.Context, tx *sql.Tx, from time.Time, retentionCeiling int64, selection changeReadSelection) (ChangeReadCoverage, int, error) {
+func readChangeCoverage(ctx context.Context, tx dbTx, from time.Time, retentionCeiling int64, selection changeReadSelection) (ChangeReadCoverage, int, error) {
 	// Completeness is scoped to the selected sources. A skipped source is true
 	// (not applicable), so downstream projections do not manufacture an
 	// unrelated partial warning for a credential-only or state-only query.
@@ -513,7 +513,7 @@ SELECT at, older_than, rows_deleted
 	return coverage, malformed, nil
 }
 
-func readTrackedChangeCoverage(ctx context.Context, tx *sql.Tx, from time.Time, trackedKey, completeKey, label, issuePrefix string) (bool, *time.Time, int, []string, error) {
+func readTrackedChangeCoverage(ctx context.Context, tx dbTx, from time.Time, trackedKey, completeKey, label, issuePrefix string) (bool, *time.Time, int, []string, error) {
 	var trackedRaw string
 	issues := make([]string, 0, 2)
 	malformed := 0
@@ -562,7 +562,7 @@ func addChangeCoverageIssue(coverage *ChangeReadCoverage, issue string) {
 	coverage.Issues = append(coverage.Issues, issue)
 }
 
-func populateChangeReadDisplayNames(ctx context.Context, tx *sql.Tx, ceiling int64, records []ChangeReadRecord) error {
+func populateChangeReadDisplayNames(ctx context.Context, tx dbTx, ceiling int64, records []ChangeReadRecord) error {
 	const batchSize = 400 // safely below SQLite's conservative bind limit
 	seen := make(map[string]bool, len(records))
 	machineIDs := make([]string, 0, len(records))
@@ -616,7 +616,7 @@ func populateChangeReadDisplayNames(ctx context.Context, tx *sql.Tx, ceiling int
 // payload or free-text evidence. Malformed Hub coordinates cannot safely be
 // constrained by an indexed time window, so every matching row below the
 // frozen ceiling is counted rather than silently disappearing from coverage.
-func auditMalformedChangeHubTimes(ctx context.Context, tx *sql.Tx, query string, args []any, label string, maxRows int) (int, map[string]bool, error) {
+func auditMalformedChangeHubTimes(ctx context.Context, tx dbTx, query string, args []any, label string, maxRows int) (int, map[string]bool, error) {
 	query += ` LIMIT ?`
 	args = append(args, maxRows+1)
 	rows, err := tx.QueryContext(ctx, query, args...)
@@ -650,7 +650,7 @@ func auditMalformedChangeHubTimes(ctx context.Context, tx *sql.Tx, query string,
 	return malformed, invalidMachines, nil
 }
 
-func readRegistryCreationChanges(ctx context.Context, tx *sql.Tx, from, to time.Time, ceiling int64, machineFilter string, auditLimit, maxRows int) ([]ChangeReadRecord, int, int, error) {
+func readRegistryCreationChanges(ctx context.Context, tx dbTx, from, to time.Time, ceiling int64, machineFilter string, auditLimit, maxRows int) ([]ChangeReadRecord, int, int, error) {
 	auditQuery := `SELECT machine_id,created_at FROM machine_registry`
 	if machineFilter == "" {
 		auditQuery += ` INDEXED BY ix_registry_change_read`
@@ -714,7 +714,7 @@ SELECT rowid,machine_id,display_name,created_at
 	return records, malformed, malformed, nil
 }
 
-func readRegistryLifecycleChanges(ctx context.Context, tx *sql.Tx, from, to time.Time, ceiling int64, machineFilter string, auditLimit, maxRows int) ([]ChangeReadRecord, int, int, error) {
+func readRegistryLifecycleChanges(ctx context.Context, tx dbTx, from, to time.Time, ceiling int64, machineFilter string, auditLimit, maxRows int) ([]ChangeReadRecord, int, int, error) {
 	auditQuery := `SELECT machine_id,occurred_at FROM machine_registry_lifecycle_events INDEXED BY `
 	if machineFilter == "" {
 		auditQuery += `ix_registry_lifecycle_read`
@@ -793,7 +793,7 @@ SELECT event_id,machine_id,event_type,occurred_at
 	return records, malformed, malformed, nil
 }
 
-func readStateChanges(ctx context.Context, tx *sql.Tx, from, to time.Time, ceiling int64, machineFilter string, auditLimit, maxRows int) ([]ChangeReadRecord, int, int, error) {
+func readStateChanges(ctx context.Context, tx dbTx, from, to time.Time, ceiling int64, machineFilter string, auditLimit, maxRows int) ([]ChangeReadRecord, int, int, error) {
 	auditQuery := `SELECT machine_id,entered_at FROM machine_state_transition_events INDEXED BY `
 	if machineFilter == "" {
 		auditQuery += `ix_state_transition_change_read`
@@ -907,7 +907,7 @@ type changeReadObservationEndpoints struct {
 	hasAfter  bool
 }
 
-func readObservationEndpointChanges(ctx context.Context, tx *sql.Tx, from, to time.Time, ceiling int64, historyPruned bool, selection changeReadSelection) ([]ChangeReadRecord, int, int, error) {
+func readObservationEndpointChanges(ctx context.Context, tx dbTx, from, to time.Time, ceiling int64, historyPruned bool, selection changeReadSelection) ([]ChangeReadRecord, int, int, error) {
 	filterSQL, filterArgs := changeReadObservationFilterSQL(selection)
 	indexName := changeReadObservationIndex(selection)
 	auditArgs := append([]any{ceiling}, filterArgs...)
@@ -1088,7 +1088,7 @@ func changeReadObservationIndex(selection changeReadSelection) string {
 	return "ix_observed_changes"
 }
 
-func loadChangeReadObservationByRowID(ctx context.Context, tx *sql.Tx, observation changeReadObservation, payloadBytes *int64, payloadLimit int) (changeReadObservation, error) {
+func loadChangeReadObservationByRowID(ctx context.Context, tx dbTx, observation changeReadObservation, payloadBytes *int64, payloadLimit int) (changeReadObservation, error) {
 	var rawMeasured string
 	var bytes int64
 	if err := tx.QueryRowContext(ctx, `
@@ -1108,7 +1108,7 @@ SELECT length(CAST(payload AS BLOB)),measured_at
 	return observation, nil
 }
 
-func loadChangeReadObservationBaseline(ctx context.Context, tx *sql.Tx, ceiling int64, from time.Time, key changeReadObservationKey, payloadBytes *int64, payloadLimit int) (changeReadObservation, bool, error) {
+func loadChangeReadObservationBaseline(ctx context.Context, tx dbTx, ceiling int64, from time.Time, key changeReadObservationKey, payloadBytes *int64, payloadLimit int) (changeReadObservation, bool, error) {
 	var result changeReadObservation
 	var rawMeasured, rawReceived string
 	var bytes int64
@@ -1446,7 +1446,7 @@ func (s *Store) setMachineLifecycle(machineID string, retired bool, now time.Tim
 	if retired {
 		operation = "retire"
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "set_machine_lifecycle")
 	if err != nil {
 		return fmt.Errorf("store: %s begin: %w", operation, err)
 	}
@@ -1513,7 +1513,7 @@ func canonicalMachineLifecycleTime(value time.Time) (time.Time, error) {
 	return value.UTC().Truncate(time.Second), nil
 }
 
-func validateMachineLifecycleTimeTx(tx *sql.Tx, machineID, rawCreated string, currentRetired sql.NullString, at time.Time) error {
+func validateMachineLifecycleTimeTx(tx dbTx, machineID, rawCreated string, currentRetired sql.NullString, at time.Time) error {
 	created, ok := parseChangeReadHubTime(rawCreated)
 	if !ok {
 		return errors.New("created_at is invalid")

@@ -23,7 +23,7 @@ type CompliancePolicySummary struct {
 
 // CompliancePolicies lists every policy by newest revision first.
 func (s *Store) CompliancePolicies() ([]CompliancePolicySummary, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT p.policy_id, p.policy_revision, p.rules_json, p.rules_digest, p.published_at,
        (SELECT COUNT(*) FROM compliance_policies c WHERE c.policy_id = p.policy_id),
        (SELECT COUNT(*) FROM compliance_assignments a
@@ -62,7 +62,7 @@ SELECT p.policy_id, p.policy_revision, p.rules_json, p.rules_digest, p.published
 // newest first. Older revisions stay readable because a machine judged under
 // one of them is entitled to an answer about which rules judged it.
 func (s *Store) CompliancePolicyRevisions(policyID string) ([]CompliancePolicyRecord, error) {
-	rows, err := s.db.Query(`SELECT policy_id,policy_revision,rules_json,rules_digest,
+	rows, err := s.rdb.Query(`SELECT policy_id,policy_revision,rules_json,rules_digest,
 	 published_at,published_by FROM compliance_policies WHERE policy_id=?
 	 ORDER BY policy_revision DESC`, policyID)
 	if err != nil {
@@ -96,7 +96,7 @@ func (s *Store) CompliancePolicyRevisions(policyID string) ([]CompliancePolicyRe
 // that has one. Superseded revisions stay in the table as history but never
 // answer "which rules are judging this scope".
 func (s *Store) CurrentComplianceAssignments() ([]ComplianceAssignmentRecord, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT a.assignment_id, a.scope_type, a.scope_id, a.assignment_revision,
        a.policy_id, a.policy_revision, a.rules_digest, a.assigned_at, a.assigned_by,
        p.rules_json
@@ -131,7 +131,7 @@ SELECT a.assignment_id, a.scope_type, a.scope_id, a.assignment_revision,
 // complianceAssignments loads every current assignment as the pure resolver
 // wants them. It is the one query the board and the per-machine read share.
 func (s *Store) complianceAssignments() ([]compliance.Assignment, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT a.scope_type, a.scope_id, a.policy_id, a.policy_revision, a.rules_digest,
        a.assigned_at, p.rules_json
   FROM compliance_assignments a
@@ -187,7 +187,7 @@ func (s *Store) MachineComplianceStates() ([]MachineComplianceState, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT m.machine_id, m.display_name, COALESCE(m.channel,''),
        c.received_at, c.agent_version, c.disk_free_bytes, c.disk_total_bytes,
        c.jobs_enabled, c.settings_digest

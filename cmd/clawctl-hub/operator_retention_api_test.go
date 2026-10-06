@@ -44,7 +44,7 @@ func TestOperatorRetentionReadPreviewApplyAndReplay(t *testing.T) {
 	}
 	var preview operator.RetentionPrunePreview
 	if err := json.Unmarshal(previewRec.Body.Bytes(), &preview); err != nil || preview.TotalDeleted < 1 ||
-		preview.Confirmation == "" || preview.PreviewDigest == "" || len(preview.Counts) != 4 {
+		preview.Confirmation == "" || preview.PreviewDigest == "" || len(preview.Counts) != 5 {
 		t.Fatalf("preview=%+v err=%v", preview, err)
 	}
 	body, _ := json.Marshal(retentionPruneApplyBody{

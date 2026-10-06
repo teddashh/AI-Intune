@@ -80,18 +80,34 @@ func TestEveryDisclosedTimeColumnExists(t *testing.T) {
 // 會被時間清掉的表一定要有 Hub 時刻，否則畫面沒有辦法說出「最舊的那一列還有
 // 多久會被清掉」——而那是保留期唯一對操作員有意義的形式。
 func TestEveryPrunedTableDisclosesAHubClock(t *testing.T) {
+	s := newTestStore(t)
 	declared := map[string]MachineDataTable{}
 	for _, table := range MachineDataTables() {
 		declared[table.Table] = table
 	}
 	for _, job := range pruneJobs {
-		table, ok := declared[job.table]
-		if !ok {
-			t.Errorf("%s 會被時間清掉，但揭露面沒有講它", job.table)
-			continue
+		hasMachine := false
+		for _, column := range tableColumns(t, s, job.table) {
+			if column == "machine_id" {
+				hasMachine = true
+			}
 		}
-		if table.TimeCol == "" {
-			t.Errorf("%s 會被時間清掉，但揭露面說它沒有時間", job.table)
+		table, ok := declared[job.table]
+		// notifications 是 Hub 自己的推播紀錄，沒有 machine_id，不進單機揭露面。
+		// 有 machine_id 的表仍必須出現在揭露面，而且要有 Hub 時刻。
+		if hasMachine {
+			if !ok {
+				t.Errorf("%s 會被時間清掉，但揭露面沒有講它", job.table)
+				continue
+			}
+			if table.TimeCol == "" {
+				t.Errorf("%s 會被時間清掉，但揭露面說它沒有時間", job.table)
+			}
+		} else if ok {
+			t.Errorf("%s 沒有 machine_id，不該出現在單機揭露面", job.table)
+		}
+		if job.cutCol == "" {
+			t.Errorf("%s 會被時間清掉，但沒有 Hub 時刻欄", job.table)
 		}
 		class, known := RetentionClassOf(job.table)
 		if !known || class != job.class {

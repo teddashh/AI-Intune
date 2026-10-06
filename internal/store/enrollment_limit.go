@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -116,7 +117,7 @@ func enrollmentLimitState(q operatorRowQuerier) (EnrollmentLimitState, error) {
 
 // EnrollmentLimit 回「現在有幾台、上限幾台、還開不開得了票」。
 func (s *Store) EnrollmentLimit() (EnrollmentLimitState, error) {
-	return enrollmentLimitState(s.db)
+	return enrollmentLimitState(s.rdb)
 }
 
 // EnrollmentLimitPreviewDigest 把「這份預覽是照著哪一版上限做的」釘進去。
@@ -254,7 +255,7 @@ func (s *Store) ApplyOperatorEnrollmentLimit(req OperatorEnrollmentLimitRequest)
 	audit.IdempotencyKey = req.IdempotencyKey
 	audit.RequestDigest = req.RequestDigest
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_enrollment_limit")
 	if err != nil {
 		return OperatorEnrollmentLimitResult{}, fmt.Errorf("store: begin enrollment limit: %w", err)
 	}
@@ -370,7 +371,7 @@ func (s *Store) ApplyOperatorEnrollmentLimit(req OperatorEnrollmentLimitRequest)
 	return result, nil
 }
 
-func (s *Store) replayOperatorEnrollmentLimit(tx *sql.Tx, req OperatorEnrollmentLimitRequest,
+func (s *Store) replayOperatorEnrollmentLimit(tx dbTx, req OperatorEnrollmentLimitRequest,
 	audit AuditEntry, cached operatorCachedRequest,
 ) (OperatorEnrollmentLimitResult, error) {
 	if cached.Operation != operatorEnrollmentLimitOperation || cached.Digest != req.RequestDigest {
@@ -435,7 +436,7 @@ func (s *Store) replayOperatorEnrollmentLimit(tx *sql.Tx, req OperatorEnrollment
 	}, nil
 }
 
-func (s *Store) rejectInvalidEnrollmentLimitCache(tx *sql.Tx, audit AuditEntry) (OperatorEnrollmentLimitResult, error) {
+func (s *Store) rejectInvalidEnrollmentLimitCache(tx dbTx, audit AuditEntry) (OperatorEnrollmentLimitResult, error) {
 	detail := "enrollment limit idempotency cache invalid；未回放結果"
 	audit.OK, audit.Detail = false, detail
 	if err := s.recordAuditTx(tx, audit); err != nil {

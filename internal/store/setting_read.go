@@ -23,7 +23,7 @@ type SettingPolicySummary struct {
 
 // SettingPolicies lists every policy by newest revision first.
 func (s *Store) SettingPolicies() ([]SettingPolicySummary, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT p.policy_id, p.policy_revision, p.settings_json, p.settings_digest, p.published_at,
        (SELECT COUNT(*) FROM setting_policies c WHERE c.policy_id = p.policy_id),
        (SELECT COUNT(*) FROM setting_assignments a
@@ -62,7 +62,7 @@ SELECT p.policy_id, p.policy_revision, p.settings_json, p.settings_digest, p.pub
 // newest first. The digests of the older revisions are what let the Hub say
 // "behind" instead of "wrong" about a machine that has not checked in yet.
 func (s *Store) SettingPolicyRevisions(policyID string) ([]SettingPolicyRecord, error) {
-	rows, err := s.db.Query(`SELECT policy_id,policy_revision,settings_json,settings_digest,
+	rows, err := s.rdb.Query(`SELECT policy_id,policy_revision,settings_json,settings_digest,
 	 published_at,published_by FROM setting_policies WHERE policy_id=?
 	 ORDER BY policy_revision DESC`, policyID)
 	if err != nil {
@@ -96,7 +96,7 @@ func (s *Store) SettingPolicyRevisions(policyID string) ([]SettingPolicyRecord, 
 // has one. Superseded revisions stay in the table as history but never answer
 // "what is in force".
 func (s *Store) CurrentSettingAssignments() ([]SettingAssignmentRecord, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT a.assignment_id, a.scope_type, a.scope_id, a.assignment_revision,
        a.policy_id, a.policy_revision, a.settings_digest, a.assigned_at, a.assigned_by,
        p.settings_json
@@ -136,11 +136,11 @@ SELECT a.assignment_id, a.scope_type, a.scope_id, a.assignment_revision,
 // stop its heartbeat over a settings question.
 func (s *Store) ResolveMachineSettings(machineID string) (settingpolicy.Effective, error) {
 	var channel sql.NullString
-	if err := s.db.QueryRow(`SELECT channel FROM machine_registry WHERE machine_id=?`,
+	if err := s.rdb.QueryRow(`SELECT channel FROM machine_registry WHERE machine_id=?`,
 		machineID).Scan(&channel); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return settingpolicy.Effective{}, fmt.Errorf("store: read machine channel for settings: %w", err)
 	}
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT a.scope_type, a.scope_id, a.policy_id, a.policy_revision, a.settings_digest,
        a.assigned_at, p.settings_json
   FROM setting_assignments a
@@ -190,7 +190,7 @@ type MachineSettingState struct {
 //
 // ⚠ 判決只看 agent 自己回報的 digest。不准用心跳間隔反推「它應該已經套用了」。
 func (s *Store) MachineSettingStates() ([]MachineSettingState, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT m.machine_id, m.display_name, COALESCE(m.channel,''),
        c.settings_digest, c.received_at
   FROM machine_registry m

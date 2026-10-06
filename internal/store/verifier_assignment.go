@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -117,7 +118,7 @@ var verificationAssignmentReportedAt = fmt.Sprintf(`(CASE WHEN v.kind='%s' THEN 
 // separation rule alone admits the whole fleet minus one machine, which is the
 // enumeration this table exists to avoid.
 func (s *Store) PendingVerificationAssignments(verifierID string) ([]VerificationAssignment, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT a.assignment_id,a.job_id,j.machine_id,COALESCE(m.display_name,''),
        a.verifier_id,v.display_name,v.failure_domain,
        CASE WHEN v.revoked_at IS NULL THEN 0 ELSE 1 END,
@@ -143,7 +144,7 @@ SELECT a.assignment_id,a.job_id,j.machine_id,COALESCE(m.display_name,''),
 // is what makes an absent verdict legible: nobody was asked, the job has not
 // finished yet, or somebody was asked and has not reported.
 func (s *Store) JobVerificationAssignments(jobID string) ([]VerificationAssignment, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT a.assignment_id,a.job_id,j.machine_id,COALESCE(m.display_name,''),
        a.verifier_id,v.display_name,v.failure_domain,
        CASE WHEN v.revoked_at IS NULL THEN 0 ELSE 1 END,
@@ -271,7 +272,7 @@ type verificationAssignmentIntent struct {
 func (s *Store) PreviewOperatorVerificationAssignment(verifierID, jobID string) (
 	OperatorVerificationAssignmentPreviewResult, error,
 ) {
-	intent, err := resolveVerificationAssignmentIntent(s.db, verifierID, jobID)
+	intent, err := resolveVerificationAssignmentIntent(s.rdb, verifierID, jobID)
 	if err != nil {
 		return OperatorVerificationAssignmentPreviewResult{}, err
 	}
@@ -443,7 +444,7 @@ func (s *Store) ApplyOperatorVerificationAssignment(req OperatorVerificationAssi
 	audit.IdempotencyKey = req.IdempotencyKey
 	audit.RequestDigest = req.RequestDigest
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_verification_assignment")
 	if err != nil {
 		return OperatorVerificationAssignmentResult{}, fmt.Errorf("store: begin verification assignment: %w", err)
 	}
@@ -573,7 +574,7 @@ func operatorVerificationAssignmentResultFrom(receipt operatorVerificationAssign
 	}
 }
 
-func (s *Store) replayOperatorVerificationAssignment(tx *sql.Tx,
+func (s *Store) replayOperatorVerificationAssignment(tx dbTx,
 	req OperatorVerificationAssignmentRequest, audit AuditEntry, cached operatorCachedRequest,
 ) (OperatorVerificationAssignmentResult, error) {
 	if cached.Operation != operatorVerificationAssignmentOperation || cached.Digest != req.RequestDigest {
@@ -654,7 +655,7 @@ func (s *Store) replayOperatorVerificationAssignment(tx *sql.Tx,
 	return operatorVerificationAssignmentResultFrom(receipt, true), nil
 }
 
-func verificationAssignmentReceiptMatchesRow(tx *sql.Tx,
+func verificationAssignmentReceiptMatchesRow(tx dbTx,
 	receipt operatorVerificationAssignmentReceipt,
 ) (bool, error) {
 	var jobID, verifierID, assignedAt, assignedBy string
@@ -671,7 +672,7 @@ func verificationAssignmentReceiptMatchesRow(tx *sql.Tx,
 		assignedAt == fmtTime(receipt.AssignedAt) && assignedBy == receipt.AssignedBy, nil
 }
 
-func (s *Store) rejectInvalidVerificationAssignmentCache(tx *sql.Tx, audit AuditEntry) (
+func (s *Store) rejectInvalidVerificationAssignmentCache(tx dbTx, audit AuditEntry) (
 	OperatorVerificationAssignmentResult, error,
 ) {
 	audit.OK = false

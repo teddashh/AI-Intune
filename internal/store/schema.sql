@@ -476,6 +476,11 @@ CREATE TABLE IF NOT EXISTS notifications (
   error           TEXT
 );
 
+-- 清 notifications 時要留下每個 kind 最新一筆已送達的列。子查詢必須走覆蓋索引，
+-- 否則一年後的相關子查詢會在半夜回表。
+CREATE INDEX IF NOT EXISTS ix_notifications_prune
+  ON notifications(kind, delivered, sent_at);
+
 -- ---------------------------------------------------------------- App catalog
 
 CREATE TABLE IF NOT EXISTS catalog_manifests (

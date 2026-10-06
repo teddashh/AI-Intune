@@ -112,12 +112,12 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		operatorRegistered, operatorRoutePolicies); err != nil {
 		t.Fatal(err)
 	}
-	if len(nonOperatorRegistered) != 18 || len(nonOperatorRoutePolicies) != 18 {
-		t.Fatalf("non-operator registered=%d policies=%d, want 18/18",
+	if len(nonOperatorRegistered) != 17 || len(nonOperatorRoutePolicies) != 17 {
+		t.Fatalf("non-operator registered=%d policies=%d, want 17/17",
 			len(nonOperatorRegistered), len(nonOperatorRoutePolicies))
 	}
-	if len(operatorRegistered) != 183 || len(operatorRoutePolicies) != 183 {
-		t.Fatalf("operator registered=%d policies=%d, want 183/183",
+	if len(operatorRegistered) != 184 || len(operatorRoutePolicies) != 184 {
+		t.Fatalf("operator registered=%d policies=%d, want 184/184",
 			len(operatorRegistered), len(operatorRoutePolicies))
 	}
 	if len(nonOperatorRegistered)+len(operatorRegistered) != 201 {
@@ -129,18 +129,18 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		counts[policy.Permission]++
 		representations[policy.Representation]++
 	}
-	if counts[operatorauth.View] != 79 || counts[operatorauth.Operate] != 21 || counts[operatorauth.Admin] != 83 {
-		t.Fatalf("permission counts=%v, want view=79 operate=21 admin=83", counts)
+	if counts[operatorauth.View] != 80 || counts[operatorauth.Operate] != 21 || counts[operatorauth.Admin] != 83 {
+		t.Fatalf("permission counts=%v, want view=80 operate=21 admin=83", counts)
 	}
-	if representations[operatorJSON] != 93 || representations[operatorHTML] != 90 {
-		t.Fatalf("representation counts=%v, want JSON=93 HTML=90", representations)
+	if representations[operatorJSON] != 93 || representations[operatorHTML] != 90 || representations[operatorPlain] != 1 {
+		t.Fatalf("representation counts=%v, want JSON=93 HTML=90 plain=1", representations)
 	}
 }
 
 func TestNonOperatorRouteManifestValidationRejectsDriftAndOperatorShadowing(t *testing.T) {
-	valid := []string{"GET /metrics"}
+	valid := []string{"GET /healthz"}
 	policy := map[string]nonOperatorRoutePolicy{
-		"GET /metrics": {nonOperatorMetrics},
+		"GET /healthz": {nonOperatorHealth},
 	}
 	if err := validateNonOperatorRoutePolicies(valid, policy); err != nil {
 		t.Fatal(err)
@@ -152,8 +152,8 @@ func TestNonOperatorRouteManifestValidationRejectsDriftAndOperatorShadowing(t *t
 	}{
 		{name: "registered route missing policy", registered: []string{"GET /future"}, policies: policy},
 		{name: "policy missing route", registered: nil, policies: policy},
-		{name: "duplicate route", registered: []string{"GET /metrics", "GET /metrics"}, policies: policy},
-		{name: "invalid class", registered: valid, policies: map[string]nonOperatorRoutePolicy{"GET /metrics": {99}}},
+		{name: "duplicate route", registered: []string{"GET /healthz", "GET /healthz"}, policies: policy},
+		{name: "invalid class", registered: valid, policies: map[string]nonOperatorRoutePolicy{"GET /healthz": {99}}},
 		{name: "unknown method token", registered: []string{"BREW /v1/jobs"}, policies: map[string]nonOperatorRoutePolicy{"BREW /v1/jobs": {nonOperatorAgent}}},
 		{name: "agent path outside v1", registered: []string{"POST /machines/x/retire"}, policies: map[string]nonOperatorRoutePolicy{"POST /machines/x/retire": {nonOperatorAgent}}},
 		{name: "operator namespace root disguised as agent", registered: []string{"GET /v1/operator"}, policies: map[string]nonOperatorRoutePolicy{"GET /v1/operator": {nonOperatorAgent}}},
@@ -163,6 +163,7 @@ func TestNonOperatorRouteManifestValidationRejectsDriftAndOperatorShadowing(t *t
 		{name: "catch all can shadow operator API", registered: []string{"GET /v1/{rest...}"}, policies: map[string]nonOperatorRoutePolicy{"GET /v1/{rest...}": {nonOperatorAgent}}},
 		{name: "health alias", registered: []string{"GET /health"}, policies: map[string]nonOperatorRoutePolicy{"GET /health": {nonOperatorHealth}}},
 		{name: "metrics alias", registered: []string{"GET /debug/metrics"}, policies: map[string]nonOperatorRoutePolicy{"GET /debug/metrics": {nonOperatorMetrics}}},
+		{name: "metrics on the public mux", registered: []string{"GET /metrics"}, policies: map[string]nonOperatorRoutePolicy{"GET /metrics": {nonOperatorMetrics}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if err := validateNonOperatorRoutePolicies(test.registered, test.policies); err == nil {
@@ -172,7 +173,7 @@ func TestNonOperatorRouteManifestValidationRejectsDriftAndOperatorShadowing(t *t
 	}
 
 	operatorPolicy := map[string]operatorRoutePolicy{
-		"GET /metrics": {operatorauth.View, operatorHTML, operator.SourceKindWeb},
+		"GET /healthz": {operatorauth.View, operatorHTML, operator.SourceKindWeb},
 	}
 	if err := validateRouteManifests(valid, policy, valid, operatorPolicy); err == nil {
 		t.Fatal("route shared by root and operator mux was accepted")
@@ -233,6 +234,7 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		path    string
 		policy  operatorRoutePolicy
 	}{
+		{"GET /metrics", "/metrics", operatorRoutePolicy{operatorauth.View, operatorPlain, operator.SourceKindWeb}},
 		{"GET /{$}", "/", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb}},
 		{"GET /preferences/navigation-language/{locale}", "/preferences/navigation-language/en?return_to=%2F", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb}},
 		{"GET /machines", "/machines", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb}},
@@ -487,7 +489,6 @@ func TestMachineAndPublicRoutesNeverCallOperatorAuthorizer(t *testing.T) {
 		path   string
 	}{
 		{http.MethodGet, "/healthz"},
-		{http.MethodGet, "/metrics"},
 		{http.MethodPost, "/v1/enrollments"},
 		{http.MethodPost, "/v1/checkins"},
 		{http.MethodGet, "/v1/jobs/next"},
@@ -526,11 +527,11 @@ func TestMetricsPinsLiteralAuthorityWithoutDependingOnOperatorAuth(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	authorizer := &boundaryAuthorizer{decision: operatorauth.Decision{
-		HTTPStatus: http.StatusServiceUnavailable, Code: operatorauth.AuthSourceUnavailable,
-		Detail: "LocalAPI deliberately unavailable in this test",
+	denied := &boundaryAuthorizer{decision: operatorauth.Decision{
+		HTTPStatus: http.StatusForbidden, Code: operatorauth.CapabilityRequired,
+		Detail: "view grant required",
 	}}
-	handler, err := newHubHTTPHandler(h, ui, authorizer, testOperatorAuthority)
+	handler, err := newHubHTTPHandler(h, ui, denied, testOperatorAuthority)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,17 +552,42 @@ func TestMetricsPinsLiteralAuthorityWithoutDependingOnOperatorAuth(t *testing.T)
 	if rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("metrics rejection security headers=%v", rec.Header())
 	}
+	if calls := denied.snapshotCalls(); len(calls) != 0 {
+		t.Fatalf("hostile Host reached the authorizer: %v", calls)
+	}
 
 	rec = httptest.NewRecorder()
 	req := newBoundaryRequest(http.MethodGet, "/metrics", nil)
 	req.RemoteAddr = "100.100.10.20:4321"
 	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("missing view grant status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), machine.id) || strings.Contains(rec.Body.String(), "metrics-secret-machine") {
+		t.Fatalf("missing view grant leaked inventory: %s", rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
+		t.Fatalf("metrics denial content-type=%q", ct)
+	}
+	if calls := denied.snapshotCalls(); len(calls) != 1 || calls[0] != operatorauth.View {
+		t.Fatalf("missing view grant auth calls=%v", calls)
+	}
+
+	allowed := &boundaryAuthorizer{allow: true}
+	handler, err = newHubHTTPHandler(h, ui, allowed, testOperatorAuthority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	req = newBoundaryRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "100.100.10.20:4321"
+	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), machine.id) ||
 		!strings.Contains(rec.Body.String(), "metrics-secret-machine") {
-		t.Fatalf("literal authority metrics status=%d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("view grant metrics status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if calls := authorizer.snapshotCalls(); len(calls) != 0 {
-		t.Fatalf("metrics unexpectedly depended on LocalAPI auth: %v", calls)
+	if calls := allowed.snapshotCalls(); len(calls) != 1 || calls[0] != operatorauth.View {
+		t.Fatalf("view grant auth calls=%v", calls)
 	}
 
 	// /healthz intentionally remains a content-free liveness probe under any

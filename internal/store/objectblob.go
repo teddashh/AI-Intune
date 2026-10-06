@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"strings"
@@ -32,12 +33,12 @@ func (s *Store) UpsertObjectBlob(row ObjectBlob) error {
 	}
 	var size int64
 	var key, backend, kind, media string
-	err := s.db.QueryRow(`SELECT size_bytes, object_key, backend, kind, media_type
+	err := s.rdb.QueryRow(`SELECT size_bytes, object_key, backend, kind, media_type
 		FROM object_blobs WHERE digest=?`, row.Digest).Scan(&size, &key, &backend, &kind, &media)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		created := fmtTime(s.now().UTC().Truncate(time.Second))
-		_, err = s.db.Exec(`INSERT INTO object_blobs(
+		_, err = s.execWrite(context.Background(), "upsert_object_blob", `INSERT INTO object_blobs(
 			digest, size_bytes, object_key, backend, kind, media_type, created_at)
 			VALUES (?,?,?,?,?,?,?)`,
 			row.Digest, row.SizeBytes, row.ObjectKey, row.Backend, row.Kind, row.MediaType, created)
@@ -51,7 +52,7 @@ func (s *Store) UpsertObjectBlob(row ObjectBlob) error {
 	if backend == row.Backend && kind == row.Kind && media == row.MediaType {
 		return nil
 	}
-	_, err = s.db.Exec(`UPDATE object_blobs SET backend=?, kind=?, media_type=?
+	_, err = s.execWrite(context.Background(), "upsert_object_blob_2", `UPDATE object_blobs SET backend=?, kind=?, media_type=?
 		WHERE digest=? AND size_bytes=? AND object_key=?`,
 		row.Backend, row.Kind, row.MediaType, row.Digest, row.SizeBytes, row.ObjectKey)
 	return err
@@ -64,7 +65,7 @@ func (s *Store) GetObjectBlob(digest string) (ObjectBlob, bool, error) {
 	}
 	var row ObjectBlob
 	var created string
-	err := s.db.QueryRow(`SELECT digest, size_bytes, object_key, backend, kind, media_type, created_at
+	err := s.rdb.QueryRow(`SELECT digest, size_bytes, object_key, backend, kind, media_type, created_at
 		FROM object_blobs WHERE digest=?`, digest).Scan(
 		&row.Digest, &row.SizeBytes, &row.ObjectKey, &row.Backend, &row.Kind, &row.MediaType, &created)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -98,7 +99,7 @@ func (s *Store) ApplyOperatorCompliancePolicy(req OperatorCompliancePolicyReques
 	audit.Subject = req.PolicyID
 	audit.Reason = req.Reason
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_compliance_policy")
 	if err != nil {
 		return OperatorCompliancePolicyResult{}, fmt.Errorf("store: begin compliance policy: %w", err)
 	}
@@ -267,7 +268,7 @@ func (s *Store) ApplyOperatorComplianceAssignment(req OperatorComplianceAssignme
 		audit.MachineID = req.ScopeID
 	}
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_compliance_assignment")
 	if err != nil {
 		return OperatorComplianceAssignmentResult{}, fmt.Errorf("store: begin compliance assignment: %w", err)
 	}

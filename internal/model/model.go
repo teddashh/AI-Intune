@@ -1066,6 +1066,7 @@ type APIError struct {
 const (
 	ErrBadSchemaVersion        = "BAD_SCHEMA_VERSION"
 	ErrUnauthorized            = "UNAUTHORIZED"
+	ErrHubBusy                 = "HUB_BUSY"
 	ErrUnknownMachine          = "UNKNOWN_MACHINE"
 	ErrEnrollTokenBad          = "ENROLL_TOKEN_INVALID"
 	ErrJobNotFound             = "JOB_NOT_FOUND"

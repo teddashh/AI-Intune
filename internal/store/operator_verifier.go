@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -129,7 +130,7 @@ func (s *Store) ResolveHubMachineID(hubHost string) (string, error) {
 	if strings.TrimSpace(hubHost) == "" {
 		return "", nil
 	}
-	rows, err := s.db.Query(`SELECT machine_id FROM machine_registry
+	rows, err := s.rdb.Query(`SELECT machine_id FROM machine_registry
  WHERE retired_at IS NULL AND (hostname=? OR display_name=?)`, hubHost, hubHost)
 	if err != nil {
 		return "", fmt.Errorf("store: resolve hub machine id: %w", err)
@@ -158,7 +159,7 @@ func (s *Store) ResolveHubMachineID(hubHost string) (string, error) {
 
 // PreviewOperatorVerifier performs no write and consumes no idempotency key.
 func (s *Store) PreviewOperatorVerifier(kind, displayName, failureDomain, hubMachineID string) (OperatorVerifierPreviewResult, error) {
-	if err := s.validateOperatorVerifierIntent(s.db, kind, displayName, failureDomain, hubMachineID); err != nil {
+	if err := s.validateOperatorVerifierIntent(s.rdb, kind, displayName, failureDomain, hubMachineID); err != nil {
 		return OperatorVerifierPreviewResult{}, err
 	}
 	policy := currentOperatorVerifierPolicy(kind)
@@ -289,7 +290,7 @@ func (s *Store) ApplyOperatorVerifier(req OperatorVerifierCreateRequest) (Operat
 	audit.IdempotencyKey = req.IdempotencyKey
 	audit.RequestDigest = req.RequestDigest
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_verifier")
 	if err != nil {
 		return OperatorVerifierCreateResult{}, fmt.Errorf("store: begin operator verifier registration: %w", err)
 	}
@@ -393,7 +394,7 @@ func (s *Store) ApplyOperatorVerifier(req OperatorVerifierCreateRequest) (Operat
 	return freshOperatorVerifierResult(receipt, secret), nil
 }
 
-func (s *Store) replayOperatorVerifier(tx *sql.Tx, req OperatorVerifierCreateRequest,
+func (s *Store) replayOperatorVerifier(tx dbTx, req OperatorVerifierCreateRequest,
 	audit AuditEntry, cached operatorCachedRequest,
 ) (OperatorVerifierCreateResult, error) {
 	if cached.Operation != operatorVerifierOperation || cached.Digest != req.RequestDigest {
@@ -468,7 +469,7 @@ func (s *Store) replayOperatorVerifier(tx *sql.Tx, req OperatorVerifierCreateReq
 	return result, nil
 }
 
-func (s *Store) rejectInvalidOperatorVerifierCache(tx *sql.Tx,
+func (s *Store) rejectInvalidOperatorVerifierCache(tx dbTx,
 	audit AuditEntry,
 ) (OperatorVerifierCreateResult, error) {
 	// Never copy a corrupt cached value into the returned error or the audit:
@@ -485,7 +486,7 @@ func (s *Store) rejectInvalidOperatorVerifierCache(tx *sql.Tx,
 		errors.New("store: operator verifier idempotency cache is invalid")
 }
 
-func validateOperatorVerifierRejectionEvidence(tx *sql.Tx, cached operatorCachedRequest,
+func validateOperatorVerifierRejectionEvidence(tx dbTx, cached operatorCachedRequest,
 	req OperatorVerifierCreateRequest,
 ) (bool, error) {
 	var count int
@@ -502,7 +503,7 @@ func validateOperatorVerifierRejectionEvidence(tx *sql.Tx, cached operatorCached
 	return count == 1, nil
 }
 
-func validateOperatorVerifierSuccessEvidence(tx *sql.Tx, receipt operatorVerifierReceipt,
+func validateOperatorVerifierSuccessEvidence(tx dbTx, receipt operatorVerifierReceipt,
 	req OperatorVerifierCreateRequest,
 ) (bool, error) {
 	var kind, displayName, failureDomain, createdAt, credentialHash string

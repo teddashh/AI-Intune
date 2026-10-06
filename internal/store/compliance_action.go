@@ -44,7 +44,7 @@ func (s *Store) complianceRunStart(machineID string, p compliance.Policy,
 	windowStart := now.Add(-p.MaxGrace())
 	lower := windowStart
 	var boundary sql.NullString
-	if err := s.db.QueryRow(`SELECT MAX(received_at) FROM machine_checkins
+	if err := s.rdb.QueryRow(`SELECT MAX(received_at) FROM machine_checkins
  WHERE machine_id = ? AND received_at < ?`, machineID, fmtTime(windowStart)).Scan(&boundary); err != nil {
 		return time.Time{}, false, fmt.Errorf("store: compliance window boundary: %w", err)
 	}
@@ -52,7 +52,7 @@ func (s *Store) complianceRunStart(machineID string, p compliance.Policy,
 		lower = parseTime(boundary.String)
 	}
 
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT received_at, agent_version, disk_free_bytes, disk_total_bytes, jobs_enabled, settings_digest
   FROM machine_checkins
  WHERE machine_id = ? AND received_at >= ?
@@ -144,7 +144,7 @@ func (s *Store) ComplianceBlocksJobs(machineID string) (bool, error) {
 // channel-scoped policy; the caller's own lookup decides whether it exists.
 func (s *Store) machineChannel(machineID string) string {
 	var channel sql.NullString
-	if err := s.db.QueryRow(`SELECT channel FROM machine_registry WHERE machine_id = ?`,
+	if err := s.rdb.QueryRow(`SELECT channel FROM machine_registry WHERE machine_id = ?`,
 		machineID).Scan(&channel); err != nil {
 		return ""
 	}

@@ -79,7 +79,7 @@ func (s *Store) MachineDataHoldings(machineID string) ([]MachineDataHolding, err
 		return nil, fmt.Errorf("store: machine data holdings 需要 machine id")
 	}
 	var exists bool
-	if err := s.db.QueryRow(
+	if err := s.rdb.QueryRow(
 		`SELECT EXISTS(SELECT 1 FROM machine_registry WHERE machine_id = ?)`,
 		machineID).Scan(&exists); err != nil {
 		return nil, err
@@ -101,7 +101,7 @@ func (s *Store) MachineDataHoldings(machineID string) ([]MachineDataHolding, err
 func (s *Store) machineDataHolding(table MachineDataTable, machineID string) (MachineDataHolding, error) {
 	holding := MachineDataHolding{Table: table.Table}
 	if table.TimeCol == "" {
-		err := s.db.QueryRow(
+		err := s.rdb.QueryRow(
 			fmt.Sprintf(`SELECT count(*) FROM %s WHERE machine_id = ?`, table.Table),
 			machineID).Scan(&holding.Rows)
 		return holding, err
@@ -109,7 +109,7 @@ func (s *Store) machineDataHolding(table MachineDataTable, machineID string) (Ma
 	// NULLIF 把空字串當成「沒記」，不是當成一個比任何時刻都早的時刻。少了它，
 	// min() 會回一個空字串，畫面上那格就變成一個看起來很久以前的空白。
 	var oldest, newest sql.NullString
-	err := s.db.QueryRow(fmt.Sprintf(`
+	err := s.rdb.QueryRow(fmt.Sprintf(`
 SELECT count(*),
        coalesce(sum(CASE WHEN %[1]s IS NOT NULL AND %[1]s <> '' THEN 1 ELSE 0 END), 0),
        min(NULLIF(%[1]s, '')),

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -39,7 +40,7 @@ type PendingToken struct {
 // 所以這裡只回一張。真的有多張時取最新的那一張。
 func (s *Store) PendingEnrollToken(machineID string, now time.Time) (*PendingToken, error) {
 	var displayName, createdAt, expiresAt string
-	err := s.db.QueryRow(`
+	err := s.rdb.QueryRow(`
 SELECT display_name, created_at, expires_at
   FROM enrollment_tokens
  WHERE used_by = ? AND used_at IS NULL
@@ -72,7 +73,7 @@ SELECT display_name, created_at, expires_at
 // 這跟 retire 不一樣 —— 收回一張憑證是安全的方向。
 func (s *Store) RevokeEnrollToken(machineID string) (string, error) {
 	var displayName string
-	err := s.db.QueryRow(`
+	err := s.rdb.QueryRow(`
 SELECT display_name FROM enrollment_tokens
  WHERE used_by = ? AND used_at IS NULL
  ORDER BY created_at DESC LIMIT 1`, machineID).Scan(&displayName)
@@ -82,8 +83,7 @@ SELECT display_name FROM enrollment_tokens
 	if err != nil {
 		return "", fmt.Errorf("store: revoke lookup: %w", err)
 	}
-	if _, err := s.db.Exec(
-		`DELETE FROM enrollment_tokens WHERE used_by = ? AND used_at IS NULL`,
+	if _, err := s.execWrite(context.Background(), "revoke_enroll_token", `DELETE FROM enrollment_tokens WHERE used_by = ? AND used_at IS NULL`,
 		machineID); err != nil {
 		return "", fmt.Errorf("store: revoke: %w", err)
 	}

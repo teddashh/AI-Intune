@@ -496,7 +496,7 @@ func ValidateExistingLedger(path string) error {
 	return nil
 }
 
-func validateAdditiveLedgerColumn(tx *sql.Tx, table string, expected ledgerColumnInvariant) error {
+func validateAdditiveLedgerColumn(tx dbTx, table string, expected ledgerColumnInvariant) error {
 	var objectType string
 	err := tx.QueryRow(`SELECT type FROM sqlite_schema WHERE name=? AND type IN ('table','view')`, table).Scan(&objectType)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -550,7 +550,7 @@ func parseLedgerColumns(spec string) ([]ledgerColumnInvariant, error) {
 	return columns, nil
 }
 
-func validateLedgerTable(tx *sql.Tx, expected ledgerTableInvariant) error {
+func validateLedgerTable(tx dbTx, expected ledgerTableInvariant) error {
 	var tableType string
 	var withoutRowID, strict int
 	if err := tx.QueryRow(`SELECT type,wr,strict FROM pragma_table_list WHERE schema='main' AND name=?`, expected.name).
@@ -677,7 +677,7 @@ func countPresentLedgerColumns(actual map[string]ledgerColumnInvariant, columns 
 	return count
 }
 
-func readLedgerColumns(tx *sql.Tx, table string) (map[string]ledgerColumnInvariant, error) {
+func readLedgerColumns(tx dbTx, table string) (map[string]ledgerColumnInvariant, error) {
 	rows, err := tx.Query(`SELECT name,type,"notnull",dflt_value,pk,hidden FROM pragma_table_xinfo(?)`, table)
 	if err != nil {
 		return nil, fmt.Errorf("store: identify ledger columns for %s: %w", table, err)
@@ -709,7 +709,7 @@ func compareLedgerColumn(table string, expected, actual ledgerColumnInvariant) e
 	return nil
 }
 
-func validateLedgerForeignKeys(tx *sql.Tx, expected ledgerTableInvariant) error {
+func validateLedgerForeignKeys(tx dbTx, expected ledgerTableInvariant) error {
 	rows, err := tx.Query(`SELECT "from","table","to",on_update,on_delete,match FROM pragma_foreign_key_list(?)`, expected.name)
 	if err != nil {
 		return fmt.Errorf("store: identify ledger foreign keys for %s: %w", expected.name, err)
@@ -749,7 +749,7 @@ type ledgerUniqueKeyInvariant struct {
 	columns string
 }
 
-func validateLedgerUniqueKeys(tx *sql.Tx, expected ledgerTableInvariant, requiredColumns []ledgerColumnInvariant) error {
+func validateLedgerUniqueKeys(tx dbTx, expected ledgerTableInvariant, requiredColumns []ledgerColumnInvariant) error {
 	rows, err := tx.Query(`SELECT name,origin,partial FROM pragma_index_list(?) WHERE "unique"=1`, expected.name)
 	if err != nil {
 		return fmt.Errorf("store: identify ledger unique keys for %s: %w", expected.name, err)
@@ -832,7 +832,7 @@ func validateLedgerUniqueKeys(tx *sql.Tx, expected ledgerTableInvariant, require
 	return nil
 }
 
-func readLedgerIndexColumns(tx *sql.Tx, index string) ([]ledgerIndexColumnInvariant, error) {
+func readLedgerIndexColumns(tx dbTx, index string) ([]ledgerIndexColumnInvariant, error) {
 	rows, err := tx.Query(`SELECT name,"desc",coll FROM pragma_index_xinfo(?) WHERE "key"=1 ORDER BY seqno`, index)
 	if err != nil {
 		return nil, fmt.Errorf("store: identify ledger index columns for %s: %w", index, err)

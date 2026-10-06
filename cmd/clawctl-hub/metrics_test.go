@@ -92,6 +92,11 @@ func TestMetricsAreParseableExposition(t *testing.T) {
 		// 但「沒宣告」跟「期望檔載入失敗」長得一樣，所以下面這一條是無條件的：
 		// 它讓 0 是一個看得見的數字。見 TestExpectationMetricsAppearOnlyWhenDeclared。
 		"clawctl_expectations_loaded",
+		"clawctl_notify_configured",
+		"clawctl_notify_consecutive_failures",
+		"clawctl_db_busy_total",
+		"clawctl_db_write_wait_seconds",
+		"clawctl_db_write_hold_seconds",
 	} {
 		if _, ok := fam[want]; !ok {
 			t.Errorf("整頁裡找不到 %s", want)
@@ -879,7 +884,9 @@ func emptyMetricsFixture(t *testing.T) (*http.ServeMux, *store.Store) {
 		t.Fatalf("publish workload policy: %v", err)
 	}
 	mux := http.NewServeMux()
-	(&hub{store: st}).machineAndPublicRoutes(mux)
+	h := &hub{store: st}
+	h.machineAndPublicRoutes(mux)
+	mux.HandleFunc("GET /metrics", h.handleMetrics)
 	return mux, st
 }
 
@@ -1046,15 +1053,35 @@ func parseExposition(t *testing.T, body string) map[string]*family {
 			t.Fatalf("第 %d 行解析失敗：%v\n  %s\n"+
 				"⚠ Prometheus 遇到這個是整頁丟掉，不是丟掉這一行。", lineNo, err, ln)
 		}
-		touch(s.name, lineNo)
-		f, ok := out[s.name]
+		famName := expositionFamily(out, s.name)
+		touch(famName, lineNo)
+		f, ok := out[famName]
 		if !ok {
 			t.Errorf("第 %d 行：%s 有 sample 卻沒有先宣告 # TYPE", lineNo, s.name)
-			f = get(s.name)
+			f = get(famName)
 		}
 		f.samples = append(f.samples, s)
 	}
 	return out
+}
+
+// expositionFamily keeps histogram _bucket, _sum and _count samples inside
+// the family that declared TYPE histogram. The sample name itself stays
+// intact so le labels remain part of the series identity.
+func expositionFamily(out map[string]*family, sampleName string) string {
+	if _, ok := out[sampleName]; ok {
+		return sampleName
+	}
+	for _, suffix := range []string{"_bucket", "_sum", "_count"} {
+		base, ok := strings.CutSuffix(sampleName, suffix)
+		if !ok {
+			continue
+		}
+		if f, exists := out[base]; exists && f.typ == "histogram" {
+			return base
+		}
+	}
+	return sampleName
 }
 
 func parseSample(ln string) (sample, error) {

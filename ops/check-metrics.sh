@@ -18,6 +18,9 @@
 #
 # 用法：ops/check-metrics.sh [URL]
 #   CLAWCTL_PY=/path/to/python   指定有裝 prometheus_client 的 python
+#
+# GET /metrics requires the operator view grant (docs/HUB-RELIABILITY.md). Run this from a tailnet node
+# that holds <prefix>-view. A managed machine receives 403. /healthz stays public.
 set -euo pipefail
 
 URL="${1:-http://100.64.200.2:8787/metrics}"

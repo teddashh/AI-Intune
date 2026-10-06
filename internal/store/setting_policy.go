@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -105,7 +106,7 @@ func (s *Store) ApplyOperatorSettingPolicy(req OperatorSettingPolicyRequest) (Op
 	audit.Subject = req.PolicyID
 	audit.Reason = req.Reason
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_setting_policy")
 	if err != nil {
 		return OperatorSettingPolicyResult{}, fmt.Errorf("store: begin setting policy: %w", err)
 	}
@@ -270,7 +271,7 @@ func (s *Store) ApplyOperatorSettingAssignment(req OperatorSettingAssignmentRequ
 		audit.MachineID = req.ScopeID
 	}
 
-	tx, err := s.db.Begin()
+	tx, err := s.beginWrite(context.Background(), "apply_operator_setting_assignment")
 	if err != nil {
 		return OperatorSettingAssignmentResult{}, fmt.Errorf("store: begin setting assignment: %w", err)
 	}

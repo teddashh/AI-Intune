@@ -33,7 +33,7 @@ type FleetToolRow struct {
 // 同一個 received_at 再比 measured_at、rowid。三層都要，因為
 // received_at 會撞在一起（同一秒兩批）。
 func (s *Store) FleetTools() ([]FleetToolRow, error) {
-	rows, err := s.db.Query(`
+	rows, err := s.rdb.Query(`
 SELECT o.machine_id, o.subject, o.payload, o.measured_at, o.received_at
   FROM observed_state o
  WHERE o.kind = ?

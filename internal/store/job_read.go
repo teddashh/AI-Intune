@@ -133,7 +133,7 @@ func (s *Store) ListJobReads(filter JobReadFilter) (JobReadPage, error) {
 	if err := validateJobReadFilter(filter); err != nil {
 		return JobReadPage{}, err
 	}
-	tx, err := s.db.BeginTx(context.Background(), nil)
+	tx, err := s.beginWrite(context.Background(), "list_job_reads")
 	if err != nil {
 		return JobReadPage{}, fmt.Errorf("store: begin job list read: %w", err)
 	}
@@ -458,7 +458,7 @@ func (s *Store) JobReadEvidence(jobID string, limit int) (JobReadEvidence, error
 	if err := validateJobReadDetailTarget(jobID, limit); err != nil {
 		return JobReadEvidence{}, err
 	}
-	tx, err := s.db.BeginTx(context.Background(), nil)
+	tx, err := s.beginWrite(context.Background(), "job_read_evidence")
 	if err != nil {
 		return JobReadEvidence{}, fmt.Errorf("store: begin job evidence read: %w", err)
 	}
@@ -521,7 +521,7 @@ func (s *Store) jobReadDetail(jobID string, evidenceLimit int) (JobReadDetail, e
 	if err := validateJobReadDetailTarget(jobID, evidenceLimit); err != nil {
 		return JobReadDetail{}, err
 	}
-	tx, err := s.db.BeginTx(context.Background(), nil)
+	tx, err := s.beginWrite(context.Background(), "job_read_detail")
 	if err != nil {
 		return JobReadDetail{}, fmt.Errorf("store: begin job detail read: %w", err)
 	}
@@ -577,7 +577,7 @@ const (
 	jobDesiredEvidence
 )
 
-func readJobItemAndDesired(tx *sql.Tx, jobID string, mode jobDesiredReadMode) (JobReadItem, DesiredState, error) {
+func readJobItemAndDesired(tx dbTx, jobID string, mode jobDesiredReadMode) (JobReadItem, DesiredState, error) {
 	item, err := scanJobReadItem(tx.QueryRow(`SELECT `+jobReadItemColumns+`
  FROM jobs j
  LEFT JOIN machine_registry m ON m.machine_id=j.machine_id
@@ -604,7 +604,7 @@ func readJobItemAndDesired(tx *sql.Tx, jobID string, mode jobDesiredReadMode) (J
 	return item, desired, nil
 }
 
-func readJobDesired(tx *sql.Tx, desiredID string, mode jobDesiredReadMode) (DesiredState, sql.NullString, error) {
+func readJobDesired(tx dbTx, desiredID string, mode jobDesiredReadMode) (DesiredState, sql.NullString, error) {
 	var desired DesiredState
 	var createdAt sql.NullString
 	if mode == jobDesiredEvidence {
@@ -621,7 +621,7 @@ func readJobDesired(tx *sql.Tx, desiredID string, mode jobDesiredReadMode) (Desi
 	return desired, createdAt, err
 }
 
-func readBoundedJobEvents(tx *sql.Tx, jobID, machineID string, limit, total int, includeRaw bool) ([]JobEvent, bool, error) {
+func readBoundedJobEvents(tx dbTx, jobID, machineID string, limit, total int, includeRaw bool) ([]JobEvent, bool, error) {
 	columns := `event_id,job_id,seq,
  CASE WHEN phase IN ('start','finish','rejected') THEN phase ELSE 'other' END,
  occurred_at,received_at,producer_kind,producer_id,evidence_role,authority,provenance_recorded`
@@ -680,7 +680,7 @@ func validJobEventProducer(event JobEvent, machineID string) bool {
 	}
 }
 
-func readBoundedJobVerifications(tx *sql.Tx, jobID, machineID, role string, limit, total int, includeRaw bool) ([]JobVerification, bool, error) {
+func readBoundedJobVerifications(tx dbTx, jobID, machineID, role string, limit, total int, includeRaw bool) ([]JobVerification, bool, error) {
 	columns := "verification_id,job_id,machine_id,exit_code,passed,verified_at," +
 		"producer_kind,producer_id,evidence_role,authority,provenance_recorded,received_at," +
 		"observed_digest,observed_version,verifier_id"
@@ -781,7 +781,7 @@ func reverseJobVerifications(items []JobVerification) {
 // row in one page. A row whose verifier row is missing is a corrupt ledger, not
 // a row to render anonymously: evidence that cannot name its producer is not
 // evidence.
-func readJobEvidenceVerifiers(tx *sql.Tx, rows []JobVerification) (map[string]Verifier, error) {
+func readJobEvidenceVerifiers(tx dbTx, rows []JobVerification) (map[string]Verifier, error) {
 	if len(rows) == 0 {
 		return nil, nil
 	}
@@ -809,7 +809,7 @@ func readJobEvidenceVerifiers(tx *sql.Tx, rows []JobVerification) (map[string]Ve
 // readIndependentVerdictCounts aggregates over every independent row of one
 // job, not over the bounded page. A verdict that only saw the first page could
 // call a job passed while an unrendered row reported a digest clash.
-func readIndependentVerdictCounts(tx *sql.Tx, jobID, artifactDigest, expectedVersion string,
+func readIndependentVerdictCounts(tx dbTx, jobID, artifactDigest, expectedVersion string,
 	terminalAt *time.Time,
 ) (IndependentVerdictCounts, error) {
 	terminal := ""
