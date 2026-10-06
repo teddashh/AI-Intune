@@ -26,15 +26,16 @@ type OperatorMachineAssignedUserRequest struct {
 }
 
 type OperatorMachineAssignedUserResult struct {
-	MachineID         string `json:"machine_id"`
-	DisplayName       string `json:"display_name"`
-	PreviousUserID    string `json:"previous_user_id"`
-	PreviousUserLogin string `json:"previous_user_login"`
-	UserID            string `json:"user_id"`
-	UserLogin         string `json:"user_login"`
-	Revision          int64  `json:"revision"`
-	Replayed          bool   `json:"replayed"`
-	Audited           bool   `json:"-"`
+	MachineID         string   `json:"machine_id"`
+	DisplayName       string   `json:"display_name"`
+	PreviousUserID    string   `json:"previous_user_id"`
+	PreviousUserLogin string   `json:"previous_user_login"`
+	UserID            string   `json:"user_id"`
+	UserLogin         string   `json:"user_login"`
+	Revision          int64    `json:"revision"`
+	Replayed          bool     `json:"replayed"`
+	Audited           bool     `json:"-"`
+	ClosedSessionIDs  []string `json:"-"`
 }
 
 // ApplyOperatorMachineAssignedUser is the transactional authority for which
@@ -220,6 +221,33 @@ func (s *Store) ApplyOperatorMachineAssignedUser(req OperatorMachineAssignedUser
 			return OperatorMachineAssignedUserResult{}, fmt.Errorf("store: operator machine assigned user revision changed during transaction")
 		}
 		result.Revision++
+		if currentID.String != targetID {
+			rows, err := tx.Query(`SELECT session_id FROM agent_sessions
+				 WHERE machine_id=? AND closed_at IS NULL ORDER BY session_id`, req.MachineID)
+			if err != nil {
+				return OperatorMachineAssignedUserResult{}, fmt.Errorf("store: list sessions after assigned user change: %w", err)
+			}
+			for rows.Next() {
+				var sessionID string
+				if err := rows.Scan(&sessionID); err != nil {
+					rows.Close()
+					return OperatorMachineAssignedUserResult{}, fmt.Errorf("store: scan session after assigned user change: %w", err)
+				}
+				result.ClosedSessionIDs = append(result.ClosedSessionIDs, sessionID)
+			}
+			if err := rows.Close(); err != nil {
+				return OperatorMachineAssignedUserResult{}, fmt.Errorf("store: close session rows after assigned user change: %w", err)
+			}
+			if err := rows.Err(); err != nil {
+				return OperatorMachineAssignedUserResult{}, fmt.Errorf("store: list sessions after assigned user change: %w", err)
+			}
+			if _, err := tx.Exec(`UPDATE agent_sessions
+				 SET closed_at=?,close_reason=?
+			 WHERE machine_id=? AND closed_at IS NULL`,
+				fmtTime(s.now()), AgentSessionCloseReasonAssignedUserChanged, req.MachineID); err != nil {
+				return OperatorMachineAssignedUserResult{}, fmt.Errorf("store: close sessions after assigned user change: %w", err)
+			}
+		}
 	}
 
 	raw, err := json.Marshal(result)

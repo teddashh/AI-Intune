@@ -39,6 +39,11 @@ func (h *hub) handleGetOperatorMachineActions(w http.ResponseWriter, r *http.Req
 		writeOperatorMachineActionsError(w, err, machineID)
 		return
 	}
+	assigned, err := service.MachineAssignedUser(machineID)
+	if err != nil {
+		writeOperatorMachineActionsError(w, err, machineID)
+		return
+	}
 	principal, _ := operatorauth.PrincipalFromContext(r.Context())
 	catalogue, err := service.MachineActions(operator.MachineActionsRequest{
 		Detail: detail, Connect: connect, Lifecycle: lifecycle,
@@ -46,6 +51,9 @@ func (h *hub) handleGetOperatorMachineActions(w http.ResponseWriter, r *http.Req
 			Operate: principal.Has(operatorauth.Operate),
 			Admin:   principal.Has(operatorauth.Admin),
 		},
+		OperatorTailnetUserID: principal.TailnetUserID,
+		AssignedUserID:        assigned.UserID,
+		TerminalLinked:        h.agentLinks.HasLink(machineID),
 	})
 	if err != nil {
 		writeOperatorMachineActionsError(w, err, machineID)

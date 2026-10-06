@@ -279,10 +279,10 @@ var dataCategoryShapes = map[DataCategoryKey]dataCategoryShape{
 	},
 	DataCategoryAudit: {
 		title:       "稽核記錄",
-		holds:       "每一次對這台機器的操作：動作、結果、來源位址、Tailscale 節點與使用者、權限判定。",
+		holds:       "每一次對這台機器的操作，以及獲准的即時 session：動作、結果、來源位址、Tailscale 節點與使用者、權限判定、開啟與關閉時刻。",
 		source:      DataSourceOperator,
-		tables:      []string{"audit_log"},
-		freeText:    "操作理由、請求細節與 User-Agent。⚠ 這一類存的是操作員的身分，不是機器的。",
+		tables:      []string{"audit_log", "agent_sessions"},
+		freeText:    "操作理由、session 關閉原因、請求細節與 User-Agent。⚠ 這一類存的是操作員的身分，不是機器的。",
 		path:        "/audit",
 		ringRows:    store.OperatorDenialAuditLimit,
 		ringSubject: "被拒絕的請求",

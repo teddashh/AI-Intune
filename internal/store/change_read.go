@@ -1495,6 +1495,11 @@ func (s *Store) setMachineLifecycle(machineID string, retired bool, now time.Tim
 	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
 		return fmt.Errorf("store: %s lifecycle changed concurrently", operation)
 	}
+	if retired {
+		if _, err := closeOpenAgentSessionsForMachine(tx, machineID, now, AgentSessionCloseReasonMachineRetired); err != nil {
+			return fmt.Errorf("store: close sessions after machine retirement: %w", err)
+		}
+	}
 	if _, err := tx.Exec(`
 INSERT INTO machine_registry_lifecycle_events(machine_id,event_type,occurred_at)
 VALUES(?,?,?)`, machineID, eventType, fmtTime(now)); err != nil {

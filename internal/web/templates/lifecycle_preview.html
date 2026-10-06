@@ -15,7 +15,7 @@
 </div>
 {{else}}
 <div class="caveat">
-  退役會停止 agent 驗證並移出管理分母；credential、ticket、channel 與歷史保留。
+  退役會停止 agent 驗證、結束套用時仍開啟的終端工作階段，並移出管理分母；credential、ticket、channel 與歷史保留。
 </div>
 {{end}}
 
@@ -29,6 +29,7 @@
   <tr><th>Agent credential</th><td>{{if $p.AgentCredentialPresent}}有保留的 bearer{{else}}沒有已啟用 bearer{{end}}；authentication {{if $p.AgentAuthenticationBefore}}允許{{else}}拒絕{{end}} → {{if $p.AgentAuthenticationAfter}}允許{{else}}拒絕{{end}}</td></tr>
   <tr><th>Pending enrollment</th><td>{{$p.PendingEnrollmentTokenCount}} 張（其中 {{$p.PendingEnrollmentTokenExpiredCount}} 張已過期）；redemption {{if $p.PendingEnrollmentRedemptionBefore}}允許{{else}}拒絕{{end}} → {{if $p.PendingEnrollmentRedemptionAfter}}允許{{else}}拒絕{{end}}</td></tr>
   <tr><th>非終態工作單</th><td>{{$p.ActiveJobCount}}</td></tr>
+  {{if eq $p.DesiredState "retired"}}<tr><th>開啟中的終端工作階段</th><td>{{$p.OpenAgentSessionCount}}</td></tr>{{end}}
   <tr><th>理由</th><td>{{$p.Reason}}</td></tr>
 </tbody></table>
 </div>

@@ -158,6 +158,28 @@ func (e *OperatorRequestError) Unwrap() error {
 		return ErrNotFound
 	case OperatorCodeMachineRetired:
 		return ErrMachineRetired
+	case OperatorCodeAgentSessionMachineNotFound:
+		return ErrNotFound
+	case OperatorCodeAgentSessionMachineRetired:
+		return ErrMachineRetired
+	case OperatorCodeAgentSessionMachineUnassigned:
+		return ErrAgentSessionMachineUnassigned
+	case OperatorCodeAgentSessionOperatorUserRequired:
+		return ErrAgentSessionOperatorUserRequired
+	case OperatorCodeAgentSessionAssignedUserMismatch:
+		return ErrAgentSessionAssignedUserMismatch
+	case OperatorCodeAgentSessionInvalid:
+		return ErrAgentSessionInvalid
+	case OperatorCodeAgentSessionExists:
+		return ErrAgentSessionExists
+	case OperatorCodeAgentSessionLimitReached:
+		return ErrAgentSessionLimitReached
+	case OperatorCodeAgentSessionNotFound:
+		return ErrAgentSessionNotFound
+	case OperatorCodeAgentSessionClosed:
+		return ErrAgentSessionClosed
+	case OperatorCodeAgentSessionCloseReasonRequired:
+		return ErrAgentSessionCloseReasonRequired
 	case OperatorCodeNeverObserved:
 		return ErrNeverObserved
 	case OperatorCodeMachineActiveJob:

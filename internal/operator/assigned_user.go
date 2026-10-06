@@ -113,6 +113,7 @@ func (s *Service) ChangeMachineAssignedUser(ctx context.Context, req MachineAssi
 				entry.Action, entry.Subject, auditErr)
 		}
 	}
+	s.endClosedTerminalSessions(err, result.ClosedSessionIDs)
 	return result, err
 }
 

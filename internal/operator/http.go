@@ -72,6 +72,10 @@ func HTTPError(err error) (status int, code, detail string) {
 	// 或把上限調高之後就會成立。回 400 會叫呼叫端去改一個沒有錯的 body。
 	case store.OperatorCodeEnrollmentLimitReached:
 		status = http.StatusConflict
+	// 一台機器的開啟中 session 已滿是機隊現在的事實，不是送錯的 request：
+	// 同一份 body 在關閉一個 session 之後就會成立。回 400 會叫呼叫端去改一個沒有錯的 body。
+	case store.OperatorCodeAgentSessionLimitReached:
+		status = http.StatusConflict
 	case store.OperatorCodePreconditionRequired:
 		status = http.StatusPreconditionRequired
 	case store.OperatorCodeMachineRenamePreviewRequired, store.OperatorCodeMachineRenameConfirmationMismatch,

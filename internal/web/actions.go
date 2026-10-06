@@ -92,6 +92,7 @@ func (s *Server) actionRoutes(mux *http.ServeMux) []string {
 		"POST /machines/{id}/notes",
 		"POST /machines/{id}/assigned-user-preview",
 		"POST /machines/{id}/assigned-user",
+		"POST /machines/{id}/terminals",
 		"POST /deployments/{id}/skip-failed-batch-preview",
 		"POST /deployments/{id}/skip-failed-batch",
 	}
@@ -147,8 +148,9 @@ func (s *Server) actionRoutes(mux *http.ServeMux) []string {
 	mux.HandleFunc(patterns[49], s.applyMachineNotes)
 	mux.HandleFunc(patterns[50], s.previewMachineAssignedUser)
 	mux.HandleFunc(patterns[51], s.doMachineAssignedUser)
-	mux.HandleFunc(patterns[52], s.previewDeploymentSkipFailedBatch)
-	mux.HandleFunc(patterns[53], s.applyDeploymentSkipFailedBatch)
+	mux.HandleFunc(patterns[52], s.openTerminal)
+	mux.HandleFunc(patterns[53], s.previewDeploymentSkipFailedBatch)
+	mux.HandleFunc(patterns[54], s.applyDeploymentSkipFailedBatch)
 	return patterns
 }
 
@@ -905,7 +907,7 @@ type lifecyclePreviewView struct {
 	AgentAuthenticationBefore, AgentAuthenticationAfter                 bool
 	PendingEnrollmentTokenCount, PendingEnrollmentTokenExpiredCount     int64
 	PendingEnrollmentRedemptionBefore, PendingEnrollmentRedemptionAfter bool
-	ActiveJobCount                                                      int64
+	ActiveJobCount, OpenAgentSessionCount                               int64
 	Blockers                                                            []store.MachineLifecycleBlocker
 }
 
@@ -961,7 +963,9 @@ func (s *Server) previewMachineLifecycle(w http.ResponseWriter, r *http.Request)
 			PendingEnrollmentTokenExpiredCount: preview.PendingEnrollmentTokenExpiredCount,
 			PendingEnrollmentRedemptionBefore:  preview.PendingEnrollmentRedemptionBefore,
 			PendingEnrollmentRedemptionAfter:   preview.PendingEnrollmentRedemptionAfter,
-			ActiveJobCount:                     preview.ActiveJobCount, Blockers: preview.Blockers,
+			ActiveJobCount:                     preview.ActiveJobCount,
+			OpenAgentSessionCount:              preview.OpenAgentSessionCount,
+			Blockers:                           preview.Blockers,
 		},
 	})
 }

@@ -45,6 +45,13 @@ func catalogueOf(t *testing.T, service *Service, machineID string, now time.Time
 	grant MachineActionGrant,
 ) MachineActionCatalogue {
 	t.Helper()
+	return catalogueWith(t, service, machineID, now, grant, "", "", false)
+}
+
+func catalogueWith(t *testing.T, service *Service, machineID string, now time.Time,
+	grant MachineActionGrant, callerID, assignedID string, linked bool,
+) MachineActionCatalogue {
+	t.Helper()
 	detail, err := service.MachineDetail(machineID, now)
 	if err != nil {
 		t.Fatal(err)
@@ -59,6 +66,7 @@ func catalogueOf(t *testing.T, service *Service, machineID string, now time.Time
 	}
 	catalogue, err := service.MachineActions(MachineActionsRequest{
 		Detail: detail, Connect: connect, Lifecycle: lifecycle, Granted: grant,
+		OperatorTailnetUserID: callerID, AssignedUserID: assignedID, TerminalLinked: linked,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -87,10 +95,11 @@ func absentIn(t *testing.T, catalogue MachineActionCatalogue, kind MachineAction
 }
 
 func TestMachineActionsSchemaVersionIncludesSurface(t *testing.T) {
-	if MachineActionsSchemaVersion != 4 {
-		t.Fatalf("machine actions schema=%d want=4", MachineActionsSchemaVersion)
+	if MachineActionsSchemaVersion != 5 {
+		t.Fatalf("machine actions schema=%d want=5", MachineActionsSchemaVersion)
 	}
-	if kinds := MachineActionKinds(); len(kinds) != 8 || kinds[2] != MachineActionRename || kinds[3] != MachineActionNotes {
+	if kinds := MachineActionKinds(); len(kinds) != 9 || kinds[1] != MachineActionOpenTerminal ||
+		kinds[3] != MachineActionRename || kinds[4] != MachineActionNotes {
 		t.Fatalf("machine action kinds=%v", kinds)
 	}
 }
@@ -179,7 +188,8 @@ func TestEveryBlockerSaysWhatIsTrueNow(t *testing.T) {
 		MachineActionBlockerRetired, MachineActionBlockerNeverReported,
 		MachineActionBlockerExecutionUnknown, MachineActionBlockerExecutionDisabled,
 		MachineActionBlockerActiveJobs, MachineActionBlockerNoPendingToken,
-		MachineActionBlockerNoConnectAddress,
+		MachineActionBlockerNoConnectAddress, MachineActionBlockerTerminalNotLinked,
+		MachineActionBlockerTerminalLimitReached,
 	}
 	// 只有「操作員得先去清掉」的 blocker 才有下一步；沒東西可撤銷不是待辦事項。
 	withoutNextStep := map[MachineActionBlocker]bool{MachineActionBlockerNoPendingToken: true}
@@ -413,6 +423,7 @@ func TestTheActionCatalogueSaysTheseExactWords(t *testing.T) {
 		effect string
 	}{
 		{MachineActionConnect, "連到這台的 BAT", "取得這台的 bat-server 位址並留下一筆動作紀錄；機器本身不變。"},
+		{MachineActionOpenTerminal, "開啟終端", "在這台機器上開一個終端，由你直接輸入。關閉或重新整理終端頁、或連線中斷，都會結束終端裡正在執行的工作。"},
 		{MachineActionDiagnosticNoop, "開一張診斷工作單", "開一張不改任何設定的工作單，走完整條派工與回報路徑。"},
 		{MachineActionRename, "重新命名", "改 Hub 名冊名稱與名稱型 expectations；machine ID、agent 與機器上的 hostname 都不變。"},
 		{MachineActionNotes, "編輯名冊備註", "更新 Hub 名冊中的人工備註；機器設定與 agent 不變。"},
@@ -452,6 +463,8 @@ func TestABlockedActionSaysTheseExactNextSteps(t *testing.T) {
 		{MachineActionBlockerExecutionDisabled, "在那台上開啟 agent 的工作單執行。"},
 		{MachineActionBlockerActiveJobs, "等未結束的工作單收尾，或到工作單頁處理掉。"},
 		{MachineActionBlockerNoConnectAddress, "等 agent 回報 bat-server 的監聽位址。"},
+		{MachineActionBlockerTerminalNotLinked, "確認這台機器上的 agent 與 bat-server 都在執行。"},
+		{MachineActionBlockerTerminalLimitReached, "先關閉其中一個終端的分頁。"},
 	}
 	for _, want := range wants {
 		t.Run(string(want.blocker), func(t *testing.T) {

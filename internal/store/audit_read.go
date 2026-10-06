@@ -51,6 +51,8 @@ var allAuditActions = [...]AuditAction{
 	AuditMachineProfileAssign,
 	AuditMachineChannel,
 	AuditMachineAssignedUser,
+	AuditAgentSessionOpen,
+	AuditAgentSessionClose,
 	AuditMachineLifecycle,
 	AuditMachineRename,
 	AuditMachineNotes,

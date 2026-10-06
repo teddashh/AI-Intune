@@ -59,6 +59,7 @@ func (h *hub) agentRoutes(mux *http.ServeMux) []string {
 		"POST /v1/observations:batch",
 		"GET /v1/jobs/next",
 		"GET /v1/agent/readiness",
+		"GET /v1/agent/terminal-link",
 		"POST /v1/jobs/{id}/claims",
 		"POST /v1/jobs/{id}/lease:renew",
 		"POST /v1/jobs/{id}/events",
@@ -76,17 +77,18 @@ func (h *hub) agentRoutes(mux *http.ServeMux) []string {
 	mux.HandleFunc(patterns[2], h.authed(h.handleObservations))
 	mux.HandleFunc(patterns[3], h.authed(h.handleNextJob))
 	mux.HandleFunc(patterns[4], h.authed(h.handleAgentReadiness))
-	mux.HandleFunc(patterns[5], h.authed(h.handleClaimJob))
-	mux.HandleFunc(patterns[6], h.authed(h.handleRenewJobLease))
-	mux.HandleFunc(patterns[7], h.authed(h.handleJobEvent))
-	mux.HandleFunc(patterns[8], h.authed(h.handleJobVerification))
-	mux.HandleFunc(patterns[9], h.authed(h.handleCompleteJob))
-	mux.HandleFunc(patterns[10], h.authed(h.handleRejectJob))
-	mux.HandleFunc(patterns[11], h.authed(h.handleCapabilities))
-	mux.HandleFunc(patterns[12], h.authed(h.handleGetArtifact))
+	mux.HandleFunc(patterns[5], h.authed(h.handleAgentTerminalLink))
+	mux.HandleFunc(patterns[6], h.authed(h.handleClaimJob))
+	mux.HandleFunc(patterns[7], h.authed(h.handleRenewJobLease))
+	mux.HandleFunc(patterns[8], h.authed(h.handleJobEvent))
+	mux.HandleFunc(patterns[9], h.authed(h.handleJobVerification))
+	mux.HandleFunc(patterns[10], h.authed(h.handleCompleteJob))
+	mux.HandleFunc(patterns[11], h.authed(h.handleRejectJob))
+	mux.HandleFunc(patterns[12], h.authed(h.handleCapabilities))
 	mux.HandleFunc(patterns[13], h.authed(h.handleGetArtifact))
-	mux.HandleFunc(patterns[14], h.verifierAuthed(h.handleIndependentVerification))
-	mux.HandleFunc(patterns[15], h.verifierAuthed(h.handleVerificationAssignments))
+	mux.HandleFunc(patterns[14], h.authed(h.handleGetArtifact))
+	mux.HandleFunc(patterns[15], h.verifierAuthed(h.handleIndependentVerification))
+	mux.HandleFunc(patterns[16], h.verifierAuthed(h.handleVerificationAssignments))
 	return patterns
 }
 
@@ -102,6 +104,12 @@ func (h *hub) agentRoutes(mux *http.ServeMux) []string {
 // artifact digest 在 activation 之前驗、只綁 tailnet。理由與**它們擋不住
 // 什麼**（被偷的 token 仍能塞假觀測；digest 擋不住 Hub 本身被拿下）
 // 寫在 docs/PHASE1.md §4，連同重新開這個決定的三個觸發條件。
+//
+// ⚠ 終端連線（GET /v1/agent/terminal-link）之後，被偷的 token 還能冒充
+// 這台機器的終端端點：開 session 仍要 operate 權限加指派使用者，但之後
+// 那台機器的 operator 按鍵與 PTY 輸出會經過持有這條連線的人。所以終端連線
+// 每 agentSessionRevocationInterval 重查一次 token（agentTerminalCredentialLoop），
+// 重新 enroll 或退役會在幾秒內切斷舊連線與它的 session。
 func (h *hub) authed(next func(w http.ResponseWriter, r *http.Request, machineID string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")

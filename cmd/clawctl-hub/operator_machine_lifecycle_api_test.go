@@ -55,6 +55,9 @@ func previewMachineLifecycleAPI(t *testing.T, f jobsFixture, desired string, rev
 		t.Fatalf("lifecycle preview=%d headers=%v body=%s", rec.Code, rec.Header(), rec.Body.String())
 	}
 	assertLifecycleResponseOmitsLegacyExpected(t, rec)
+	if !strings.Contains(rec.Body.String(), `"open_agent_session_count":`) {
+		t.Fatalf("lifecycle preview omitted open agent session count: %s", rec.Body.String())
+	}
 	result := decodeMachineLifecyclePreviewResult(t, rec)
 	if result.PreviewDigest == "" || !strings.HasPrefix(result.PreviewDigest, "sha256:") {
 		t.Fatalf("lifecycle preview lacks digest: %+v", result)
@@ -100,6 +103,9 @@ func TestOperatorMachineLifecycleGETPreviewApplyReplayAndRestore(t *testing.T) {
 		t.Fatalf("fresh lifecycle apply=%d headers=%v body=%s", fresh.Code, fresh.Header(), fresh.Body.String())
 	}
 	assertLifecycleResponseOmitsLegacyExpected(t, fresh)
+	if strings.Contains(fresh.Body.String(), `"open_agent_session_count"`) {
+		t.Fatalf("lifecycle apply exposed preview-time open agent session count: %s", fresh.Body.String())
+	}
 	retired := decodeMachineLifecycleApplyResult(t, fresh)
 	if retired.MachineID != f.machine.id || retired.PreviousState != "active" ||
 		retired.State != "retired" || retired.LifecycleRevision != 1 ||

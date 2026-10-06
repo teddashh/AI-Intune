@@ -54,6 +54,7 @@ func lifecycleClientTestPreview() MachineLifecyclePreviewResponse {
 		MachineID: "machine-1", DisplayName: "cnode",
 		CurrentState: store.MachineLifecycleActive, DesiredState: store.MachineLifecycleRetired,
 		LifecycleRevision: 4, PreviewedAt: lifecycleClientTestTime(),
+		OpenAgentSessionCount:  2,
 		MachineLifecycleImpact: lifecycleClientTestImpact(store.MachineLifecycleActive, store.MachineLifecycleRetired),
 		PreviewDigest:          lifecycleClientTestDigest(),
 	}
@@ -83,6 +84,13 @@ func lifecycleClientJSON(t *testing.T, value any) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func spliceJSONBeforeClosingBrace(canonical []byte, fragment string) []byte {
+	body := make([]byte, 0, len(canonical)+len(fragment))
+	body = append(body, canonical[:len(canonical)-1]...)
+	body = append(body, fragment...)
+	return append(body, canonical[len(canonical)-1])
 }
 
 func TestMachineLifecycleClientReadPreviewApplyAndReplay(t *testing.T) {
@@ -135,7 +143,8 @@ func TestMachineLifecycleClientReadPreviewApplyAndReplay(t *testing.T) {
 	}
 	requestPreview := MachineLifecyclePreviewRequest{DesiredState: store.MachineLifecycleRetired, ExpectedRevision: 4}
 	gotPreview, err := client.PreviewMachineLifecycle(t.Context(), "machine-1", requestPreview)
-	if err != nil || gotPreview.PreviewDigest != lifecycleClientTestDigest() || gotPreview.DenominatorDelta != -1 {
+	if err != nil || gotPreview.PreviewDigest != lifecycleClientTestDigest() || gotPreview.DenominatorDelta != -1 ||
+		gotPreview.OpenAgentSessionCount != 2 {
 		t.Fatalf("lifecycle preview=%+v err=%v", gotPreview, err)
 	}
 	requestApply := MachineLifecycleRequest{
@@ -151,6 +160,23 @@ func TestMachineLifecycleClientReadPreviewApplyAndReplay(t *testing.T) {
 	if err != nil || !replayed.Replayed || !replayed.Meta.IdempotencyReplayed ||
 		replayed.TransitionEventID == nil || *replayed.TransitionEventID != *fresh.TransitionEventID {
 		t.Fatalf("replayed lifecycle apply=%+v err=%v", replayed, err)
+	}
+}
+
+func TestDecodeMachineLifecyclePreviewRequiresOpenAgentSessionCount(t *testing.T) {
+	canonical := lifecycleClientJSON(t, lifecycleClientTestPreview())
+	decoded, err := decodeMachineLifecyclePreview(canonical)
+	if err != nil || decoded.OpenAgentSessionCount != 2 {
+		t.Fatalf("decode lifecycle preview=%+v err=%v", decoded, err)
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(canonical, &fields); err != nil {
+		t.Fatal(err)
+	}
+	delete(fields, "open_agent_session_count")
+	if _, err := decodeMachineLifecyclePreview(lifecycleClientJSON(t, fields)); err == nil {
+		t.Fatal("lifecycle preview decoder accepted missing open_agent_session_count")
 	}
 }
 
@@ -261,13 +287,28 @@ func TestMachineLifecycleClientRejectsContradictoryOrNoncanonicalSuccess(t *test
 		},
 		{
 			name: "read legacy expected field", method: http.MethodGet,
-			body: append(canonicalRead[:len(canonicalRead)-1], []byte(`,"expected":true}`)...),
+			body: spliceJSONBeforeClosingBrace(canonicalRead, `,"expected":true`),
 			etag: `"lifecycle-revision-4"`,
 			call: func(c *Client) error { _, err := c.MachineLifecycle(t.Context(), "machine-1"); return err },
 		},
 		{
 			name: "preview unknown field", method: http.MethodPost,
-			body: append(canonicalPreview[:len(canonicalPreview)-1], []byte(`,"secret":"leak"}`)...),
+			body: spliceJSONBeforeClosingBrace(canonicalPreview, `,"secret":"leak"`),
+			call: func(c *Client) error {
+				_, err := c.PreviewMachineLifecycle(t.Context(), "machine-1", previewRequest)
+				return err
+			},
+		},
+		{
+			name: "preview missing open agent session count", method: http.MethodPost,
+			body: func() []byte {
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal(canonicalPreview, &fields); err != nil {
+					t.Fatal(err)
+				}
+				delete(fields, "open_agent_session_count")
+				return lifecycleClientJSON(t, fields)
+			}(),
 			call: func(c *Client) error {
 				_, err := c.PreviewMachineLifecycle(t.Context(), "machine-1", previewRequest)
 				return err
@@ -275,7 +316,7 @@ func TestMachineLifecycleClientRejectsContradictoryOrNoncanonicalSuccess(t *test
 		},
 		{
 			name: "preview legacy expected field", method: http.MethodPost,
-			body: append(canonicalPreview[:len(canonicalPreview)-1], []byte(`,"expected":true}`)...),
+			body: spliceJSONBeforeClosingBrace(canonicalPreview, `,"expected":true`),
 			call: func(c *Client) error {
 				_, err := c.PreviewMachineLifecycle(t.Context(), "machine-1", previewRequest)
 				return err

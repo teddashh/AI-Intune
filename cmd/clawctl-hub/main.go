@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/agentlink"
 	"github.com/teddashh/AI-Intune/internal/blobstore"
 	"github.com/teddashh/AI-Intune/internal/expect"
 	"github.com/teddashh/AI-Intune/internal/ledgerlock"
@@ -42,8 +43,9 @@ import (
 var version = "dev"
 
 type hub struct {
-	store   *store.Store
-	tailnet *tailnet.Cache
+	store      *store.Store
+	tailnet    *tailnet.Cache
+	agentLinks *agentlink.Registry
 
 	// operatorService is the one artifact-aware control-plane service owned by
 	// this Hub process. The startup recovery worker and runtime queue worker must
@@ -481,6 +483,9 @@ func serve(argv []string) {
 		log.Fatalf("開不了資料庫 %s：%v", *dbPath, err)
 	}
 	defer st.Close()
+	if err := sweepOpenAgentSessionsOnStartup(st, log.Printf); err != nil {
+		log.Fatalf("無法確認 Hub 重新啟動後的終端狀態：Hub 不會開始服務；請修復資料庫後重新啟動：%v", err)
+	}
 
 	exps := loadExpectations(st)
 	// deployment CLI 是另一個 process，不會繼承 systemd EnvironmentFile。
@@ -503,7 +508,7 @@ func serve(argv []string) {
 		log.Printf("object storage: %s", objectBlobSummary)
 	}
 	h := &hub{
-		store: st, tailnet: tailnetCache, artifactsDir: artifactsDir, blobs: objectBlobs, operatorService: operatorService, publicURL: operatorBase,
+		store: st, tailnet: tailnetCache, agentLinks: agentlink.New(), artifactsDir: artifactsDir, blobs: objectBlobs, operatorService: operatorService, publicURL: operatorBase,
 		hubHost:   *hubHost,
 		startedAt: time.Now(), drillStamp: drillStampPath(*dbPath),
 		notifyCmd: *notify, reportAt: *reportAt, reportStamp: *stamp,
@@ -543,6 +548,8 @@ func serve(argv []string) {
 		log.Fatalf("樣板載入失敗：%v", err)
 	}
 	ui.SetDrillStampReader(func() (time.Time, bool) { return readDrillStamp(h.drillStamp) })
+	ui.SetTerminalLinks(h.agentLinks)
+	installOperatorTerminalSessionCloser(h)
 	ui.SetArtifactsDir(h.artifactsDir)
 	ui.SetTailnetCache(tailnetCache)
 	ui.SetOperatorService(operatorService)
@@ -604,6 +611,7 @@ func serve(argv []string) {
 	h.journalStart(time.Now())
 
 	go h.reconcileLoop(ctx)
+	go h.agentSessionRevocationLoop(ctx)
 	go h.jobReaperLoop(ctx)
 	go h.reportLoop(ctx)
 	go h.pruneLoop(ctx)
@@ -627,6 +635,7 @@ func serve(argv []string) {
 	h.journal(store.HubStopping, "收到停止訊號（kill -9 不會有這一筆，那是預期的）", time.Now())
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	h.agentLinks.CloseAll(agentlink.ReasonAgentDisconnected)
 	_ = srv.Shutdown(shutCtx)
 }
 

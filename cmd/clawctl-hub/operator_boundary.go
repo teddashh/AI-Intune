@@ -16,6 +16,7 @@ import (
 	"github.com/teddashh/AI-Intune/internal/operatorendpoint"
 	"github.com/teddashh/AI-Intune/internal/store"
 	"github.com/teddashh/AI-Intune/internal/web"
+	"github.com/teddashh/AI-Intune/internal/web/terminalassets"
 )
 
 // operatorRequestAuthorizer is deliberately narrower than the Tailscale
@@ -53,18 +54,20 @@ const (
 	// operatorSecurityLocked is the policy every operator response used
 	// before the terminal document existed: no script and no connection.
 	operatorSecurityLocked operatorSecurityProfile = iota + 1
+	// operatorSecurityTerminal is legal for the one terminal document. Its
+	// script-src names the hashed inline scripts, and its connect-src names
+	// the pinned authority. A second route must not claim it.
+	operatorSecurityTerminal
 )
 
 const (
+	operatorTerminalDocumentPattern = "GET /machines/{id}/terminals/{session}"
+	operatorTerminalSocketPattern   = "GET /machines/{id}/terminals/{session}/socket"
 	// The one unsafe route a view principal may call. It sets only the
 	// caller's own navigation-language cookie, and the cross-origin check
 	// still refuses a cross-site POST before the handler.
 	navigationLanguagePattern = "POST /preferences/navigation-language"
 )
-
-func operatorSecurityProfileValid(_ string, profile operatorSecurityProfile) bool {
-	return profile == operatorSecurityLocked
-}
 
 func operatorRepresentationValid(pattern string, representation operatorRepresentation) bool {
 	switch representation {
@@ -72,6 +75,17 @@ func operatorRepresentationValid(pattern string, representation operatorRepresen
 		return true
 	case operatorPlain:
 		return pattern == "GET /metrics"
+	default:
+		return false
+	}
+}
+
+func operatorSecurityProfileValid(pattern string, profile operatorSecurityProfile) bool {
+	switch profile {
+	case operatorSecurityLocked:
+		return pattern != operatorTerminalDocumentPattern
+	case operatorSecurityTerminal:
+		return pattern == operatorTerminalDocumentPattern
 	default:
 		return false
 	}
@@ -100,6 +114,7 @@ var nonOperatorRoutePolicies = map[string]nonOperatorRoutePolicy{
 	"POST /v1/observations:batch":      {nonOperatorAgent},
 	"GET /v1/jobs/next":                {nonOperatorAgent},
 	"GET /v1/agent/readiness":          {nonOperatorAgent},
+	"GET /v1/agent/terminal-link":      {nonOperatorAgent},
 	"POST /v1/jobs/{id}/claims":        {nonOperatorAgent},
 	"POST /v1/jobs/{id}/lease:renew":   {nonOperatorAgent},
 	"POST /v1/jobs/{id}/events":        {nonOperatorAgent},
@@ -118,11 +133,14 @@ var nonOperatorRoutePolicies = map[string]nonOperatorRoutePolicy{
 // A newly registered control route therefore fails closed until somebody
 // classifies that exact ServeMux pattern in review.
 var operatorRoutePolicies = map[string]operatorRoutePolicy{
-	"GET /metrics":                                                        {operatorauth.View, operatorPlain, operator.SourceKindWeb, operatorSecurityLocked},
-	"GET /{$}":                                                            {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
-	"POST /preferences/navigation-language":                               {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
-	"GET /machines":                                                       {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
-	"GET /machines/enrollment":                                            {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"GET /metrics":             {operatorauth.View, operatorPlain, operator.SourceKindWeb, operatorSecurityLocked},
+	"GET /{$}":                 {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	navigationLanguagePattern:  {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"GET /machines":            {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"GET /machines/enrollment": {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+
+	// Blank line: Go 1.24 and Go 1.27 gofmt only agree on this map when the
+	// short keys stay in their own alignment group. Do not remove it.
 	"POST /machines/enrollment/limit-preview":                             {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /machines/enrollment/limits":                                    {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"GET /downloads/agent/{arch}":                                         {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
@@ -296,12 +314,15 @@ var operatorRoutePolicies = map[string]operatorRoutePolicy{
 	"GET /tenant/maintenance/restore-drills/{id}":                         {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /tenant/maintenance/restore-drill-preview":                      {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /tenant/maintenance/restore-drills":                             {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /machines/{id}/terminals":                                       {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"PUT /v1/operator/machines/{id}/channel":                              {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
 	"PUT /v1/operator/machines/{id}/assigned-user":                        {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
 	"POST /v1/operator/enrollment-tokens/preview":                         {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
 	"POST /v1/operator/enrollment-tokens":                                 {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
 	"POST /v1/operator/machines/{id}/enrollment-token/revocation-preview": {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
 	"POST /v1/operator/machines/{id}/enrollment-token/revocations":        {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
+	operatorTerminalDocumentPattern:                                       {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal},
+	operatorTerminalSocketPattern:                                         {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /deployments/{id}/skip-failed-batch-preview":                    {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /deployments/{id}/skip-failed-batch":                            {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /v1/operator/deployments/{id}/skip-failed-batch-preview":        {operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
@@ -352,6 +373,10 @@ func newOperatorBoundary(next *http.ServeMux, authorizer operatorRequestAuthoriz
 	csrf.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, pattern := next.Handler(r)
 		policy := policies[pattern]
+		// A rejected mutation is not the terminal document. Force the locked
+		// policy here so this handler cannot attach the terminal profile to
+		// some other route, even if the matched policy claimed it.
+		b.writeSecurityHeaders(w, r, operatorSecurityLocked)
 		b.observeBoundaryDenial(r, pattern, policy, csrfDecisionCode,
 			"cross_origin_mutation")
 		writeOperatorBoundaryError(w, policy.Representation, http.StatusForbidden, csrfDecisionCode,
@@ -376,6 +401,7 @@ func newHubHTTPHandler(h *hub, ui *web.Server, authorizer operatorRequestAuthori
 	operatorMux := http.NewServeMux()
 	operatorRegistered := h.operatorRoutes(operatorMux)
 	operatorRegistered = append(operatorRegistered, ui.Routes(operatorMux)...)
+	operatorRegistered = append(operatorRegistered, registerOperatorTerminalSocket(operatorMux, h, authorizer, authority))
 	if err := validateRouteManifests(nonOperatorRegistered, nonOperatorRoutePolicies,
 		operatorRegistered, operatorRoutePolicies); err != nil {
 		return nil, err
@@ -714,9 +740,19 @@ func operatorPolicyAdmissible(pattern string, policy operatorRoutePolicy) bool {
 	return operatorSecurityProfileValid(pattern, policy.SecurityProfile)
 }
 
-// lockedOperatorContentSecurityPolicy is the policy every operator response
-// still sends. It names no script and no connection.
+// lockedOperatorContentSecurityPolicy is the policy every non-terminal
+// operator response still sends. It names no script and no connection.
 const lockedOperatorContentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+
+// The script hashes are fixed at process start from the embedded bytes. The
+// authority is the listener pinned on this boundary, so only the scheme is
+// chosen per request.
+var terminalDocumentCSPPrefix = "default-src 'none'; script-src '" +
+	terminalassets.XTermJSHash + "' '" +
+	terminalassets.FitJSHash + "' '" +
+	terminalassets.PageJSHash + "'; connect-src "
+
+const terminalDocumentCSPSuffix = "; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 func (b *operatorBoundary) writeSecurityHeaders(w http.ResponseWriter, r *http.Request, profile operatorSecurityProfile) {
 	header := w.Header()
@@ -727,8 +763,19 @@ func (b *operatorBoundary) writeSecurityHeaders(w http.ResponseWriter, r *http.R
 	header.Set("X-Frame-Options", "DENY")
 }
 
-func contentSecurityPolicy(operatorSecurityProfile, string, *http.Request) string {
-	return lockedOperatorContentSecurityPolicy
+func contentSecurityPolicy(profile operatorSecurityProfile, authority string, r *http.Request) string {
+	if profile != operatorSecurityTerminal {
+		return lockedOperatorContentSecurityPolicy
+	}
+	// ListenAndServe accepts plain HTTP, so r.TLS is nil and the page opens
+	// ws://. The page script chooses wss:// only when location.protocol is
+	// https:. Use the connection's TLS state, not a fixed scheme, so a TLS
+	// listener does not keep advertising a ws:// source the page will not open.
+	scheme := "ws"
+	if r != nil && r.TLS != nil {
+		scheme = "wss"
+	}
+	return terminalDocumentCSPPrefix + scheme + "://" + authority + terminalDocumentCSPSuffix
 }
 
 func writeOperatorBoundaryError(w http.ResponseWriter, representation operatorRepresentation, status int, code, detail string) {

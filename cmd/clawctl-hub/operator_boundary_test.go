@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
+	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"maps"
@@ -19,6 +22,7 @@ import (
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/store"
 	"github.com/teddashh/AI-Intune/internal/web"
+	"github.com/teddashh/AI-Intune/internal/web/terminalassets"
 )
 
 type boundaryAuthorizer struct {
@@ -110,39 +114,38 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 	operatorMux := http.NewServeMux()
 	operatorRegistered := h.operatorRoutes(operatorMux)
 	operatorRegistered = append(operatorRegistered, ui.Routes(operatorMux)...)
+	operatorRegistered = append(operatorRegistered, registerOperatorTerminalSocket(operatorMux, h, nil, testOperatorAuthority))
 	if err := validateRouteManifests(nonOperatorRegistered, nonOperatorRoutePolicies,
 		operatorRegistered, operatorRoutePolicies); err != nil {
 		t.Fatal(err)
 	}
-	if len(nonOperatorRegistered) != 17 || len(nonOperatorRoutePolicies) != 17 {
-		t.Fatalf("non-operator registered=%d policies=%d, want 17/17",
+	if len(nonOperatorRegistered) != 18 || len(nonOperatorRoutePolicies) != 18 {
+		t.Fatalf("non-operator registered=%d policies=%d, want 18/18",
 			len(nonOperatorRegistered), len(nonOperatorRoutePolicies))
 	}
-	if len(operatorRegistered) != 200 || len(operatorRoutePolicies) != 200 {
-		t.Fatalf("operator registered=%d policies=%d, want 200/200",
+	if len(operatorRegistered) != 203 || len(operatorRoutePolicies) != 203 {
+		t.Fatalf("operator registered=%d policies=%d, want 203/203",
 			len(operatorRegistered), len(operatorRoutePolicies))
 	}
-	if len(nonOperatorRegistered)+len(operatorRegistered) != 217 {
-		t.Fatalf("all registered routes=%d, want 217", len(nonOperatorRegistered)+len(operatorRegistered))
+	if len(nonOperatorRegistered)+len(operatorRegistered) != 221 {
+		t.Fatalf("all registered routes=%d, 預期 221", len(nonOperatorRegistered)+len(operatorRegistered))
 	}
 	counts := map[operatorauth.Permission]int{}
 	representations := map[operatorRepresentation]int{}
+	profiles := map[operatorSecurityProfile]int{}
 	for _, policy := range operatorRoutePolicies {
 		counts[policy.Permission]++
 		representations[policy.Representation]++
-	}
-	if counts[operatorauth.View] != 83 || counts[operatorauth.Operate] != 21 || counts[operatorauth.Admin] != 96 {
-		t.Fatalf("permission counts=%v, want view=83 operate=21 admin=96", counts)
-	}
-	if representations[operatorJSON] != 107 || representations[operatorHTML] != 92 || representations[operatorPlain] != 1 {
-		t.Fatalf("representation counts=%v, want JSON=107 HTML=92 plain=1", representations)
-	}
-	profiles := map[operatorSecurityProfile]int{}
-	for _, policy := range operatorRoutePolicies {
 		profiles[policy.SecurityProfile]++
 	}
-	if profiles[operatorSecurityLocked] != 200 || len(profiles) != 1 {
-		t.Fatalf("security profiles=%v, want locked=200", profiles)
+	if counts[operatorauth.View] != 83 || counts[operatorauth.Operate] != 24 || counts[operatorauth.Admin] != 96 {
+		t.Fatalf("permission counts=%v, want view=83 operate=24 admin=96", counts)
+	}
+	if representations[operatorJSON] != 107 || representations[operatorHTML] != 95 || representations[operatorPlain] != 1 {
+		t.Fatalf("representation counts=%v, want JSON=107 HTML=95 plain=1", representations)
+	}
+	if profiles[operatorSecurityLocked] != 202 || profiles[operatorSecurityTerminal] != 1 {
+		t.Fatalf("security profiles=%v, want locked=202 terminal=1", profiles)
 	}
 }
 
@@ -211,6 +214,16 @@ func TestOperatorRouteManifestValidationRejectsDrift(t *testing.T) {
 		{name: "unsafe mutation classified view", registered: []string{"POST /future"}, policies: map[string]operatorRoutePolicy{"POST /future": {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}}},
 		{name: "unknown method token", registered: []string{"BREW /future"}, policies: map[string]operatorRoutePolicy{"BREW /future": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}}},
 		{name: "operator API outside namespace", registered: valid, policies: map[string]operatorRoutePolicy{"GET /{$}": {operatorauth.View, operatorHTML, operator.SourceKindOperatorAPI, operatorSecurityLocked}}},
+		{name: "omitted security profile", registered: []string{"GET /future"}, policies: map[string]operatorRoutePolicy{
+			"GET /future": {Permission: operatorauth.View, Representation: operatorHTML, SourceKind: operator.SourceKindWeb},
+		}},
+		{name: "terminal document without its profile", registered: []string{operatorTerminalDocumentPattern}, policies: map[string]operatorRoutePolicy{
+			operatorTerminalDocumentPattern: {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+		}},
+		{name: "terminal profile on a second route", registered: []string{operatorTerminalDocumentPattern, "GET /other"}, policies: map[string]operatorRoutePolicy{
+			operatorTerminalDocumentPattern: {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal},
+			"GET /other":                    {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal},
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if err := validateOperatorRoutePolicies(test.registered, test.policies); err == nil {
@@ -238,6 +251,7 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 	probeMux := http.NewServeMux()
 	h.operatorRoutes(probeMux)
 	ui.Routes(probeMux)
+	registerOperatorTerminalSocket(probeMux, h, authorizer, testOperatorAuthority)
 	tests := []struct {
 		pattern string
 		path    string
@@ -330,20 +344,6 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		{"POST /v1/operator/deployments/{id}/retries", "/v1/operator/deployments/deployment-1/retries", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"POST /v1/operator/deployments/{id}/abandonment-preview", "/v1/operator/deployments/deployment-1/abandonment-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"POST /v1/operator/deployments/{id}/abandonments", "/v1/operator/deployments/deployment-1/abandonments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/deployments/{id}/skip-failed-batch-preview", "/v1/operator/deployments/deployment-1/skip-failed-batch-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/deployments/{id}/skip-failed-batches", "/v1/operator/deployments/deployment-1/skip-failed-batches", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/disk-clean/summaries", "/v1/operator/disk-clean/summaries", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/disk-clean/summaries/{id}", "/v1/operator/disk-clean/summaries/machine-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/profile-preview", "/v1/operator/disk-clean/profile-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/profiles", "/v1/operator/disk-clean/profiles", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/dry-run-preview", "/v1/operator/disk-clean/dry-run-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/dry-runs", "/v1/operator/disk-clean/dry-runs", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/canary-preview", "/v1/operator/disk-clean/canary-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/canaries", "/v1/operator/disk-clean/canaries", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/continuation-preview", "/v1/operator/disk-clean/continuation-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/continuations", "/v1/operator/disk-clean/continuations", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/abandonment-preview", "/v1/operator/disk-clean/abandonment-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/abandonments", "/v1/operator/disk-clean/abandonments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"GET /v1/operator/machines/{id}/channel", "/v1/operator/machines/machine-1/channel", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"GET /v1/operator/machines/{id}/assigned-user", "/v1/operator/machines/machine-1/assigned-user", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"GET /v1/operator/machines/{id}/enrollment-token", "/v1/operator/machines/machine-1/enrollment-token", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
@@ -386,8 +386,6 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		{"POST /deployments/{id}/retry", "/deployments/deploy-1/retry", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /deployments/{id}/abandon-preview", "/deployments/deploy-1/abandon-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /deployments/{id}/abandon", "/deployments/deploy-1/abandon", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /deployments/{id}/skip-failed-batch-preview", "/deployments/deploy-1/skip-failed-batch-preview", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /deployments/{id}/skip-failed-batch", "/deployments/deploy-1/skip-failed-batch", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /machines/{id}/retire", "/machines/machine-1/retire", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /machines/{id}/unretire", "/machines/machine-1/unretire", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /machines/{id}/lifecycle-preview", "/machines/machine-1/lifecycle-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
@@ -443,6 +441,25 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		{"POST /v1/operator/compliance-policies", "/v1/operator/compliance-policies", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"POST /v1/operator/compliance-assignments/preview", "/v1/operator/compliance-assignments/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"POST /v1/operator/compliance-assignments", "/v1/operator/compliance-assignments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"POST /machines/{id}/terminals", "/machines/machine-1/terminals", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
+		{operatorTerminalDocumentPattern, "/machines/machine-1/terminals/session-1", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal}},
+		{operatorTerminalSocketPattern, "/machines/machine-1/terminals/session-1/socket", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
+		{"POST /deployments/{id}/skip-failed-batch-preview", "/deployments/deploy-1/skip-failed-batch-preview", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
+		{"POST /deployments/{id}/skip-failed-batch", "/deployments/deploy-1/skip-failed-batch", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
+		{"POST /v1/operator/deployments/{id}/skip-failed-batch-preview", "/v1/operator/deployments/deployment-1/skip-failed-batch-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"POST /v1/operator/deployments/{id}/skip-failed-batches", "/v1/operator/deployments/deployment-1/skip-failed-batches", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"GET /v1/operator/disk-clean/summaries", "/v1/operator/disk-clean/summaries", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"GET /v1/operator/disk-clean/summaries/{id}", "/v1/operator/disk-clean/summaries/machine-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"POST /v1/operator/disk-clean/profile-preview", "/v1/operator/disk-clean/profile-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"POST /v1/operator/disk-clean/profiles", "/v1/operator/disk-clean/profiles", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"POST /v1/operator/disk-clean/dry-run-preview", "/v1/operator/disk-clean/dry-run-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"POST /v1/operator/disk-clean/dry-runs", "/v1/operator/disk-clean/dry-runs", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"POST /v1/operator/disk-clean/canary-preview", "/v1/operator/disk-clean/canary-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"POST /v1/operator/disk-clean/canaries", "/v1/operator/disk-clean/canaries", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"POST /v1/operator/disk-clean/continuation-preview", "/v1/operator/disk-clean/continuation-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"POST /v1/operator/disk-clean/continuations", "/v1/operator/disk-clean/continuations", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"POST /v1/operator/disk-clean/abandonment-preview", "/v1/operator/disk-clean/abandonment-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"POST /v1/operator/disk-clean/abandonments", "/v1/operator/disk-clean/abandonments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 	}
 	casePatterns := make(map[string]struct{}, len(tests))
 	for _, test := range tests {
@@ -488,6 +505,16 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		}
 		if test.policy.Representation == operatorHTML && !strings.HasPrefix(contentType, "text/html") {
 			t.Errorf("%s content-type=%q, want HTML", test.pattern, contentType)
+		}
+		if rec.Header().Get("Cache-Control") != "no-store" {
+			t.Errorf("%s Cache-Control=%q", test.pattern, rec.Header().Get("Cache-Control"))
+		}
+		wantCSP := lockedOperatorContentSecurityPolicy
+		if test.pattern == operatorTerminalDocumentPattern {
+			wantCSP = terminalDocumentCSPForTest(false)
+		}
+		if got := rec.Header().Get("Content-Security-Policy"); got != wantCSP {
+			t.Errorf("%s CSP=%q, want %q", test.pattern, got, wantCSP)
 		}
 		calls := authorizer.snapshotCalls()
 		if len(calls) != i+1 || calls[i] != test.policy.Permission {
@@ -890,6 +917,9 @@ func TestRegisteredButUnclassifiedRouteFailsClosed(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable || mutations != 0 || len(authorizer.snapshotCalls()) != 0 {
 		t.Fatalf("unclassified route did not fail closed: status=%d mutations=%d calls=%v",
 			rec.Code, mutations, authorizer.snapshotCalls())
+	}
+	if got := rec.Header().Get("Content-Security-Policy"); got != lockedOperatorContentSecurityPolicy {
+		t.Fatalf("unclassified route CSP=%q", got)
 	}
 	entries, err := st.Audit("", 10)
 	if err != nil || len(entries) != 1 || entries[0].Action != store.AuditOperatorDenied ||
@@ -1742,6 +1772,286 @@ func TestOperatorBoundarySecurityHeadersAndDestinationParsing(t *testing.T) {
 	}
 }
 
+func terminalDocumentCSPForTest(useTLS bool) string {
+	scheme := "ws"
+	if useTLS {
+		scheme = "wss"
+	}
+	return "default-src 'none'; script-src '" + terminalassets.XTermJSHash + "' '" +
+		terminalassets.FitJSHash + "' '" + terminalassets.PageJSHash +
+		"'; connect-src " + scheme + "://" + testOperatorAuthority +
+		"; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+}
+
+func TestOmittedSecurityProfileFailsClosedWithLockedCSP(t *testing.T) {
+	inner := http.NewServeMux()
+	inner.HandleFunc("GET /future", func(http.ResponseWriter, *http.Request) {
+		t.Fatal("omitted security profile reached the handler")
+	})
+	policies := map[string]operatorRoutePolicy{
+		"GET /future": {Permission: operatorauth.View, Representation: operatorHTML, SourceKind: operator.SourceKindWeb},
+	}
+	if err := validateOperatorRoutePolicies([]string{"GET /future"}, policies); err == nil {
+		t.Fatal("omitted security profile was accepted")
+	}
+	boundary := newOperatorBoundary(inner, &boundaryAuthorizer{allow: true}, boundaryStore(t), policies, testOperatorAuthority)
+	rec := httptest.NewRecorder()
+	req := newBoundaryRequest(http.MethodGet, "/future", nil)
+	req.RemoteAddr = "100.100.10.20:4321"
+	boundary.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Security-Policy"); got != lockedOperatorContentSecurityPolicy || strings.Contains(got, "script-src") {
+		t.Fatalf("omitted profile CSP=%q", got)
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("Cache-Control=%q", rec.Header().Get("Cache-Control"))
+	}
+}
+
+func TestCrossOriginDenialCannotUseTerminalSecurityProfile(t *testing.T) {
+	inner := http.NewServeMux()
+	inner.HandleFunc("POST /mutate", func(http.ResponseWriter, *http.Request) {
+		t.Fatal("cross-origin mutation reached the handler")
+	})
+	inner.HandleFunc(operatorTerminalDocumentPattern, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	policies := map[string]operatorRoutePolicy{
+		"POST /mutate":                  {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+		operatorTerminalDocumentPattern: {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal},
+	}
+	boundary := newOperatorBoundary(inner, &boundaryAuthorizer{allow: true}, boundaryStore(t), policies, testOperatorAuthority)
+	req := newBoundaryRequest(http.MethodPost, "/mutate", nil)
+	req.RemoteAddr = "100.100.10.20:4321"
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	req.Header.Set("Origin", "http://evil.example:8787")
+	rec := httptest.NewRecorder()
+	boundary.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	got := rec.Header().Get("Content-Security-Policy")
+	if got != lockedOperatorContentSecurityPolicy || strings.Contains(got, "script-src") || strings.Contains(got, terminalassets.PageJSHash) {
+		t.Fatalf("CSRF denial CSP=%q", got)
+	}
+
+	tlsReq := newBoundaryRequest(http.MethodGet, "/machines/machine-1/terminals/session-1", nil)
+	tlsReq.RemoteAddr = "100.100.10.20:4321"
+	tlsReq.TLS = &tls.ConnectionState{}
+	tlsRec := httptest.NewRecorder()
+	boundary.ServeHTTP(tlsRec, tlsReq)
+	if got := tlsRec.Header().Get("Content-Security-Policy"); got != terminalDocumentCSPForTest(true) {
+		t.Fatalf("tls terminal CSP=%q", got)
+	}
+}
+
+func TestRenderedTerminalDocumentUsesTerminalSecurityProfile(t *testing.T) {
+	st := boundaryStore(t)
+	now := time.Now().UTC()
+	token, err := st.CreateEnrollToken("samplehub1", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	machineID, _, err := st.RedeemEnrollToken(token, model.EnrollRequest{
+		SchemaVersion: model.SchemaVersion, EnrollToken: token,
+		Hostname: "samplehub1", OS: "linux", Arch: "amd64", UnixUser: "example-user",
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE machine_registry SET assigned_user_id=?, assigned_user_login=? WHERE machine_id=?`,
+		"42", "operator@example.com", machineID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.OpenAgentSession(store.OpenAgentSessionRequest{
+		SessionID: "session-1", MachineID: machineID,
+		OperatorTailnetUserID: "42", OperatorTailnetUserLogin: "operator@example.com",
+		IdempotencyKey: "open-session-1", RequestDigest: "sha256:session-1",
+		Audit: store.AuditEntry{SourceAddr: "local-test", AuthMethod: "test"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ui, err := web.New(st, "hub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := newHubHTTPHandler(&hub{store: st}, ui, &boundaryAuthorizer{allow: true}, testOperatorAuthority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := newBoundaryRequest(http.MethodGet, "/machines/"+machineID+"/terminals/session-1", nil)
+	req.RemoteAddr = "100.100.10.20:4321"
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "</html>") {
+		t.Fatalf("status=%d body tail=%s", rec.Code, tailOf(rec.Body.String()))
+	}
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("Cache-Control=%q", rec.Header().Get("Cache-Control"))
+	}
+	if got, want := rec.Header().Get("Content-Security-Policy"), terminalDocumentCSPForTest(false); got != want {
+		t.Fatalf("terminal CSP=%q\nwant %q", got, want)
+	}
+	scripts := scriptContents(rec.Body.String())
+	wantScripts := [][]byte{terminalassets.XTermJS, terminalassets.FitJS, terminalassets.PageJS}
+	wantHashes := []string{terminalassets.XTermJSHash, terminalassets.FitJSHash, terminalassets.PageJSHash}
+	if len(scripts) != len(wantScripts) {
+		t.Fatalf("script count=%d", len(scripts))
+	}
+	for i, script := range scripts {
+		sum := sha256.Sum256([]byte(script))
+		got := "sha256-" + base64.StdEncoding.EncodeToString(sum[:])
+		if got != wantHashes[i] || script != string(wantScripts[i]) {
+			t.Fatalf("script %d hash=%s want %s emitted=%d embedded=%d", i, got, wantHashes[i], len(script), len(wantScripts[i]))
+		}
+	}
+	dashboard := httptest.NewRecorder()
+	dashReq := newBoundaryRequest(http.MethodGet, "/", nil)
+	dashReq.RemoteAddr = "100.100.10.20:4321"
+	handler.ServeHTTP(dashboard, dashReq)
+	if got := dashboard.Header().Get("Content-Security-Policy"); got != lockedOperatorContentSecurityPolicy {
+		t.Fatalf("dashboard CSP=%q", got)
+	}
+}
+
+// connect-src 的 host 是呼叫端傳入的 authority，也就是啟動時釘住的 listener。
+// writeSecurityHeaders 比對 Host 之前就寫 CSP，所以 Host 不符的 421 仍帶著
+// 這個標頭。表格直接呼叫函式。最後一列走 ServeHTTP，呼叫點必須傳 boundary
+// 的 authority，而不是請求的 Host。
+func TestContentSecurityPolicyNamesPinnedListenerNotRequestHost(t *testing.T) {
+	const authority = "100.64.0.1:8443"
+	const hostileHost = "evil.example:80"
+	hostile := httptest.NewRequest(http.MethodGet, "http://"+hostileHost+"/machines/machine-1/terminals/session-1", nil)
+	hostile.Host = hostileHost
+	withTLS := hostile.Clone(hostile.Context())
+	withTLS.TLS = &tls.ConnectionState{}
+
+	scriptSrcBody := func(policy string) string {
+		const marker = "script-src "
+		start := strings.Index(policy, marker)
+		if start < 0 {
+			return ""
+		}
+		rest := policy[start+len(marker):]
+		end := strings.IndexByte(rest, ';')
+		if end < 0 {
+			return ""
+		}
+		return rest[:end]
+	}
+	wantScriptSrc := "'" + terminalassets.XTermJSHash + "' '" +
+		terminalassets.FitJSHash + "' '" + terminalassets.PageJSHash + "'"
+
+	tests := []struct {
+		name       string
+		profile    operatorSecurityProfile
+		req        *http.Request
+		connectSrc string
+		exact      string
+	}{
+		{
+			name:       "terminal http",
+			profile:    operatorSecurityTerminal,
+			req:        hostile,
+			connectSrc: "connect-src ws://" + authority + ";",
+		},
+		{
+			name:       "terminal tls",
+			profile:    operatorSecurityTerminal,
+			req:        withTLS,
+			connectSrc: "connect-src wss://" + authority + ";",
+		},
+		{
+			name:       "terminal nil request",
+			profile:    operatorSecurityTerminal,
+			req:        nil,
+			connectSrc: "connect-src ws://" + authority + ";",
+		},
+		{
+			name:    "locked",
+			profile: operatorSecurityLocked,
+			req:     hostile,
+			exact:   lockedOperatorContentSecurityPolicy,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := contentSecurityPolicy(test.profile, authority, test.req)
+			if test.exact != "" {
+				if got != test.exact {
+					t.Fatalf("CSP=%q, want %q", got, test.exact)
+				}
+				if strings.Contains(got, "evil.example") || strings.Contains(got, authority) {
+					t.Fatalf("locked CSP names a host: %q", got)
+				}
+				return
+			}
+			if !strings.Contains(got, test.connectSrc) {
+				t.Fatalf("CSP=%q, missing %q", got, test.connectSrc)
+			}
+			if strings.Contains(got, "evil.example") {
+				t.Fatalf("CSP names the request Host: %q", got)
+			}
+			if strings.Count(got, "script-src") != 1 || scriptSrcBody(got) != wantScriptSrc {
+				t.Fatalf("script-src=%q, want %q", scriptSrcBody(got), wantScriptSrc)
+			}
+		})
+	}
+
+	t.Run("writeSecurityHeaders on misdirected request", func(t *testing.T) {
+		inner := http.NewServeMux()
+		inner.HandleFunc(operatorTerminalDocumentPattern, func(http.ResponseWriter, *http.Request) {
+			t.Fatal("hostile Host reached the terminal document")
+		})
+		boundary := newOperatorBoundary(inner, &boundaryAuthorizer{allow: true}, nil,
+			map[string]operatorRoutePolicy{
+				operatorTerminalDocumentPattern: {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal},
+			}, authority)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "http://"+hostileHost+"/machines/machine-1/terminals/session-1", nil)
+		req.Host = hostileHost
+		req.RemoteAddr = "100.100.10.20:4321"
+		boundary.ServeHTTP(rec, req)
+		if rec.Code != http.StatusMisdirectedRequest {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		got := rec.Header().Get("Content-Security-Policy")
+		if !strings.Contains(got, "connect-src ws://"+authority+";") || strings.Contains(got, "evil.example") {
+			t.Fatalf("CSP=%q, missing %q", got, "connect-src ws://"+authority+";")
+		}
+		if strings.Count(got, "script-src") != 1 || scriptSrcBody(got) != wantScriptSrc {
+			t.Fatalf("script-src=%q, want %q", scriptSrcBody(got), wantScriptSrc)
+		}
+	})
+}
+
+func scriptContents(html string) []string {
+	var out []string
+	rest := html
+	for {
+		start := strings.Index(rest, "<script>")
+		if start < 0 {
+			return out
+		}
+		rest = rest[start+len("<script>"):]
+		end := strings.Index(rest, "</script>")
+		if end < 0 {
+			return out
+		}
+		out = append(out, rest[:end])
+		rest = rest[end+len("</script>"):]
+	}
+}
+
+func tailOf(body string) string {
+	if len(body) <= 400 {
+		return body
+	}
+	return body[len(body)-400:]
+}
+
 // Publishing or assigning a settings policy changes how every targeted machine
 // behaves, which puts it in the same class as channel assignment, machine
 // lifecycle and tailnet exceptions: admin, on every plane that offers it.
@@ -1873,33 +2183,6 @@ func TestDeploymentWritesCostTheirExactCapabilityOnEveryPlane(t *testing.T) {
 	}
 	if adminWrites != 8 {
 		t.Fatalf("實際掃到 %d 條 deployment admin 寫入路徑，預期 8 條；少一條表示有路徑改名沒被涵蓋，多一條表示有新的 deployment 寫入路徑進來", adminWrites)
-	}
-}
-
-func TestOmittedSecurityProfileFailsClosedWithLockedCSP(t *testing.T) {
-	inner := http.NewServeMux()
-	inner.HandleFunc("GET /future", func(http.ResponseWriter, *http.Request) {
-		t.Fatal("omitted security profile reached the handler")
-	})
-	policies := map[string]operatorRoutePolicy{
-		"GET /future": {Permission: operatorauth.View, Representation: operatorHTML, SourceKind: operator.SourceKindWeb},
-	}
-	if err := validateOperatorRoutePolicies([]string{"GET /future"}, policies); err == nil {
-		t.Fatal("omitted security profile was accepted")
-	}
-	boundary := newOperatorBoundary(inner, &boundaryAuthorizer{allow: true}, boundaryStore(t), policies, testOperatorAuthority)
-	rec := httptest.NewRecorder()
-	req := newBoundaryRequest(http.MethodGet, "/future", nil)
-	req.RemoteAddr = "100.100.10.20:4321"
-	boundary.ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Content-Security-Policy"); got != lockedOperatorContentSecurityPolicy || strings.Contains(got, "script-src") {
-		t.Fatalf("omitted profile CSP=%q", got)
-	}
-	if rec.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("Cache-Control=%q", rec.Header().Get("Cache-Control"))
 	}
 }
 

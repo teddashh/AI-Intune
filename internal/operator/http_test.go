@@ -23,6 +23,7 @@ func TestHTTPErrorKeepsAdaptersOnOneDomainMapping(t *testing.T) {
 		{store.OperatorCodeAgentExecutionUnknown, http.StatusConflict},
 		{store.OperatorCodeAgentExecutionDisabled, http.StatusConflict},
 		{store.OperatorCodeIdempotencyConflict, http.StatusConflict},
+		{store.OperatorCodeAgentSessionLimitReached, http.StatusConflict},
 		{store.OperatorCodePreconditionRequired, http.StatusPreconditionRequired},
 		{store.OperatorCodePreconditionFailed, http.StatusPreconditionFailed},
 		{store.OperatorCodePreviewRequired, http.StatusPreconditionRequired},

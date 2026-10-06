@@ -82,12 +82,13 @@ type OperatorMachineLifecyclePreviewRequest struct {
 }
 
 type OperatorMachineLifecyclePreviewResult struct {
-	MachineID         string                `json:"machine_id"`
-	DisplayName       string                `json:"display_name"`
-	CurrentState      MachineLifecycleState `json:"current_state"`
-	DesiredState      MachineLifecycleState `json:"desired_state"`
-	LifecycleRevision int64                 `json:"lifecycle_revision"`
-	PreviewedAt       time.Time             `json:"previewed_at"`
+	MachineID             string                `json:"machine_id"`
+	DisplayName           string                `json:"display_name"`
+	CurrentState          MachineLifecycleState `json:"current_state"`
+	DesiredState          MachineLifecycleState `json:"desired_state"`
+	LifecycleRevision     int64                 `json:"lifecycle_revision"`
+	PreviewedAt           time.Time             `json:"previewed_at"`
+	OpenAgentSessionCount int64                 `json:"open_agent_session_count"`
 	OperatorMachineLifecycleImpact
 	PreviewDigest string `json:"preview_digest"`
 }
@@ -116,9 +117,10 @@ type OperatorMachineLifecycleResult struct {
 	RetiredAt         *time.Time            `json:"retired_at,omitempty"`
 	AppliedAt         time.Time             `json:"applied_at"`
 	OperatorMachineLifecycleImpact
-	PreviewDigest string `json:"preview_digest"`
-	Replayed      bool   `json:"replayed"`
-	Audited       bool   `json:"-"`
+	PreviewDigest    string   `json:"preview_digest"`
+	Replayed         bool     `json:"replayed"`
+	Audited          bool     `json:"-"`
+	ClosedSessionIDs []string `json:"-"`
 }
 
 type operatorMachineLifecycleSnapshot struct {
@@ -136,6 +138,7 @@ type operatorMachineLifecycleSnapshot struct {
 	PendingExpiredCount   int64
 	pendingIdentityDigest string
 	ActiveJobCount        int64
+	OpenAgentSessionCount int64
 }
 
 type operatorMachineLifecycleReceipt struct {
@@ -217,6 +220,7 @@ func operatorMachineLifecyclePreview(snapshot operatorMachineLifecycleSnapshot, 
 		MachineID: snapshot.MachineID, DisplayName: snapshot.DisplayName,
 		CurrentState: snapshot.State, DesiredState: desired,
 		LifecycleRevision: snapshot.Revision, PreviewedAt: now,
+		OpenAgentSessionCount:          snapshot.OpenAgentSessionCount,
 		OperatorMachineLifecycleImpact: impact,
 	}
 	result.PreviewDigest = operatorMachineLifecyclePreviewDigest(snapshot, desired, impact)
@@ -260,12 +264,14 @@ func loadOperatorMachineLifecycleSnapshot(q operatorRowQuerier, machineID string
 	     AND `+enrollmentTicketExpiredPredicate+`),
 	 COALESCE((SELECT group_concat(e.token_hash || ':' || e.created_at || ':' || e.expires_at, '|' ORDER BY e.token_hash)
 	   FROM enrollment_tokens e WHERE e.used_by=m.machine_id AND e.used_at IS NULL),''),
-	 (SELECT COUNT(*) FROM jobs j WHERE j.machine_id=m.machine_id AND j.state NOT IN (?,?,?,?,?))
+	 (SELECT COUNT(*) FROM jobs j WHERE j.machine_id=m.machine_id AND j.state NOT IN (?,?,?,?,?)),
+	 (SELECT COUNT(*) FROM agent_sessions a WHERE a.machine_id=m.machine_id AND a.closed_at IS NULL)
 	 FROM machine_registry m WHERE m.machine_id=?`, fmtTime(now),
 		deploy.Succeeded, deploy.Failed, deploy.Rejected, deploy.LeaseExpired, deploy.ManualIntervention,
 		machineID).Scan(&snapshot.DisplayName, &createdRaw, &channel, &snapshot.ChannelRevision,
 		&snapshot.Revision, &retiredRaw, &agentHash, &snapshot.PendingCount,
-		&snapshot.PendingExpiredCount, &pendingIdentity, &snapshot.ActiveJobCount)
+		&snapshot.PendingExpiredCount, &pendingIdentity, &snapshot.ActiveJobCount,
+		&snapshot.OpenAgentSessionCount)
 	if errors.Is(err, sql.ErrNoRows) {
 		return snapshot, operatorError(OperatorCodeMachineNotFound, "找不到這台機器")
 	}
@@ -274,7 +280,8 @@ func loadOperatorMachineLifecycleSnapshot(q operatorRowQuerier, machineID string
 	}
 	if snapshot.DisplayName == "" || snapshot.Revision < 0 || snapshot.Revision >= MaxMachineLifecycleRevision ||
 		snapshot.ChannelRevision < 0 || snapshot.PendingCount < 0 || snapshot.PendingExpiredCount < 0 ||
-		snapshot.PendingExpiredCount > snapshot.PendingCount || snapshot.ActiveJobCount < 0 {
+		snapshot.PendingExpiredCount > snapshot.PendingCount || snapshot.ActiveJobCount < 0 ||
+		snapshot.OpenAgentSessionCount < 0 {
 		if snapshot.Revision < 0 || snapshot.Revision >= MaxMachineLifecycleRevision {
 			return snapshot, operatorError(OperatorCodeLifecycleRevisionLimit,
 				"lifecycle revision 已耗盡或損毀；拒絕讀取或變更")
@@ -476,6 +483,7 @@ func (s *Store) ApplyOperatorMachineLifecycle(req OperatorMachineLifecycleReques
 		OperatorMachineLifecycleImpact: preview.OperatorMachineLifecycleImpact,
 		PreviewDigest:                  req.PreviewDigest,
 	}
+	var closedSessionIDs []string
 	if changed {
 		var retiredValue any
 		if req.DesiredState == MachineLifecycleRetired {
@@ -497,6 +505,12 @@ func (s *Store) ApplyOperatorMachineLifecycle(req OperatorMachineLifecycleReques
 		}
 		if rows, err := res.RowsAffected(); err != nil || rows != 1 {
 			return OperatorMachineLifecycleResult{}, errors.New("store: machine lifecycle changed during transaction")
+		}
+		if req.DesiredState == MachineLifecycleRetired {
+			closedSessionIDs, err = closeOpenAgentSessionsForMachine(tx, req.MachineID, writerNow, AgentSessionCloseReasonMachineRetired)
+			if err != nil {
+				return OperatorMachineLifecycleResult{}, fmt.Errorf("store: close sessions after operator machine retirement: %w", err)
+			}
 		}
 		receipt.LifecycleRevision++
 		eventType := ChangeReadRegistered
@@ -535,6 +549,7 @@ func (s *Store) ApplyOperatorMachineLifecycle(req OperatorMachineLifecycleReques
 		return OperatorMachineLifecycleResult{}, fmt.Errorf("store: commit operator machine lifecycle: %w", err)
 	}
 	result := operatorMachineLifecycleResult(receipt)
+	result.ClosedSessionIDs = closedSessionIDs
 	result.Audited = true
 	return result, nil
 }

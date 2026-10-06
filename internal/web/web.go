@@ -32,6 +32,7 @@ import (
 	"github.com/teddashh/AI-Intune/internal/model"
 	"github.com/teddashh/AI-Intune/internal/operator"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
+	"github.com/teddashh/AI-Intune/internal/sessionid"
 	"github.com/teddashh/AI-Intune/internal/state"
 	"github.com/teddashh/AI-Intune/internal/store"
 	"github.com/teddashh/AI-Intune/internal/tailnet"
@@ -40,10 +41,18 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
+// TerminalLinks reports whether a machine's agent is attached.
+// A nil value means no machine is linked.
+type TerminalLinks interface {
+	HasLink(machineID string) bool
+}
+
 type Server struct {
 	// drill 讀還原演練的章；nil = 不看。用 SetDrillStampReader 塞。
 	drill DrillStampReader
-	store *store.Store
+	// terminalLinks 是機器有沒有連上 agent。nil = 沒有任何一台連著。
+	terminalLinks TerminalLinks
+	store         *store.Store
 	// operator is the canonical human-control read/use-case boundary. HTML is
 	// an adapter over the same machine queries used by JSON and the official
 	// CLI; it must not grow a second interpretation of fleet state.
@@ -179,6 +188,7 @@ func (s *Server) Routes(mux *http.ServeMux) []string {
 		"GET /reports/profile",
 		"GET /reports/profile.csv",
 		"POST /preferences/navigation-language",
+		"GET /machines/{id}/terminals/{session}",
 	}
 	mux.HandleFunc(patterns[0], s.dashboard)
 	mux.HandleFunc(patterns[1], s.dashboard)
@@ -218,6 +228,7 @@ func (s *Server) Routes(mux *http.ServeMux) []string {
 	mux.HandleFunc(patterns[35], s.profileReport)
 	mux.HandleFunc(patterns[36], s.profileReportCSV)
 	mux.HandleFunc(patterns[37], s.setNavigationLanguage)
+	mux.HandleFunc(patterns[38], s.terminalDocument)
 	// ⚠ 寫入路徑全部在 actions.go，而且全部是 POST。理由寫在那個檔案的開頭。
 	return append(patterns, s.actionRoutes(mux)...)
 }
@@ -432,6 +443,9 @@ type page struct {
 	// to this machine right now. It is nil when their capabilities cover none
 	// of them, so the page has no 動作 section at all rather than an empty one.
 	MachineActions *machineActionsView
+	// TerminalOpen is the 開啟終端 form. It is nil unless that action is
+	// available on this render; the session id and request key are minted here.
+	TerminalOpen *machineTerminalOpen
 	// MachineRenamePreview is populated only on the rename review page.
 	MachineRenamePreview *operator.MachineRenamePreviewResult
 	MachineRenameReason  string
@@ -465,6 +479,10 @@ type page struct {
 	AssignedUserDirectory tailnet.UserDirectory
 	AssignedUserPreview   *assignedUserPreview
 	LifecyclePreview      *lifecyclePreviewView
+	// Terminal is set only on the terminal document. The script bytes are
+	// typed so html/template emits them unchanged; their CSP hash is the hash
+	// of those same bytes.
+	Terminal terminalPage
 
 	// 工作單證據頁
 	Job     *jobPage
@@ -841,6 +859,10 @@ type DrillStampReader func() (time.Time, bool)
 // SetDrillStampReader 由 main 在起 Hub 的時候呼叫。
 func (s *Server) SetDrillStampReader(f DrillStampReader) { s.drill = f }
 
+// SetTerminalLinks installs the live agent attachment check.
+// A nil value means no machine is linked.
+func (s *Server) SetTerminalLinks(links TerminalLinks) { s.terminalLinks = links }
+
 func (s *Server) restoreDrill(now time.Time) restoreDrillNote {
 	n := restoreDrillNote{}
 	if s.drill == nil {
@@ -1199,9 +1221,13 @@ func (s *Server) machine(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, "讀取指派使用者失敗", err)
 		return
 	}
+	principal, _ := operatorauth.PrincipalFromContext(r.Context())
 	catalogue, err := s.operator.MachineActions(operator.MachineActionsRequest{
 		Detail: machine, Connect: connect, Lifecycle: lifecycle,
-		Granted: operator.MachineActionGrant{Operate: access.CanOperate, Admin: access.CanAdmin},
+		Granted:               operator.MachineActionGrant{Operate: access.CanOperate, Admin: access.CanAdmin},
+		OperatorTailnetUserID: principal.TailnetUserID,
+		AssignedUserID:        assignedUser.UserID,
+		TerminalLinked:        s.terminalLinks != nil && s.terminalLinks.HasLink(machine.Item.MachineID),
 	})
 	if err != nil {
 		s.fail(w, "讀取裝置動作目錄失敗", err)
@@ -1213,6 +1239,21 @@ func (s *Server) machine(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.fail(w, "產生 channel 表單 request key 失敗", err)
 		return
+	}
+	var terminalOpen *machineTerminalOpen
+	for _, action := range catalogue.Actions {
+		if action.Kind != operator.MachineActionOpenTerminal || !action.Available {
+			continue
+		}
+		terminalKey, keyErr := operator.NewIdempotencyKey("web-machine-terminal")
+		if keyErr != nil {
+			s.fail(w, "產生終端表單 request key 失敗", keyErr)
+			return
+		}
+		terminalOpen = &machineTerminalOpen{
+			Effect: action.Effect, SessionID: sessionid.New(), IdempotencyKey: terminalKey,
+		}
+		break
 	}
 	monitorInterval := time.Duration(machine.Monitor.CheckinIntervalSeconds) * time.Second
 	var monitorClockSkew *time.Duration
@@ -1233,6 +1274,7 @@ func (s *Server) machine(w http.ResponseWriter, r *http.Request) {
 		Machine:                 machineView,
 		MachineConnect:          &connect,
 		MachineActions:          machineActionsViewFrom(catalogue),
+		TerminalOpen:            terminalOpen,
 		PendingEnrollment:       pendingEnrollment,
 		MachineEvidence:         &evidence,
 		MachineJournals:         journals,

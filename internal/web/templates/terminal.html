@@ -1,0 +1,28 @@
+{{define "terminal.html"}}<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · AI-Intune</title>
+<style>{{.Terminal.CSS}}</style>
+<style>
+html,body{margin:0;height:100%;background:#1e1e1e;color:#f3f2f1}
+body{display:flex;flex-direction:column;min-height:100%;font:14px/1.45 "Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif}
+h1{margin:0;padding:12px 14px 0;font-size:16px;font-weight:600}
+#terminal-impact{margin:0;padding:8px 14px 0}
+#terminal-status{margin:0;padding:8px 14px 12px}
+#terminal-stage{flex:1;min-height:0}
+#terminal{height:100%}
+</style>
+</head>
+<body>
+<h1>{{.Machine.DisplayName}} 的終端</h1>
+<p id="terminal-impact">關閉或重新整理這一頁，或連線中斷，都會結束這個終端裡正在執行的工作。</p>
+<p id="terminal-status">正在連線這個終端，目前不能輸入。</p>
+<div id="terminal-stage"><div id="terminal"></div></div>
+<script>{{.Terminal.XTerm}}</script>
+<script>{{.Terminal.Fit}}</script>
+<script>{{.Terminal.Page}}</script>
+</body>
+</html>
+{{end}}

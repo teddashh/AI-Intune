@@ -40,6 +40,15 @@ func lifecycleRetryCoordinates(t *testing.T, stderr string) (key, revision, dige
 	return key, revision, digest
 }
 
+func insertMachineLifecycleCLIOpenSession(t *testing.T, st *store.Store, machineID, sessionID string) {
+	t.Helper()
+	if _, err := st.DB().Exec(`INSERT INTO agent_sessions
+		(session_id,machine_id,operator_tailnet_user_id,operator_tailnet_user_login,opened_at)
+		VALUES (?,?,?,?,?)`, sessionID, machineID, "cli-user", "cli@example.com", time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMachineLifecycleCLIHTTPReadPreviewApplyAndExplicitRetry(t *testing.T) {
 	f := observedOperatorFixture(t)
 	var mu sync.Mutex
@@ -73,6 +82,7 @@ func TestMachineLifecycleCLIHTTPReadPreviewApplyAndExplicitRetry(t *testing.T) {
 	if readErr.Len() != 0 {
 		t.Fatalf("HTTP lifecycle read wrote stderr: %q", readErr.String())
 	}
+	insertMachineLifecycleCLIOpenSession(t, f.store, f.machine.id, "cli-preview-open")
 
 	var previewOut, previewErr bytes.Buffer
 	if err := runMachineCommandWithDeps(t.Context(), []string{
@@ -81,7 +91,7 @@ func TestMachineLifecycleCLIHTTPReadPreviewApplyAndExplicitRetry(t *testing.T) {
 	}, &previewOut, &previewErr, deps); err != nil {
 		t.Fatalf("HTTP lifecycle preview: %v; stderr=%s", err, previewErr.String())
 	}
-	for _, want := range []string{"HTTP operator API preview", "active → retired", "lifecycle-revision=0", "blockers=none", "preview-digest=sha256:"} {
+	for _, want := range []string{"HTTP operator API preview", "active → retired", "lifecycle-revision=0", "terminal sessions currently open=1", "blockers=none", "preview-digest=sha256:"} {
 		if !strings.Contains(previewOut.String(), want) {
 			t.Fatalf("HTTP lifecycle preview missing %q: %q", want, previewOut.String())
 		}
@@ -101,6 +111,9 @@ func TestMachineLifecycleCLIHTTPReadPreviewApplyAndExplicitRetry(t *testing.T) {
 	}
 	if err := runMachineCommandWithDeps(t.Context(), applyArgs, &applyOut, &applyErr, deps); err != nil {
 		t.Fatalf("HTTP lifecycle apply: %v; stderr=%s", err, applyErr.String())
+	}
+	if !strings.Contains(applyErr.String(), "terminal sessions currently open: 1；retiring ends any still open when applied.") {
+		t.Fatalf("HTTP lifecycle apply omitted terminal-session notice: %q", applyErr.String())
 	}
 	for _, want := range []string{"HTTP operator API", "active → retired", "revision=1", "ETag=", "changed=true", "no-op=false", "replayed=false"} {
 		if !strings.Contains(applyOut.String(), want) {
@@ -166,6 +179,47 @@ func TestMachineLifecycleCLIHTTPReadPreviewApplyAndExplicitRetry(t *testing.T) {
 	}
 	if _, err := os.Stat(missingDB); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("HTTP lifecycle CLI touched fallback DB: %v", err)
+	}
+}
+
+func TestMachineLifecycleCLIApplyOmitsTerminalSessionNoticeForZeroCountAndRestore(t *testing.T) {
+	tests := []struct {
+		name    string
+		desired store.MachineLifecycleState
+		prepare func(*testing.T, *jobsFixture)
+	}{
+		{name: "retire with zero open sessions", desired: store.MachineLifecycleRetired},
+		{
+			name: "restore with an open session", desired: store.MachineLifecycleActive,
+			prepare: func(t *testing.T, f *jobsFixture) {
+				if err := f.store.RetireMachine(f.machine.id, time.Now().UTC()); err != nil {
+					t.Fatal(err)
+				}
+				insertMachineLifecycleCLIOpenSession(t, f.store, f.machine.id, "cli-restore-open")
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			f := observedOperatorFixture(t)
+			if test.prepare != nil {
+				test.prepare(t, &f)
+			}
+			server := httptest.NewServer(f.mux)
+			defer server.Close()
+			base, deps := machineHTTPTestDeps(t, server)
+			var out, errOut bytes.Buffer
+			err := runMachineCommandWithDeps(t.Context(), []string{
+				"lifecycle", "--hub-url", base, "--machine", f.machine.id,
+				"--set", string(test.desired), "--confirm-name", "cnode-operator", "--reason", "notice condition",
+			}, &out, &errOut, deps)
+			if err != nil {
+				t.Fatalf("lifecycle apply: %v; stderr=%s", err, errOut.String())
+			}
+			if strings.Contains(errOut.String(), "terminal sessions") {
+				t.Fatalf("lifecycle apply printed terminal-session notice: %q", errOut.String())
+			}
+		})
 	}
 }
 
@@ -615,6 +669,14 @@ func TestMachineLifecycleCLIHelpNamesSafeModesAndRetryContract(t *testing.T) {
 
 func TestMachineLifecycleCLIExplicitDirectDBIsFencedAndAudited(t *testing.T) {
 	dbPath, machineID := directDBFixture(t)
+	seed, err := openExisting(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	insertMachineLifecycleCLIOpenSession(t, seed, machineID, "direct-cli-open")
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
 	deps := productionMachineCommandDeps()
 	deps.discoverHubURL = func() (string, error) {
 		t.Fatal("explicit lifecycle --db invoked HTTP discovery")
@@ -666,6 +728,9 @@ func TestMachineLifecycleCLIExplicitDirectDBIsFencedAndAudited(t *testing.T) {
 		t.Fatalf("direct lifecycle output=%q", out.String())
 	}
 	key, revision, digest := lifecycleRetryCoordinates(t, errOut.String())
+	if !strings.Contains(errOut.String(), "terminal sessions currently open: 1；retiring ends any still open when applied.") {
+		t.Fatalf("direct lifecycle apply omitted terminal-session notice: %q", errOut.String())
+	}
 	if revision != "0" {
 		t.Fatalf("direct lifecycle retry revision=%q, want 0", revision)
 	}
