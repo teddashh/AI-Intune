@@ -404,7 +404,7 @@ func runRollbackCompatibility(argv []string, out io.Writer) error {
 
 func serve(argv []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("listen", serveListenDefault(), "監聽位址（literal Tailscale IP:port；預設讀 $CLAWCTL_LISTEN）")
+	addr := fs.String("listen", "127.0.0.1:8770", "監聽位址（literal Tailscale IP:port；未指定時讀 $CLAWCTL_LISTEN）")
 	dbPath := fs.String("db", defaultDB(), "SQLite 檔位置")
 	hubHost := fs.String("hub-host", hostname(), "這台的名字；用來偵測 Hub 是不是裝在它自己管的機器上")
 	notify := fs.String("notify-cmd", os.Getenv("CLAWCTL_NOTIFY_CMD"), "早報要餵給哪個指令（全文走 stdin）")
@@ -418,6 +418,11 @@ func serve(argv []string) {
 	operatorCapabilityPrefix := fs.String("operator-capability-prefix", os.Getenv("CLAWCTL_OPERATOR_CAPABILITY_PREFIX"),
 		"Tailscale grants app capability 前綴（<owned-domain>/cap/<application>）")
 	_ = fs.Parse(argv)
+	listenSet := false
+	fs.Visit(func(f *flag.Flag) { listenSet = listenSet || f.Name == "listen" })
+	if !listenSet {
+		*addr = serveListenDefault()
+	}
 	if err := rejectUnexpectedServePositionals(fs.Args()); err != nil {
 		log.Fatal(err)
 	}
