@@ -1095,7 +1095,7 @@ SELECT ?, job_id, machine_id, ?, ?, ?, ?, ?, ?, ?, ?, machine_id, ?, ?, 1, ?
 		return fmt.Errorf("store: count verification results: %w", err)
 	}
 	if n == 1 {
-		return nil
+		return s.projectMaintenanceSummary(jobID, machineID, stdoutExcerpt, receivedAt)
 	}
 	var existingCommand, existingStdout, existingStderr, existingVerifiedAt string
 	var existingExitCode int
@@ -1118,7 +1118,7 @@ SELECT command, exit_code, stdout_excerpt, stderr_excerpt, passed, verified_at
 		existingPassed != passed || existingVerifiedAt != fmtTime(verifiedAt) {
 		return fmt.Errorf("%w: job_id=%s rule_id=%s", ErrJobVerificationConflict, jobID, ruleID)
 	}
-	return nil
+	return s.projectMaintenanceSummary(jobID, machineID, stdoutExcerpt, receivedAt)
 }
 
 // MarkSucceededIfVerified 只依 Hub 已保存的驗證證據判定工作單成功。

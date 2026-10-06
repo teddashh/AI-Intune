@@ -26,7 +26,8 @@ func HTTPError(err error) (status int, code, detail string) {
 		store.OperatorCodeTailnetPeerNotFound, store.OperatorCodeVerifierNotFound,
 		store.OperatorCodeVerificationAssignmentJobNotFound,
 		store.OperatorCodeSettingPolicyNotFound,
-		store.OperatorCodeCompliancePolicyNotFound:
+		store.OperatorCodeCompliancePolicyNotFound,
+		store.OperatorCodeMaintenanceNotFound:
 		status = http.StatusNotFound
 	case store.OperatorCodeIdempotencyConflict, store.OperatorCodeNeverObserved,
 		store.OperatorCodeMachinePlatformUnknown, store.OperatorCodeMachinePlatformUnsupported,
@@ -60,6 +61,11 @@ func HTTPError(err error) (status int, code, detail string) {
 	// the same request becomes valid once the operator re-reads the policy.
 	case store.OperatorCodeSettingPolicyConflict, store.OperatorCodeCompliancePolicyConflict:
 		status = http.StatusConflict
+	case store.OperatorCodeMaintenanceRevisionConflict, store.OperatorCodeMaintenanceCapabilityUnconfirmed,
+		store.OperatorCodeMaintenanceDryRunRequired, store.OperatorCodeMaintenanceRolloutConflict:
+		status = http.StatusConflict
+	case store.OperatorCodeMaintenancePreviewStale:
+		status = http.StatusPreconditionFailed
 	case store.OperatorCodeRetentionNothingToPrune:
 		status = http.StatusConflict
 	// 到註冊上限是機隊現在的事實，不是送錯的 request：同一份 body 在退役一台、

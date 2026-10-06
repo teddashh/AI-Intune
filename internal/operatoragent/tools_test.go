@@ -121,6 +121,54 @@ func (f *fakeHub) AssignMachineProfile(context.Context, string, operator.Machine
 	f.call("AssignMachineProfile")
 	return operator.MachineProfileAssignmentResult{}, nil
 }
+func (f *fakeHub) DiskCleanSummaries(context.Context) ([]store.DiskCleanSummaryView, error) {
+	f.call("DiskCleanSummaries")
+	return []store.DiskCleanSummaryView{}, nil
+}
+func (f *fakeHub) DiskCleanSummary(context.Context, string) (store.DiskCleanSummaryView, error) {
+	f.call("DiskCleanSummary")
+	return store.DiskCleanSummaryView{}, nil
+}
+func (f *fakeHub) PreviewDiskCleanProfile(context.Context, operatorclient.DiskCleanProfilePreviewRequest) (store.DiskCleanProfilePreview, error) {
+	f.call("PreviewDiskCleanProfile")
+	return store.DiskCleanProfilePreview{PreviewDigest: testDigest}, nil
+}
+func (f *fakeHub) PublishDiskCleanProfile(context.Context, string, operatorclient.DiskCleanProfilePublishRequest) (store.DiskCleanProfileResult, error) {
+	f.call("PublishDiskCleanProfile")
+	return store.DiskCleanProfileResult{}, nil
+}
+func (f *fakeHub) PreviewDiskCleanDryRun(context.Context, operatorclient.DiskCleanTargetPreviewRequest) (store.DiskCleanDryRunPreview, error) {
+	f.call("PreviewDiskCleanDryRun")
+	return store.DiskCleanDryRunPreview{PreviewDigest: testDigest}, nil
+}
+func (f *fakeHub) ApplyDiskCleanDryRun(context.Context, string, operatorclient.DiskCleanTargetApplyRequest) (store.DiskCleanDryRunResult, error) {
+	f.call("ApplyDiskCleanDryRun")
+	return store.DiskCleanDryRunResult{}, nil
+}
+func (f *fakeHub) PreviewDiskCleanCanary(context.Context, operatorclient.DiskCleanCanaryPreviewRequest) (store.DiskCleanCanaryPreview, error) {
+	f.call("PreviewDiskCleanCanary")
+	return store.DiskCleanCanaryPreview{}, nil
+}
+func (f *fakeHub) ApplyDiskCleanCanary(context.Context, string, operatorclient.DiskCleanCanaryApplyRequest) (store.DiskCleanCanaryResult, error) {
+	f.call("ApplyDiskCleanCanary")
+	return store.DiskCleanCanaryResult{}, nil
+}
+func (f *fakeHub) PreviewDiskCleanContinue(context.Context, string) (store.DiskCleanControlPreview, error) {
+	f.call("PreviewDiskCleanContinue")
+	return store.DiskCleanControlPreview{PreviewDigest: testDigest}, nil
+}
+func (f *fakeHub) ContinueDiskClean(context.Context, string, operatorclient.DiskCleanControlApplyRequest) (store.DiskCleanRolloutResult, error) {
+	f.call("ContinueDiskClean")
+	return store.DiskCleanRolloutResult{}, nil
+}
+func (f *fakeHub) PreviewDiskCleanAbandon(context.Context, string) (store.DiskCleanControlPreview, error) {
+	f.call("PreviewDiskCleanAbandon")
+	return store.DiskCleanControlPreview{PreviewDigest: testDigest}, nil
+}
+func (f *fakeHub) AbandonDiskClean(context.Context, string, operatorclient.DiskCleanControlApplyRequest) (store.DiskCleanRolloutResult, error) {
+	f.call("AbandonDiskClean")
+	return store.DiskCleanRolloutResult{}, nil
+}
 
 func statePtr(state deploy.JobState) *deploy.JobState { return &state }
 func strPtr(value string) *string                     { return &value }
@@ -158,6 +206,11 @@ func TestWriteToolsDoNotCallHubWithoutPreviewDigest(t *testing.T) {
 		{"deployment_abandon", `{"deployment_id":"dep-1","expected_control_revision":4,"expected_opened_batch":1,"confirm_deployment_id":"dep-1","reason":"stop","idempotency_key":"k1"}`, "preview_digest_required"},
 		{"profile_assignment_apply", `{"machine_id":"m-a","profile_id":"p","profile_revision":1,"confirm_display_name":"alpha","reason":"assign","idempotency_key":"k1"}`, "preview_digest_required"},
 		{"rollout_apply", `{"channel":"canary","version":"2026.9.8","artifact_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","confirm_channel":"canary","confirm_version":"2026.9.8","reason":"ship","idempotency_key":"k1"}`, "preview_digest_required"},
+		{"disk_clean_profile_publish", `{"scope_type":"channel","scope_id":"stable","profile":{"schema_version":1,"scope":"user","dry_run":true,"categories":["user_tmp"],"tmp_age_days":7,"attention_pct":90,"mount":"/"},"expected_revision":0,"confirm_scope_id":"stable","reason":"publish","idempotency_key":"k1"}`, "preview_digest_required"},
+		{"disk_clean_dry_run_apply", `{"scope_type":"channel","scope_id":"stable","revision":1,"machine_ids":["machine-1"],"confirm_scope_id":"stable","reason":"preview run","idempotency_key":"k1"}`, "preview_digest_required"},
+		{"disk_clean_canary_apply", `{"scope_type":"channel","scope_id":"stable","revision":1,"machine_ids":["machine-1"],"canary_machine_id":"machine-1","confirm_scope_id":"stable","reason":"canary","idempotency_key":"k1"}`, "preview_digest_required"},
+		{"disk_clean_continue_apply", `{"rollout_id":"roll-1","expected_control_revision":1,"expected_opened_batch":1,"confirm_rollout_id":"roll-1","reason":"continue","idempotency_key":"k1"}`, "preview_digest_required"},
+		{"disk_clean_abandon_apply", `{"rollout_id":"roll-1","expected_control_revision":1,"expected_opened_batch":1,"confirm_rollout_id":"roll-1","reason":"stop","idempotency_key":"k1"}`, "preview_digest_required"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.tool, func(t *testing.T) {
@@ -170,6 +223,48 @@ func TestWriteToolsDoNotCallHubWithoutPreviewDigest(t *testing.T) {
 				t.Fatalf("Hub calls = %v", f.calls)
 			}
 		})
+	}
+}
+
+func TestDiskCleanContinueRequiresExpectedRevisionBeforeHub(t *testing.T) {
+	f := &fakeHub{}
+	svc := &Service{Hub: f}
+	raw := `{"rollout_id":"roll-1","preview_digest":"` + testDigest + `","confirm_rollout_id":"roll-1","reason":"go","idempotency_key":"k1"}`
+	_, err := svc.Call(context.Background(), "disk_clean_continue_apply", json.RawMessage(raw))
+	if callErr(t, err).Code != "expected_revision_required" || len(f.calls) != 0 {
+		t.Fatalf("err=%v calls=%v", err, f.calls)
+	}
+}
+
+func TestDiskCleanToolsAreClosedAndFailClosed(t *testing.T) {
+	f := &fakeHub{}
+	svc := &Service{Hub: f}
+	seen := map[string]Tool{}
+	for _, tool := range Tools() {
+		if !strings.HasPrefix(tool.Name, "disk_clean_") {
+			continue
+		}
+		seen[tool.Name] = tool
+		if tool.InputSchema["additionalProperties"] != false {
+			t.Fatalf("%s accepts unknown fields", tool.Name)
+		}
+		if tool.Annotations == nil || tool.Annotations.OpenWorldHint {
+			t.Fatalf("%s annotations = %+v", tool.Name, tool.Annotations)
+		}
+	}
+	if len(seen) != 12 {
+		t.Fatalf("disk-clean tools = %d", len(seen))
+	}
+	raw := `{"scope_type":"channel","scope_id":"stable","revision":1,"machine_ids":["machine-1"],"preview_digest":"` + testDigest + `","confirm_scope_id":"stable","reason":"preview run","idempotency_key":"k1"}`
+	if _, err := svc.Call(context.Background(), "disk_clean_dry_run_apply", json.RawMessage(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if !f.called("ApplyDiskCleanDryRun") {
+		t.Fatalf("calls = %v", f.calls)
+	}
+	f.calls = nil
+	if _, err := svc.Call(context.Background(), "disk_clean_dry_run_apply", json.RawMessage(raw[:len(raw)-1]+`,"shell":"rm"}`)); callErr(t, err).Code != "invalid_arguments" || len(f.calls) != 0 {
+		t.Fatalf("err=%v calls=%v", err, f.calls)
 	}
 }
 

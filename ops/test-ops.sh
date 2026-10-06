@@ -1933,6 +1933,12 @@ nsend netfail
 expect '送出時網路不通 exit 1' 1 has 'curl 失敗（exit 6）'
 expect '送出失敗時永遠不准印出 token' 1 lacks "$SEKRIT"
 
+if bash "$ROOT/ops/test-disk-clean.sh"; then
+	passed=$((passed + 1))
+else
+	failed=$((failed + 1))
+fi
+
 printf '\n通過：%s，失敗：%s\n' "$passed" "$failed"
 if [ "$failed" -ne 0 ]; then
 	exit 1

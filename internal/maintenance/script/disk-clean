@@ -1,0 +1,477 @@
+#!/usr/bin/env bash
+# fleet-disk-clean — config-driven, allowlist-only disk housekeeping.
+# Hardening 1.1.0: BUILTIN_PROTECT is always merged into PROTECT_NAMES and into
+# tmpfiles exclusions. A config file can add names; it cannot remove these.
+# A TMP_GLOB_RULE whose basename glob would match protected data is refused.
+# One script, two scopes:
+#   --scope user  (default; no sudo)  -> ~/.config/disk-clean/config,  ~/.local/state/disk-clean/last.json
+#   --scope root  (run by root timer) -> /etc/disk-clean/root.conf,    /var/lib/disk-clean/last.json
+# Every category is a separate function  cat_<name>  that can be run alone with  --only <name>.
+# Summary schema: fleet-disk-clean/v1 (see README.md). Never deletes outside its allowlist.
+set -uo pipefail
+VERSION="1.1.0"
+SCHEMA="fleet-disk-clean/v1"
+export LC_ALL=C
+export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+
+SCOPE=user; ACTION=daily; FORCE_DRY=0; ONLY=""; CONF_ARG=""
+usage() { echo "usage: disk-clean [--scope user|root] [--dry-run] [--weekly] [--only CATEGORY] [--conf FILE] [--print-config]"; }
+PRINT_CONFIG=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --scope) SCOPE="$2"; shift ;;
+    --dry-run) FORCE_DRY=1 ;;
+    --weekly) ACTION=weekly ;;
+    --only) ONLY="$2"; shift ;;
+    --conf) CONF_ARG="$2"; shift ;;
+    --print-config) PRINT_CONFIG=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; usage >&2; exit 2 ;;
+  esac; shift
+done
+
+# Names the config cannot shrink. Matched case-insensitively, like protected_name.
+BUILTIN_PROTECT='systemd-private-* .X11-unix .ICE-unix .XIM-unix .font-unix .Test-unix tmux-* ssh-* snap-private-tmp *openclaw* *clawctl* *claude* *codex* *grok* *agy* *cursor* *vscode* *backup* *snapshot* *.sock *.pid *.lock .X*-lock .s.PGSQL* *odoo* *postgres* pulse-* dbus-* gpg-* krb5cc* hsperfdata_*'
+PROTECT_PATS=()
+
+merge_protect() {
+  local -a builtin extra merged
+  local tok low
+  declare -A seen=()
+  builtin=(); extra=(); merged=()
+  read -r -a builtin <<< "$BUILTIN_PROTECT"
+  if [ -n "${CFG[PROTECT_NAMES]+x}" ] && [ -n "${CFG[PROTECT_NAMES]}" ]; then
+    # read -a does not glob-expand; a token cannot become a find option.
+    read -r -a extra <<< "${CFG[PROTECT_NAMES]}"
+  fi
+  for tok in "${builtin[@]}" "${extra[@]}"; do
+    case "$tok" in
+      -*) echo "config: PROTECT_NAMES token refused: $tok" >&2; exit 2 ;;
+    esac
+    [[ "$tok" =~ ^[A-Za-z0-9.*_?-]+$ ]] || { echo "config: PROTECT_NAMES token refused: $tok" >&2; exit 2; }
+    low="${tok,,}"
+    [ -n "${seen[$low]+x}" ] && continue
+    seen[$low]=1
+    merged+=("$low")
+  done
+  PROTECT_PATS=("${merged[@]}")
+  CFG[PROTECT_NAMES]="${merged[*]}"
+}
+
+# True when the rule basename glob would match a protected name or a concrete
+# sample of a protected pattern (* removed, * -> x, * -> xx). Same rule as the Hub.
+rule_targets_protected() {
+  local base="${1##*/}" pat sample
+  base="${base,,}"
+  [ -z "$base" ] || [ "$base" = "." ] || [ "$base" = ".." ] && return 0
+  for pat in "${PROTECT_PATS[@]}"; do
+    [[ "$pat" == $base ]] && return 0
+    [[ "$base" == $pat ]] && return 0
+    sample="${pat//\*/}"
+    [ -n "$sample" ] && [[ "$sample" == $base ]] && return 0
+    sample="${pat//\*/x}"
+    [[ "$sample" == $base ]] && return 0
+    sample="${pat//\*/xx}"
+    [[ "$sample" == $base ]] && return 0
+  done
+  return 1
+}
+
+# ---------------------------------------------------------------- config ----
+declare -A CFG
+if [ "$SCOPE" = root ]; then
+  [ "$(id -u)" -eq 0 ] || { echo "--scope root must run as root" >&2; exit 2; }
+  CONF="${CONF_ARG:-/etc/disk-clean/root.conf}"; STATE="${DISK_CLEAN_STATE:-/var/lib/disk-clean}"
+  CFG=( [DRY_RUN]=1 [APPLY_CATEGORIES]="" [CATEGORIES]="tmpfiles journal pkg_cache docker snap"
+        [TMP_AGE_DAYS]=10 [VARTMP_AGE_DAYS]=14
+        [JOURNAL_MAX_SIZE]=500M [JOURNAL_MAX_AGE]=30d
+        [DOCKER_UNTIL_HOURS]=168 [ATTENTION_PCT]=90 [MOUNT]=/ [PROTECT_NAMES]='' )
+elif [ "$SCOPE" = user ]; then
+  CONF="${CONF_ARG:-$HOME/.config/disk-clean/config}"; STATE="${DISK_CLEAN_STATE:-$HOME/.local/state/disk-clean}"
+  CFG=( [DRY_RUN]=1 [APPLY_CATEGORIES]="" [CATEGORIES]="user_tmp tmp_globs npm_cache pip_cache uv_cache go_cache thumbnails trash"
+        [TMP_DIRS]="/tmp /var/tmp" [TMP_AGE_DAYS]=7
+        [NPM_CLEAN_MIN_MB]=1024 [PIP_CACHE_MIN_MB]=200 [GO_CACHE_MIN_MB]=5120
+        [THUMB_AGE_DAYS]=30 [TRASH_AGE_DAYS]=30
+        [ATTENTION_PCT]=90 [MOUNT]=/ [DU_TIMEOUT_S]=180 [DU_DEPTH]=2
+        [REPORT_PATHS]='$HOME/clawctl-backups $HOME/openclaw-backups $HOME/backups $HOME/*backup* $HOME/*snapshot*'
+        [PROTECT_NAMES]=''
+        [ROOT_SUMMARY]=/var/lib/disk-clean/last.json [ROOT_MAX_AGE_H]=48 )
+else echo "bad --scope" >&2; exit 2; fi
+TMP_GLOB_RULES=()
+UNKNOWN_KEYS=""
+if [ -f "$CONF" ]; then
+  # Parse-only (never sourced): KEY=VALUE, optional quotes, # comments.
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"; line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"
+    [ -z "$line" ] && continue
+    [[ "$line" =~ ^([A-Z_]+)=(.*)$ ]] || { UNKNOWN_KEYS+=" badline"; continue; }
+    k="${BASH_REMATCH[1]}"; v="${BASH_REMATCH[2]}"
+    [[ "$v" =~ ^\"(.*)\"$ ]] && v="${BASH_REMATCH[1]}"; [[ "$v" =~ ^\'(.*)\'$ ]] && v="${BASH_REMATCH[1]}"
+    if [ "$k" = TMP_GLOB_RULE ] && [ "$SCOPE" = user ]; then TMP_GLOB_RULES+=("$v")
+    elif [ -n "${CFG[$k]+x}" ]; then CFG[$k]="$v"
+    else UNKNOWN_KEYS+=" $k"; fi
+  done < "$CONF"
+  CONFIG_DIGEST="sha256:$(sha256sum "$CONF" | cut -d' ' -f1)"
+else
+  CONFIG_DIGEST="none(defaults)"
+fi
+for k in TMP_AGE_DAYS VARTMP_AGE_DAYS NPM_CLEAN_MIN_MB PIP_CACHE_MIN_MB GO_CACHE_MIN_MB THUMB_AGE_DAYS TRASH_AGE_DAYS ATTENTION_PCT DU_TIMEOUT_S DU_DEPTH ROOT_MAX_AGE_H DOCKER_UNTIL_HOURS; do
+  [ -n "${CFG[$k]+x}" ] || continue
+  [[ "${CFG[$k]}" =~ ^[0-9]+$ ]] || { echo "config: $k must be an integer" >&2; exit 2; }
+done
+# Hard floors: tmp items touched in the last 24h are never eligible.
+for k in TMP_AGE_DAYS VARTMP_AGE_DAYS; do [ -n "${CFG[$k]+x}" ] && [ "${CFG[$k]}" -lt 1 ] && CFG[$k]=1; done
+merge_protect
+DRY=1; [ "${CFG[DRY_RUN]}" = 0 ] && DRY=0; [ "$FORCE_DRY" = 1 ] && DRY=1
+GLOBAL_DRY=$DRY
+# APPLY_CATEGORIES: categories that run for real even while DRY_RUN=1 (staged approval). --dry-run still wins.
+cat_dry() { local c; [ "$FORCE_DRY" = 1 ] && { echo 1; return; }; [ "$GLOBAL_DRY" = 0 ] && { echo 0; return; }
+  for c in ${CFG[APPLY_CATEGORIES]}; do [ "$c" = "$1" ] && { echo 0; return; }; done; echo 1; }
+MODE=$([ $DRY = 1 ] && echo dry-run || echo apply)
+if [ $DRY = 1 ] && [ "$FORCE_DRY" = 0 ] && [ -n "${CFG[APPLY_CATEGORIES]// /}" ]; then MODE=mixed; fi
+if [ $PRINT_CONFIG = 1 ]; then for k in "${!CFG[@]}"; do echo "$k=${CFG[$k]}"; done | sort; printf 'TMP_GLOB_RULE=%s\n' "${TMP_GLOB_RULES[@]}"; echo "digest=$CONFIG_DIGEST mode=$MODE"; exit 0; fi
+
+# ------------------------------------------------------------- plumbing ----
+mkdir -p "$STATE/log" || exit 1
+exec 9>"$STATE/lock"; flock -n 9 || { echo "another disk-clean run holds $STATE/lock" >&2; exit 3; }
+LOG="$STATE/log/$(date +%F).log"
+RESULTS="$(mktemp)"; trap 'rm -f "$RESULTS" "$OPEN_PATHS"' EXIT
+OPEN_PATHS="$(mktemp)"
+log() { printf '%s [%s %s] %s\n' "$(date -Is)" "$SCOPE" "$MODE" "$*" >> "$LOG"; }
+# record CATEGORY STATUS CANDIDATE_BYTES FREED_BYTES ITEMS NOTE
+record() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "${3:-0}" "${4:-0}" "${5:-0}" "${6:-}" "$([ "$DRY" = 1 ] && echo dry-run || echo apply)" | tr -d '\r' >> "$RESULTS"; log "category=$1 mode=$([ "$DRY" = 1 ] && echo dry-run || echo apply) status=$2 candidate=${3:-0} freed=${4:-0} items=${5:-0} ${6:-}"; }
+sizeof() { du -sxB1 -- "$1" 2>/dev/null | cut -f1 | grep -E '^[0-9]+$' || echo 0; }
+mb() { echo $(( $1 * 1024 * 1024 )); }
+disk_pct() { df -P -- "${CFG[MOUNT]}" | awk 'NR==2{gsub("%","",$5); print $5}'; }
+disk_avail() { df -PB1 -- "${CFG[MOUNT]}" | awk 'NR==2{print $4}'; }
+# Snapshot every cwd/root/fd target of processes we can see (own processes as user, all as root).
+snapshot_open_paths() {
+  : > "$OPEN_PATHS"
+  for p in /proc/[0-9]*; do
+    for l in "$p/cwd" "$p/root" "$p"/fd/*; do readlink "$l" 2>/dev/null; done
+  done | grep '^/' | sort -u > "$OPEN_PATHS"
+}
+in_use() { awk -v d="$1" 'index($0, d"/")==1 || $0==d {f=1; exit} END{exit !f}' "$OPEN_PATHS"; }
+has_recent() { # path days -> true if path or anything below was modified within <days> days
+  local cut; cut=$(( $(date +%s) - $2 * 86400 ))
+  [ -n "$(find "$1" -xdev -newermt "@$cut" -print -quit 2>/dev/null)" ]
+}
+newest_mtime() { find "$1" -xdev -printf '%T@\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1; }
+# PROTECT_PATS was filled by merge_protect; do not reset it here.
+protected_name() {
+  local n="${1,,}" pat
+  for pat in "${PROTECT_PATS[@]}"; do [[ "$n" == $pat ]] && return 0; done
+  return 1
+}
+in_tmp_dirs() { local d; for d in ${CFG[TMP_DIRS]}; do [ "$1" = "$d" ] && return 0; done; return 1; }
+# The only rm in user scope. Refuses anything not directly inside a TMP_DIR or not owned by us.
+rm_tmp_entry() {
+  local p="$1" parent; parent="$(dirname -- "$p")"
+  in_tmp_dirs "$parent" || { log "REFUSE outside tmp dirs: $p"; return 1; }
+  [ "$(stat -c %u -- "$p" 2>/dev/null)" = "$(id -u)" ] || { log "REFUSE not owned: $p"; return 1; }
+  rm -rf --one-file-system -- "$p" 2>/dev/null
+  if [ -e "$p" ]; then  # test fixtures often leave read-only dirs; make our own tree writable and retry once
+    find "$p" -xdev -type d -user "$(id -u)" ! -perm -u+w -exec chmod u+w {} + 2>/dev/null
+    rm -rf --one-file-system -- "$p" 2>>"$LOG"
+  fi
+  [ ! -e "$p" ]
+}
+
+# ------------------------------------------------- user-scope categories ----
+cat_user_tmp() {  # user-owned top-level entries in TMP_DIRS untouched for TMP_AGE_DAYS
+  local age=${CFG[TMP_AGE_DAYS]} cand=0 freed=0 n=0 skipped=0 d e sz typ mt cut
+  cut=$(( $(date +%s) - age*86400 ))
+  for d in ${CFG[TMP_DIRS]}; do
+    [ -d "$d" ] || continue
+    # one find pass gives type, mtime and size; plain files need no further subprocesses
+    while IFS=$'\t' read -r -d '' typ mt sz e; do
+      case "$typ" in s|p) continue ;; esac
+      protected_name "${e##*/}" && continue
+      tmp_glob_owned "$e" && continue
+      [ "${mt%.*}" -ge "$cut" ] && continue
+      if [ "$typ" = d ]; then
+        has_recent "$e" "$age" && continue
+        # dirs holding unix sockets may belong to a live daemon (socket fds don't show a path)
+        [ -n "$(find "$e" -xdev -type s -print -quit 2>/dev/null)" ] && { log "SKIP has-socket $e"; continue; }
+      fi
+      in_use "$e" && { skipped=$((skipped+1)); log "SKIP in-use $e"; continue; }
+      [ "$typ" = d ] && sz=$(sizeof "$e")
+      cand=$((cand+sz)); n=$((n+1))
+      if [ $DRY = 1 ]; then log "WOULD-DELETE $sz $e"
+      elif rm_tmp_entry "$e"; then freed=$((freed+sz)); log "DELETED $sz $e"
+      else log "FAILED $e"; fi
+    done < <(find "$d" -mindepth 1 -maxdepth 1 -user "$(id -u)" -printf '%y\t%T@\t%s\t%p\0' 2>/dev/null)
+  done
+  record user_tmp ok "$cand" "$freed" "$n" "age>=${age}d skipped_in_use=$skipped"
+}
+tmp_glob_owned() { # true if a TMP_GLOB_RULE claims this entry (handled by cat_tmp_globs instead)
+  local r g; for r in "${TMP_GLOB_RULES[@]}"; do g="${r%%|*}"; [[ "$1" == $g ]] && return 0; done; return 1
+}
+cat_tmp_globs() { # TMP_GLOB_RULE=glob|min_age_days|keep_newest|busy_process_regex
+  [ ${#TMP_GLOB_RULES[@]} -eq 0 ] && { record tmp_globs ok 0 0 0 "no rules"; return; }
+  local cand=0 freed=0 n=0 notes="" r
+  for r in "${TMP_GLOB_RULES[@]}"; do
+    local g age keep busy; IFS='|' read -r g age keep busy <<< "$r"
+    [[ "$age" =~ ^[0-9]+$ ]] || age=1; [ "$age" -lt 1 ] && age=1; [[ "$keep" =~ ^[0-9]+$ ]] || keep=1
+    in_tmp_dirs "$(dirname -- "$g")" || { notes+=" refused:$g"; continue; }
+    rule_targets_protected "$g" && { notes+=" refused:$g"; log "REFUSE protected glob $g"; continue; }
+    local rows=() m e
+    for e in $g; do [ -d "$e" ] && [ ! -L "$e" ] && [ "$(stat -c %u -- "$e")" = "$(id -u)" ] || continue
+      # Defence in depth: a rule glob that passed rule_targets_protected can still
+      # match a protected entry (e.g. foo* vs foo-clawctl). Check every entry.
+      protected_name "${e##*/}" && { log "SKIP protected $e"; continue; }
+      m=$(newest_mtime "$e"); rows+=("${m:-0} $e"); done
+    [ ${#rows[@]} -eq 0 ] && continue
+    mapfile -t rows < <(printf '%s\n' "${rows[@]}" | sort -rn)   # newest first
+    if [ -n "$busy" ] && pgrep -f -- "$busy" >/dev/null 2>&1; then notes+=" busy:$(basename -- "$g")"; log "SKIP rule busy ($busy running): $g"; continue; fi
+    local i=0 cut; cut=$(( $(date +%s) - age*86400 ))
+    for row in "${rows[@]}"; do
+      i=$((i+1)); m="${row%% *}"; e="${row#* }"
+      [ $i -le "$keep" ] && { log "KEEP newest $e"; continue; }
+      [ "$m" -ge "$cut" ] && { log "KEEP recent $e"; continue; }
+      in_use "$e" && { log "SKIP in-use $e"; continue; }
+      local sz; sz=$(sizeof "$e"); cand=$((cand+sz)); n=$((n+1))
+      if [ $DRY = 1 ]; then log "WOULD-DELETE $sz $e"
+      elif rm_tmp_entry "$e"; then freed=$((freed+sz)); log "DELETED $sz $e"
+      else log "FAILED $e"; fi
+    done
+  done
+  record tmp_globs ok "$cand" "$freed" "$n" "rules=${#TMP_GLOB_RULES[@]}$notes"
+}
+cat_npm_cache() { # npm's own tool: 'cache verify' (gc) normally, 'cache clean --force' when huge
+  command -v npm >/dev/null || { record npm_cache skipped 0 0 0 "npm not installed"; return; }
+  local dir; dir="$(npm config get cache 2>/dev/null)"; [ -d "$dir" ] || dir="$HOME/.npm"
+  [ -d "$dir/_cacache" ] || { record npm_cache ok 0 0 0 "no cache"; return; }
+  local before after; before=$(sizeof "$dir/_cacache")
+  if [ "$before" -ge "$(mb ${CFG[NPM_CLEAN_MIN_MB]})" ]; then
+    [ $DRY = 1 ] && { record npm_cache ok "$before" 0 1 "would: npm cache clean --force (cache=$before)"; return; }
+    timeout 900 npm cache clean --force >>"$LOG" 2>&1 || { record npm_cache error 0 0 0 "npm cache clean failed"; return; }
+  else
+    [ $DRY = 1 ] && { record npm_cache ok 0 0 0 "would: npm cache verify (gc only, cache=$before)"; return; }
+    timeout 900 npm cache verify >>"$LOG" 2>&1 || { record npm_cache error 0 0 0 "npm cache verify failed"; return; }
+  fi
+  after=$(sizeof "$dir/_cacache"); record npm_cache ok "$before" $((before>after ? before-after : 0)) 1 "cache_before=$before"
+}
+cat_pip_cache() { # pip's own tool: 'pip cache purge' when above threshold
+  local pip=""; for c in pip3 pip; do command -v $c >/dev/null && { pip=$c; break; }; done
+  [ -z "$pip" ] && { record pip_cache skipped 0 0 0 "pip not installed"; return; }
+  local dir; dir="$($pip cache dir 2>/dev/null)"; [ -d "$dir" ] || { record pip_cache ok 0 0 0 "no cache"; return; }
+  local before after; before=$(sizeof "$dir")
+  [ "$before" -lt "$(mb ${CFG[PIP_CACHE_MIN_MB]})" ] && { record pip_cache ok 0 0 0 "below threshold (cache=$before)"; return; }
+  [ $DRY = 1 ] && { record pip_cache ok "$before" 0 1 "would: $pip cache purge"; return; }
+  timeout 600 $pip cache purge >>"$LOG" 2>&1 || { record pip_cache error 0 0 0 "pip cache purge failed"; return; }
+  after=$(sizeof "$dir"); record pip_cache ok "$before" $((before>after ? before-after : 0)) 1 ""
+}
+cat_uv_cache() { # uv's own tool: 'uv cache prune' (only unreachable entries)
+  command -v uv >/dev/null || { record uv_cache skipped 0 0 0 "uv not installed"; return; }
+  local dir; dir="$(uv cache dir 2>/dev/null)"; [ -d "$dir" ] || { record uv_cache ok 0 0 0 "no cache"; return; }
+  local before after; before=$(sizeof "$dir")
+  [ $DRY = 1 ] && { record uv_cache ok 0 0 0 "would: uv cache prune (estimate n/a, cache=$before)"; return; }
+  timeout 600 uv cache prune >>"$LOG" 2>&1 || { record uv_cache error 0 0 0 "uv cache prune failed"; return; }
+  after=$(sizeof "$dir"); record uv_cache ok "$before" $((before>after ? before-after : 0)) 1 "cache_before=$before"
+}
+cat_go_cache() { # go's own tool: 'go clean -cache' only when GOCACHE is huge (never -modcache)
+  command -v go >/dev/null || { record go_cache skipped 0 0 0 "go not installed"; return; }
+  local dir; dir="$(go env GOCACHE 2>/dev/null)"; [ -d "$dir" ] || { record go_cache ok 0 0 0 "no cache"; return; }
+  local before after; before=$(sizeof "$dir")
+  [ "$before" -lt "$(mb ${CFG[GO_CACHE_MIN_MB]})" ] && { record go_cache ok 0 0 0 "below threshold (cache=$before)"; return; }
+  [ $DRY = 1 ] && { record go_cache ok "$before" 0 1 "would: go clean -cache"; return; }
+  timeout 900 go clean -cache >>"$LOG" 2>&1 || { record go_cache error 0 0 0 "go clean -cache failed"; return; }
+  after=$(sizeof "$dir"); record go_cache ok "$before" $((before>after ? before-after : 0)) 1 ""
+}
+cat_thumbnails() { # ~/.cache/thumbnails files older than THUMB_AGE_DAYS
+  local d="$HOME/.cache/thumbnails" age=${CFG[THUMB_AGE_DAYS]}
+  [ -d "$d" ] || { record thumbnails ok 0 0 0 "none"; return; }
+  local sum n; read -r sum n < <(find "$d" -xdev -type f -mtime +"$age" -printf '%s\n' 2>/dev/null | awk '{s+=$1;n++} END{print s+0, n+0}')
+  [ $DRY = 1 ] && { record thumbnails ok "$sum" 0 "$n" "age>${age}d"; return; }
+  find "$d" -xdev -type f -mtime +"$age" -delete 2>>"$LOG"
+  record thumbnails ok "$sum" "$sum" "$n" "age>${age}d"
+}
+cat_trash() { # freedesktop Trash entries whose .trashinfo is older than TRASH_AGE_DAYS
+  local t="$HOME/.local/share/Trash" age=${CFG[TRASH_AGE_DAYS]} cand=0 freed=0 n=0 info f sz
+  [ -d "$t/info" ] || { record trash ok 0 0 0 "none"; return; }
+  while IFS= read -r -d '' info; do
+    f="$t/files/$(basename -- "${info%.trashinfo}")"
+    sz=0; [ -e "$f" ] && sz=$(sizeof "$f"); cand=$((cand+sz)); n=$((n+1))
+    if [ $DRY = 1 ]; then log "WOULD-DELETE $sz $f"
+    else rm -rf --one-file-system -- "$f" && rm -f -- "$info" && { freed=$((freed+sz)); log "DELETED $sz $f"; }; fi
+  done < <(find "$t/info" -maxdepth 1 -name '*.trashinfo' -mtime +"$age" -print0 2>/dev/null)
+  record trash ok "$cand" "$freed" "$n" "age>${age}d"
+}
+
+# ------------------------------------------------- root-scope categories ----
+cat_tmpfiles() { # systemd-tmpfiles ages (drop-in /etc/tmpfiles.d/00-disk-clean.conf installed by install-root.sh)
+  command -v systemd-tmpfiles >/dev/null || { record tmpfiles skipped 0 0 0 "no systemd-tmpfiles"; return; }
+  local before after est
+  # mirror the x-lines of /etc/tmpfiles.d/00-disk-clean.conf so the estimate matches what tmpfiles will do
+  local ex=() pat
+  for pat in "${PROTECT_PATS[@]}"; do
+    ex+=( -not -path "*${pat}*" )
+  done
+  est=$( { find /tmp -xdev -mindepth 1 -type f -atime +"${CFG[TMP_AGE_DAYS]}" -mtime +"${CFG[TMP_AGE_DAYS]}" -ctime +"${CFG[TMP_AGE_DAYS]}" "${ex[@]}" -printf '%s\n' 2>/dev/null
+            find /var/tmp -xdev -mindepth 1 -type f -atime +"${CFG[VARTMP_AGE_DAYS]}" -mtime +"${CFG[VARTMP_AGE_DAYS]}" -ctime +"${CFG[VARTMP_AGE_DAYS]}" "${ex[@]}" -printf '%s\n' 2>/dev/null; } | awk '{s+=$1} END{print s+0}')
+  [ $DRY = 1 ] && { record tmpfiles ok "$est" 0 0 "estimate (find a/m/ctime) /tmp>${CFG[TMP_AGE_DAYS]}d /var/tmp>${CFG[VARTMP_AGE_DAYS]}d"; return; }
+  before=$(( $(sizeof /tmp) + $(sizeof /var/tmp) ))
+  timeout 1800 systemd-tmpfiles --clean >>"$LOG" 2>&1 || log "systemd-tmpfiles --clean returned non-zero (often benign warnings)"
+  after=$(( $(sizeof /tmp) + $(sizeof /var/tmp) ))
+  record tmpfiles ok "$est" $((before>after ? before-after : 0)) 0 "systemd-tmpfiles --clean; freed = /tmp+/var/tmp shrink during run (can include other activity)"
+}
+cat_journal() { # journalctl's own vacuum (drop-in cap installed by install-root.sh; no journald restart)
+  command -v journalctl >/dev/null || { record journal skipped 0 0 0 "no journalctl"; return; }
+  local before after cap; before=$(sizeof /var/log/journal); [ "$before" -eq 0 ] && before=$(sizeof /run/log/journal)
+  cap=$(numfmt --from=iec "${CFG[JOURNAL_MAX_SIZE]}" 2>/dev/null || echo 524288000)
+  [ $DRY = 1 ] && { record journal ok $((before>cap ? before-cap : 0)) 0 0 "journal=$before cap=${CFG[JOURNAL_MAX_SIZE]} max_age=${CFG[JOURNAL_MAX_AGE]}"; return; }
+  timeout 600 journalctl --vacuum-size="${CFG[JOURNAL_MAX_SIZE]}" --vacuum-time="${CFG[JOURNAL_MAX_AGE]}" >>"$LOG" 2>&1 || { record journal error 0 0 0 "vacuum failed"; return; }
+  after=$(sizeof /var/log/journal); [ "$after" -eq 0 ] && after=$(sizeof /run/log/journal)
+  record journal ok $((before>cap ? before-cap : 0)) $((before>after ? before-after : 0)) 0 "journal_before=$before"
+}
+cat_pkg_cache() { # apt-get clean / dnf clean packages (no installs, no upgrades)
+  local before after d
+  if command -v apt-get >/dev/null; then
+    d=/var/cache/apt/archives; before=$(( $(find $d -maxdepth 2 -name '*.deb' -printf '%s\n' 2>/dev/null | awk '{s+=$1} END{print s+0}') ))
+    [ $DRY = 1 ] && { record pkg_cache ok "$before" 0 0 "would: apt-get clean"; return; }
+    if ! timeout 120 apt-get -o DPkg::Lock::Timeout=60 clean >>"$LOG" 2>&1; then record pkg_cache busy 0 0 0 "apt lock busy; retry tomorrow"; return; fi
+    after=$(( $(find $d -maxdepth 2 -name '*.deb' -printf '%s\n' 2>/dev/null | awk '{s+=$1} END{print s+0}') ))
+    record pkg_cache ok "$before" $((before-after)) 0 "apt-get clean"
+  elif command -v dnf >/dev/null; then
+    before=$(find /var/cache/dnf -name '*.rpm' -printf '%s\n' 2>/dev/null | awk '{s+=$1} END{print s+0}')
+    [ $DRY = 1 ] && { record pkg_cache ok "$before" 0 0 "would: dnf clean packages"; return; }
+    timeout 300 dnf -q clean packages >>"$LOG" 2>&1 || { record pkg_cache busy 0 0 0 "dnf clean failed/busy"; return; }
+    after=$(find /var/cache/dnf -name '*.rpm' -printf '%s\n' 2>/dev/null | awk '{s+=$1} END{print s+0}')
+    record pkg_cache ok "$before" $((before-after)) 0 "dnf clean packages"
+  else record pkg_cache skipped 0 0 0 "no apt/dnf"; fi
+}
+to_bytes() { python3 -c 'import re,sys
+s=sys.argv[1].strip(); m=re.match(r"([\d.]+)\s*([kKMGT]?i?B?)",s)
+u={"":1,"B":1,"kB":1e3,"KB":1e3,"MB":1e6,"GB":1e9,"TB":1e12,"KiB":1024,"MiB":1024**2,"GiB":1024**3,"TiB":1024**4}
+print(int(float(m.group(1))*u.get(m.group(2),1)) if m else 0)' "$1" 2>/dev/null || echo 0; }
+cat_docker() { # dangling images + build cache older than DOCKER_UNTIL_HOURS. Never volumes, never containers, never -a.
+  command -v docker >/dev/null || { record docker skipped 0 0 0 "docker not installed"; return; }
+  timeout 20 docker info >/dev/null 2>&1 || { record docker skipped 0 0 0 "docker daemon unreachable"; return; }
+  local h=${CFG[DOCKER_UNTIL_HOURS]} cut img_est=0 n=0 id created size bc
+  cut=$(( $(date +%s) - h*3600 ))
+  while read -r id; do
+    read -r created size < <(docker image inspect -f '{{.Created}} {{.Size}}' "$id" 2>/dev/null)
+    [ -n "${created:-}" ] && [ "$(date -d "$created" +%s 2>/dev/null || echo $cut)" -lt "$cut" ] && { img_est=$((img_est+size)); n=$((n+1)); log "CANDIDATE dangling image $id $size"; }
+  done < <(docker image ls -q --filter dangling=true --no-trunc 2>/dev/null | sort -u)
+  bc=$(to_bytes "$(docker system df --format '{{if eq .Type "Build Cache"}}{{.Reclaimable}}{{end}}' 2>/dev/null | grep . | head -1)")
+  if [ $DRY = 1 ]; then record docker ok $((img_est)) 0 "$n" "dangling_images>${h}h=$img_est build_cache_reclaimable_upper_bound=$bc (age-filtered at run)"; return; fi
+  local o1 o2 f1 f2
+  o1=$(timeout 900 docker image prune -f --filter "until=${h}h" 2>&1); echo "$o1" >>"$LOG"
+  o2=$(timeout 900 docker builder prune -f --filter "until=${h}h" 2>&1); echo "$o2" >>"$LOG"
+  f1=$(to_bytes "$(echo "$o1" | sed -n 's/^Total reclaimed space: *//p')"); f2=$(to_bytes "$(echo "$o2" | sed -n 's/^Total: *//p;s/^Total reclaimed space: *//p' | tail -1)")
+  record docker ok $((img_est+bc)) $((f1+f2)) "$n" "images_freed=$f1 build_cache_freed=$f2"
+}
+cat_snap() { # disabled (superseded) snap revisions
+  command -v snap >/dev/null || { record snap skipped 0 0 0 "snap not installed"; return; }
+  local cand=0 freed=0 n=0 name rev f sz
+  while read -r name rev; do
+    f="/var/lib/snapd/snaps/${name}_${rev}.snap"; sz=0; [ -f "$f" ] && sz=$(stat -c %s "$f"); cand=$((cand+sz)); n=$((n+1))
+    if [ $DRY = 1 ]; then log "WOULD snap remove $name --revision=$rev ($sz)"
+    elif timeout 300 snap remove "$name" --revision="$rev" >>"$LOG" 2>&1; then freed=$((freed+sz)); log "REMOVED snap $name r$rev"
+    else log "FAILED snap remove $name r$rev"; fi
+  done < <(snap list --all 2>/dev/null | awk 'NR>1 && $NF ~ /disabled/ {print $1, $3}')
+  record snap ok "$cand" "$freed" "$n" "disabled revisions"
+}
+
+# --------------------------------------------------------------- weekly ----
+run_weekly() { # cheap du summary + backup sizes (report only, never deleted)
+  local out="$STATE/weekly.json" tmp; tmp="$(mktemp)"
+  local t0=$(date +%s) rc=0
+  timeout "${CFG[DU_TIMEOUT_S]}" nice -n 19 ionice -c3 du -x -B1 -d "${CFG[DU_DEPTH]}" "$HOME" > "$tmp.raw" 2>/dev/null; rc=$?
+  sort -rn "$tmp.raw" > "$tmp.du"
+  : > "$tmp.bk"
+  # REPORT_PATHS: only $HOME is substituted (no eval); globs are expanded by the shell.
+  local p; for p in ${CFG[REPORT_PATHS]//\$HOME/$HOME}; do [ -e "$p" ] || continue
+    printf '%s\t%s\n' "$(timeout 60 du -sxB1 -- "$p" 2>/dev/null | cut -f1)" "$p" >> "$tmp.bk"; done
+  python3 - "$tmp.du" "$tmp.bk" "$HOME" "$rc" "$t0" > "$out.new" <<'PY'
+import json,sys,time,os
+du,bk,home,rc,t0=sys.argv[1],sys.argv[2],sys.argv[3],int(sys.argv[4]),int(sys.argv[5])
+items=[]
+for l in open(du):
+    p=l.rstrip("\n").split("\t",1)
+    if len(p)==2 and p[1]!=home: items.append({"path":p[1],"bytes":int(p[0])})
+seen=set(); b=[]
+for l in open(bk):
+    s,p=(l.rstrip("\n").split("\t",1)+[""])[:2]
+    if p in seen or not s.isdigit(): continue
+    seen.add(p); b.append({"path":p,"bytes":int(s)})
+b.sort(key=lambda x:-x["bytes"])
+print(json.dumps({"ts":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),"partial":rc==124,"duration_s":int(time.time())-t0,
+  "top_dirs":items[:5],"backups":b[:10]},separators=(",",":")))
+PY
+  mv "$out.new" "$out"; rm -f "$tmp" "$tmp.raw" "$tmp.du" "$tmp.bk"
+  log "weekly du done rc=$rc"
+  # patch the weekly section into last.json so readers see it immediately
+  [ -f "$STATE/last.json" ] && python3 - "$STATE/last.json" "$out" <<'PY'
+import json,sys,os
+l=json.load(open(sys.argv[1])); w=json.load(open(sys.argv[2])); l["weekly"]=w
+t=sys.argv[1]+".tmp"; open(t,"w").write(json.dumps(l,separators=(",",":"))+"\n"); os.replace(t,sys.argv[1])
+PY
+}
+
+# ----------------------------------------------------------------- main ----
+if [ "$ACTION" = weekly ]; then
+  [ "$SCOPE" = user ] || { echo "--weekly is user scope only" >&2; exit 2; }
+  run_weekly; exit 0
+fi
+T0=$(date +%s); PCT_BEFORE=$(disk_pct); AVAIL_BEFORE=$(disk_avail)
+log "start v$VERSION conf=$CONF digest=$CONFIG_DIGEST categories='${CFG[CATEGORIES]}'"
+snapshot_open_paths
+FAILED=""
+CATS="${CFG[CATEGORIES]}"; [ -n "$ONLY" ] && CATS="$ONLY"
+for c in $CATS; do
+  DRY=$(cat_dry "$c")
+  if declare -F "cat_$c" >/dev/null; then
+    "cat_$c" || { record "$c" error 0 0 0 "function exit $?"; }
+  else record "$c" error 0 0 0 "unknown category"; fi
+done
+PCT_AFTER=$(disk_pct); AVAIL_AFTER=$(disk_avail)
+python3 - "$RESULTS" "$STATE" <<PY
+import json,sys,os,time,socket,pwd
+res,state=sys.argv[1],sys.argv[2]
+cats={}
+for l in open(res):
+    c,st,cand,freed,items,note,cm=(l.rstrip("\n").split("\t")+[""]*7)[:7]
+    cats[c]={"mode":cm or "$MODE","status":st,"candidate_bytes":int(cand or 0),"freed_bytes":int(freed or 0),"items":int(items or 0),"note":note[:300]}
+scope="$SCOPE"; pct_after=int("$PCT_AFTER" or 0); thr=int("${CFG[ATTENTION_PCT]}")
+att=[]
+if pct_after>=thr: att.append(f"disk {pct_after}% >= {thr}% after cleaning")
+errs=[c for c,v in cats.items() if v["status"]=="error"]
+if errs: att.append("category errors: "+",".join(errs))
+if "${UNKNOWN_KEYS}".strip(): att.append("config: unknown keys${UNKNOWN_KEYS}")
+s={"schema":"$SCHEMA","version":"$VERSION","scope":scope,"host":socket.gethostname(),"user":pwd.getpwuid(os.getuid()).pw_name,
+   "mode":"$MODE","ts":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),"duration_s":int(time.time())-$T0,
+   "config_digest":"$CONFIG_DIGEST",
+   "disk":{"mount":"${CFG[MOUNT]}","pct_before":int("$PCT_BEFORE" or 0),"pct_after":pct_after,
+           "avail_bytes_before":int("$AVAIL_BEFORE" or 0),"avail_bytes_after":int("$AVAIL_AFTER" or 0)},
+   "candidate_bytes":sum(v["candidate_bytes"] for v in cats.values()),
+   "freed_bytes":sum(v["freed_bytes"] for v in cats.values()),
+   "categories":cats}
+if scope=="user":
+    w=os.path.join(state,"weekly.json")
+    s["weekly"]=json.load(open(w)) if os.path.exists(w) else None
+    rp="${CFG[ROOT_SUMMARY]:-}"; r=None
+    if rp and os.path.exists(rp):
+        try:
+            rj=json.load(open(rp)); age_h=(time.time()-os.path.getmtime(rp))/3600
+            r={k:rj.get(k) for k in ("ts","mode","freed_bytes","candidate_bytes","attention","config_digest")}
+            r["stale"]=age_h>int("${CFG[ROOT_MAX_AGE_H]:-48}")
+            r["categories"]={k:{"status":v["status"],"candidate_bytes":v["candidate_bytes"],"freed_bytes":v["freed_bytes"]} for k,v in rj.get("categories",{}).items()}
+            if r["stale"]: att.append("root part stale")
+            if rj.get("attention"): att.append("root: "+rj["attention"])
+        except Exception as e:
+            att.append("root summary unreadable")
+    s["root"]=r
+s["attention"]="; ".join(att)
+line=json.dumps(s,separators=(",",":"))
+t=os.path.join(state,"last.json.tmp"); open(t,"w").write(line+"\n"); os.chmod(t,0o644); os.replace(t,os.path.join(state,"last.json"))
+h=os.path.join(state,"history.jsonl")
+old=open(h).read().splitlines()[-89:] if os.path.exists(h) else []
+open(h,"w").write("\n".join(old+[line])+"\n")
+print(line)
+PY
+RC=$?
+find "$STATE/log" -name '*.log' -mtime +30 -delete 2>/dev/null
+log "end rc=$RC pct ${PCT_BEFORE}->${PCT_AFTER}"
+exit $RC

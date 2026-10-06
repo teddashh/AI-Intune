@@ -1620,6 +1620,18 @@ ON CONFLICT(machine_id, sent_at) DO UPDATE SET
 			return fmt.Errorf("store: record checkin job capability: %w", err)
 		}
 	}
+	if _, err := tx.Exec(`DELETE FROM machine_job_capabilities
+	 WHERE machine_id=? AND sent_at=? AND capability=?`,
+		machineID, fmtTime(c.SentAt), model.MaintenanceDiskCleanCapability); err != nil {
+		return fmt.Errorf("store: replace disk-clean job capability: %w", err)
+	}
+	if c.MaintenanceDiskCleanV1 {
+		if _, err := tx.Exec(`INSERT INTO machine_job_capabilities
+		 (machine_id,sent_at,capability,supported) VALUES (?,?,?,1)`,
+			machineID, fmtTime(c.SentAt), model.MaintenanceDiskCleanCapability); err != nil {
+			return fmt.Errorf("store: record disk-clean job capability: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: commit checkin: %w", err)
 	}

@@ -206,7 +206,8 @@ func (h *hub) handleAgentReadiness(w http.ResponseWriter, r *http.Request, machi
 	writeJSON(w, http.StatusOK, model.AgentReadinessResponse{
 		MachineID: result.MachineID, LastCheckinReceivedAt: result.LastCheckinReceivedAt,
 		AgentStartedAt: result.AgentStartedAt, AgentVersion: result.AgentVersion, JobsEnabled: result.JobsEnabled,
-		DeviceSyncV1: result.DeviceSyncV1, IdentityReceivedAt: result.IdentityReceivedAt,
+		DeviceSyncV1: result.DeviceSyncV1, MaintenanceDiskCleanV1: result.MaintenanceDiskCleanV1,
+		IdentityReceivedAt: result.IdentityReceivedAt,
 		IdentityMeasuredAt: result.IdentityMeasuredAt, IdentityOS: result.IdentityOS, IdentityArch: result.IdentityArch,
 	})
 }

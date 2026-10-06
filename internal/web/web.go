@@ -231,6 +231,7 @@ type maintenancePageView struct {
 	Restore           restoreDrillNote
 	RestoreOperations store.RestoreDrillListResult
 	RestoreActive     bool
+	DiskClean         []store.DiskCleanSummaryView
 }
 
 func (s *Server) maintenance(w http.ResponseWriter, r *http.Request) {
@@ -251,6 +252,11 @@ func (s *Server) maintenance(w http.ResponseWriter, r *http.Request) {
 			restoreActive = true
 		}
 	}
+	diskClean, err := s.operator.DiskCleanSummaries(now)
+	if err != nil {
+		s.fail(w, "讀取磁碟清理狀態失敗", err)
+		return
+	}
 	lastRun := "尚未執行過清理"
 	if status.HasRun && status.LastPruneAt != nil {
 		lastRun = fmt.Sprintf("%s，刪除 %d 列", status.LastPruneAt.Local().Format("2006-01-02 15:04:05"), status.LastPruneRows)
@@ -262,6 +268,7 @@ func (s *Server) maintenance(w http.ResponseWriter, r *http.Request) {
 			Checkins: state.HumanDur(s.retentionPolicy.Checkins), Occupancy: state.HumanDur(s.retentionPolicy.Occupancy),
 			LastRun: lastRun, Restore: s.restoreDrill(now),
 			RestoreOperations: restoreOperations, RestoreActive: restoreActive,
+			DiskClean: diskClean,
 		},
 	})
 }

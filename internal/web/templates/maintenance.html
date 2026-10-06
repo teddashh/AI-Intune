@@ -65,4 +65,24 @@
 {{else}}
 <p class="empty">尚無還原演練 operation。</p>
 {{end}}
+
+<h2>磁碟清理</h2>
+<div class="panel">
+  <p>這一節只讀。Hub 用機器自己的磁碟觀測做判決；腳本的 attention 只是提示。發布、預覽執行與 canary 在 operator JSON 與 clawctl-operator，不在這一頁。</p>
+  {{if $m.DiskClean}}
+  <table><thead><tr><th>機器</th><th>判決</th><th>過期</th><th>摘要相符</th><th>磁碟</th><th>attention</th><th>root 摘要</th></tr></thead><tbody>
+  {{range $m.DiskClean}}<tr>
+    <td>{{.DisplayName}}</td>
+    <td>{{.Verdict}}{{if .Mode}}<span class="small dim" style="display:block">{{.Mode}}</span>{{end}}</td>
+    <td>{{if .Stale}}是{{else}}否{{end}}</td>
+    <td>{{if .DigestMatches}}相符{{else}}不相符{{end}}</td>
+    <td>{{.Disk.Outcome}}{{if .Disk.RuleAssigned}}<span class="small dim" style="display:block">{{.Disk.Percent}}% / 至少 {{.Disk.MinFreePercent}}%</span>{{end}}</td>
+    <td>{{if .Attention}}{{.Attention}}{{else}}<span class="dim">無</span>{{end}}</td>
+    <td>{{if .Summary}}{{if .Summary.Root}}{{.Summary.Root.Mode}}{{if .Summary.Root.Stale}}，root 摘要過期{{end}}{{if .Summary.Root.Attention}}，{{.Summary.Root.Attention}}{{end}}{{else}}<span class="dim">無</span>{{end}}{{else}}<span class="dim">無</span>{{end}}</td>
+  </tr>{{end}}
+  </tbody></table>
+  {{else}}
+  <p class="empty">目前沒有已指派或已回報的磁碟清理摘要。</p>
+  {{end}}
+</div>
 {{template "foot" .}}{{end}}

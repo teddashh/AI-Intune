@@ -65,9 +65,9 @@ the authority, and the Hub does not reinterpret it as a role hierarchy.
 
 | Capability | Covers |
 |---|---|
-| `view` | Every HTML/CSV `GET`, the operator JSON list/detail reads, and `/metrics` |
+| `view` | Every HTML/CSV `GET`, the operator JSON list/detail reads (including disk-clean summaries), and `/metrics` |
 | `operate` | Day-to-day actions on existing work: terminal, deployment Continue/Retry/skip failed batch, diagnostic jobs |
-| `admin` | Changing the fleet's desired state: enrollment, channels, lifecycle, policy publication and assignment, artifact fetch, deployment create/abandon, retention |
+| `admin` | Changing the fleet's desired state: enrollment, channels, lifecycle, policy publication and assignment, artifact fetch, deployment create/abandon, retention, disk-clean profile/dry-run/canary/continue/abandon (and their previews) |
 
 The route manifest in `cmd/clawctl-hub/operator_boundary.go` is the exact list.
 The Hub compares it with the registered routes at startup and refuses to start

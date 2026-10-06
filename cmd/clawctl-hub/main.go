@@ -848,7 +848,9 @@ func (h *hub) reportLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			h.maybeSendReport(time.Now())
+			now := time.Now()
+			h.sweepDiskCleanAlerts(now)
+			h.maybeSendReport(now)
 		}
 	}
 }

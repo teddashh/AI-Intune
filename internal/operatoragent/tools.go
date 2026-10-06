@@ -20,6 +20,8 @@ import (
 )
 
 // Tool is one MCP/CLI operation. InputSchema is a JSON Schema object.
+// Annotations is set on the disk-clean tools. Existing tools leave it empty
+// so a later merge that adds the same field stays small.
 type Tool struct {
 	Name        string           `json:"name"`
 	Description string           `json:"description"`
@@ -118,6 +120,30 @@ func (s *Service) Call(ctx context.Context, name string, raw json.RawMessage) (a
 		return s.profilePreview(ctx, raw)
 	case "profile_assignment_apply":
 		return s.profileApply(ctx, raw)
+	case "disk_clean_summaries":
+		return s.diskCleanSummaries(ctx, raw)
+	case "disk_clean_summary":
+		return s.diskCleanSummary(ctx, raw)
+	case "disk_clean_profile_preview":
+		return s.diskCleanProfilePreview(ctx, raw)
+	case "disk_clean_profile_publish":
+		return s.diskCleanProfilePublish(ctx, raw)
+	case "disk_clean_dry_run_preview":
+		return s.diskCleanDryRunPreview(ctx, raw)
+	case "disk_clean_dry_run_apply":
+		return s.diskCleanDryRunApply(ctx, raw)
+	case "disk_clean_canary_preview":
+		return s.diskCleanCanaryPreview(ctx, raw)
+	case "disk_clean_canary_apply":
+		return s.diskCleanCanaryApply(ctx, raw)
+	case "disk_clean_continue_preview":
+		return s.diskCleanContinuePreview(ctx, raw)
+	case "disk_clean_continue_apply":
+		return s.diskCleanContinueApply(ctx, raw)
+	case "disk_clean_abandon_preview":
+		return s.diskCleanAbandonPreview(ctx, raw)
+	case "disk_clean_abandon_apply":
+		return s.diskCleanAbandonApply(ctx, raw)
 	default:
 		return nil, &CallError{Code: "invalid_arguments", Message: "unknown tool " + name}
 	}

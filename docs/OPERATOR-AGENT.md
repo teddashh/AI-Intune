@@ -37,8 +37,9 @@ trail, not a credential.
 
 Capability is still the route's existing requirement. A read uses `view`. A
 deployment continue preview uses `operate`. Enrollment, deployment create,
-abandon, and profile assignment use `admin`. Missing a grant is an error from
-Hub. The tool does not retry with a different identity.
+abandon, profile assignment, and every disk-clean write use `admin`.
+Disk-clean reads use `view`. Missing a grant is an error from Hub. The tool
+does not retry with a different identity.
 
 ## Commands
 
@@ -84,21 +85,39 @@ int64.
 
 Reads: `fleet_overview`, `machines_list`, `machine_get`, `machine_evidence`,
 `jobs_list`, `job_get`, `job_evidence`, `deployments_list`, `deployment_get`,
-`software_report`, `compliance`, `rollout_status`.
+`software_report`, `compliance`, `rollout_status`, `disk_clean_summaries`,
+`disk_clean_summary`.
 
 Previews (they return `preview_digest`): `enroll_ticket_preview`,
 `deployment_create_preview`, `deployment_continue_preview`,
-`deployment_abandon_preview`, `profile_assignment_preview`, `rollout_preview`.
+`deployment_abandon_preview`, `profile_assignment_preview`, `rollout_preview`,
+`disk_clean_profile_preview`, `disk_clean_dry_run_preview`,
+`disk_clean_canary_preview`, `disk_clean_continue_preview`,
+`disk_clean_abandon_preview`.
 
 Writes: `enroll_ticket_create`, `deployment_create`, `deployment_continue`,
 `deployment_abandon`, `profile_assignment_apply`, `rollout_apply`,
-`rollout_expand`.
+`rollout_expand`, `disk_clean_profile_publish`, `disk_clean_dry_run_apply`,
+`disk_clean_canary_apply`, `disk_clean_continue_apply`,
+`disk_clean_abandon_apply`.
 
 A write requires `preview_digest` copied from a preview response
 (`sha256:` and 64 lowercase hex). The write call does not create a preview
 for you. Deployment continue, abandon, and `rollout_expand` also require
 `expected_control_revision` and `expected_opened_batch` from the deployment
 you just read, plus an `idempotency_key` you choose and reuse for a retry.
+Disk-clean continue and abandon use the same two fields from
+`disk_clean_continue_preview` or `disk_clean_abandon_preview`. Profile publish
+uses `expected_revision` from `disk_clean_profile_preview` (`current_revision`,
+which is 0 when the scope has no revision yet).
+
+## Disk-clean
+
+`disk_clean_*` does not call the artifact deployment tools. Publish a profile,
+run a dry-run, read the evidence, then open a canary of exactly one machine.
+`disk_clean_continue_apply` is the only way to open the rest.
+`disk_clean_abandon_apply` opens nothing more. The design is
+[MAINTENANCE-DISK-CLEAN.md](MAINTENANCE-DISK-CLEAN.md).
 
 `fleet_overview` is the first page of `GET /v1/operator/machines`. Totals are
 the fleet index. `page_truncated: true` means `items` are not every machine.

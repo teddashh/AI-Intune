@@ -1,6 +1,9 @@
 package web
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"os"
@@ -9,12 +12,188 @@ import (
 	"testing"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/compliance"
+	"github.com/teddashh/AI-Intune/internal/deploy"
+	"github.com/teddashh/AI-Intune/internal/maintenance"
 	"github.com/teddashh/AI-Intune/internal/model"
 	"github.com/teddashh/AI-Intune/internal/operator"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/restoredrill"
 	"github.com/teddashh/AI-Intune/internal/store"
 )
+
+func TestMaintenanceRendersADiskCleanSummaryRow(t *testing.T) {
+	s, st := newServer(t)
+	id := onlineMachine(t, st, "host-a")
+	now := time.Now().UTC().Truncate(time.Second)
+	checkin := checkin(now)
+	checkin.MaintenanceDiskCleanV1 = true
+	if err := st.RecordCheckin(id, checkin, now); err != nil {
+		t.Fatal(err)
+	}
+	assignWebDiskRule(t, st, id, 20, now)
+	published := publishWebDiskProfile(t, st, id)
+	dry := applyWebDiskDryRun(t, st, id, published.Revision)
+	stdout := webDiskSummary(t, published.ConfigDigest)
+	succeedWebDiskJob(t, st, dry.JobIDs[0], stdout, now)
+
+	page := tailnetAdminGet(t, s, "/tenant/maintenance")
+	if page.Code != http.StatusOK {
+		t.Fatalf("maintenance=%d body=%s", page.Code, page.Body.String())
+	}
+	body := page.Body.String()
+	for _, want := range []string{
+		"host-a", "attention", "dry-run", "相符", "pass", "50% / 至少 20%",
+		"cache is large", "apply，journal full", "這一節只讀",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("disk-clean row missing %q", want)
+		}
+	}
+	if strings.Contains(body, "目前沒有已指派或已回報的磁碟清理摘要。") {
+		t.Fatal("populated disk-clean board still shows the empty state")
+	}
+}
+
+func publishWebDiskProfile(t *testing.T, st *store.Store, machineID string) store.DiskCleanProfileResult {
+	t.Helper()
+	profile := webDiskProfile()
+	preview, err := st.PreviewDiskCleanProfile("machine", machineID, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := preview.CurrentRevision
+	result, err := st.ApplyDiskCleanProfile(store.DiskCleanProfileRequest{
+		ScopeType: "machine", ScopeID: machineID, Profile: profile, ExpectedRevision: &expected,
+		PreviewDigest: preview.PreviewDigest, ConfirmScopeID: machineID,
+		Reason: "publish disk-clean for the maintenance page", IdempotencyKey: "web-disk-pub",
+		RequestDigest: webDigest("web-disk-pub"), Audit: store.AuditEntry{SourceAddr: "127.0.0.1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func applyWebDiskDryRun(t *testing.T, st *store.Store, machineID string, revision int64) store.DiskCleanDryRunResult {
+	t.Helper()
+	req := store.DiskCleanTargetRequest{
+		ScopeType: "machine", ScopeID: machineID, Revision: revision, MachineIDs: []string{machineID},
+	}
+	preview, err := st.PreviewDiskCleanDryRun(req)
+	if err != nil || len(preview.Blockers) != 0 {
+		t.Fatalf("dry-run preview: %+v %v", preview, err)
+	}
+	req.PreviewDigest = preview.PreviewDigest
+	req.ConfirmScopeID = machineID
+	req.Reason = "dry-run the maintenance page"
+	req.IdempotencyKey = "web-disk-dry"
+	req.RequestDigest = webDigest("web-disk-dry")
+	req.Audit = store.AuditEntry{SourceAddr: "127.0.0.1"}
+	result, err := st.ApplyDiskCleanDryRun(req)
+	if err != nil || len(result.JobIDs) != 1 {
+		t.Fatalf("dry-run apply: %+v %v", result, err)
+	}
+	return result
+}
+
+func succeedWebDiskJob(t *testing.T, st *store.Store, jobID, stdout string, now time.Time) {
+	t.Helper()
+	job, err := st.Job(jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := st.ClaimJob(job.JobID, job.MachineID, now.Add(-time.Minute), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AdvanceJobByAgent(job.JobID, job.MachineID, token, deploy.Start, now.Add(-40*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordVerification(job.JobID, job.MachineID, token, maintenance.VerificationRuleID,
+		"disk-clean --scope user --conf /private/disk-clean.conf --dry-run", 0, stdout, "", true, now.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AdvanceJobByAgent(job.JobID, job.MachineID, token, deploy.FinishWork, now); err != nil {
+		t.Fatal(err)
+	}
+	state, err := st.MarkSucceededIfVerified(job.JobID, now)
+	if err != nil || state != deploy.Succeeded {
+		t.Fatalf("succeed %s: %s %v", jobID, state, err)
+	}
+}
+
+func webDiskSummary(t *testing.T, digest string) string {
+	t.Helper()
+	raw, err := json.Marshal(maintenance.Summary{
+		Schema: maintenance.SummarySchema, Version: maintenance.ScriptVersion, Scope: maintenance.ScopeUser,
+		Host: "host-a", User: "agent", Mode: "dry-run", TS: "2026-10-06T12:00:00Z",
+		ConfigDigest: digest, Attention: "cache is large",
+		Disk: maintenance.SummaryDisk{Mount: "/", PctBefore: 50, PctAfter: 50, AvailBytesBefore: 1, AvailBytesAfter: 1},
+		Categories: map[string]maintenance.SummaryCategory{
+			"user_tmp": {Mode: "dry-run", Status: "ok", Note: "age>=7d"},
+		},
+		Root: &maintenance.SummaryRoot{
+			TS: "2026-10-06T11:00:00Z", Mode: "apply", Attention: "journal full",
+			ConfigDigest: digest, Categories: map[string]maintenance.SummaryRootCategory{},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := maintenance.ParseSummary(raw); err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func webDiskProfile() maintenance.Profile {
+	npm, pip, goc := 0, 0, 0
+	thumb, trash := 30, 30
+	timeout, depth := 30, 2
+	dry := true
+	return maintenance.Profile{
+		SchemaVersion: maintenance.SchemaVersion, Scope: maintenance.ScopeUser, DryRun: &dry,
+		Categories: []string{"user_tmp"}, TmpDirs: []string{"/tmp"}, TmpAgeDays: 7,
+		NpmCleanMinMB: &npm, PipCacheMinMB: &pip, GoCacheMinMB: &goc,
+		ThumbAgeDays: &thumb, TrashAgeDays: &trash, AttentionPct: 90, Mount: "/",
+		DuTimeoutS: &timeout, DuDepth: &depth,
+	}
+}
+
+func assignWebDiskRule(t *testing.T, st *store.Store, machineID string, min int, now time.Time) {
+	t.Helper()
+	policy := compliance.Policy{SchemaVersion: compliance.SchemaVersion, Rules: []compliance.Rule{{
+		Kind: compliance.RuleDiskFreeMinPercent, MinFreePercent: min,
+	}}}
+	raw, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := compliance.Parse(raw); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	digest := "sha256:" + hex.EncodeToString(sum[:])
+	at := now.UTC().Format(time.RFC3339)
+	if _, err := st.DB().Exec(`INSERT INTO compliance_policies
+	 (policy_id, policy_revision, rules_json, rules_digest, published_at, published_by)
+	 VALUES ('disk', 1, ?, ?, ?, 'test')`, string(raw), digest, at); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`INSERT INTO compliance_assignments
+	 (assignment_id, scope_type, scope_id, assignment_revision, policy_id, policy_revision,
+	  rules_digest, assigned_at, assigned_by)
+	 VALUES ('disk-assign', 'machine', ?, 1, 'disk', 1, ?, ?, 'test')`,
+		machineID, digest, at); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func webDigest(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
 
 func TestMaintenanceShowsCurrentPolicyAndUsesExactAdminCapability(t *testing.T) {
 	s, _ := newServer(t)
@@ -23,7 +202,7 @@ func TestMaintenanceShowsCurrentPolicyAndUsesExactAdminCapability(t *testing.T) 
 		t.Fatal(err)
 	}
 	view := renderWithCapabilities(t, s, "/tenant/maintenance", operatorauth.CapabilityNames{View: names.View})
-	for _, want := range []string{"<h1>維護</h1>", "30 天", "14 天", "400 天", "尚未執行過清理", "租用戶管理"} {
+	for _, want := range []string{"<h1>維護</h1>", "30 天", "14 天", "400 天", "尚未執行過清理", "租用戶管理", "磁碟清理", "目前沒有已指派或已回報的磁碟清理摘要。"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view-only maintenance missing %q", want)
 		}

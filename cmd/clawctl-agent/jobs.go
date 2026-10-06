@@ -22,6 +22,7 @@ import (
 
 	"github.com/teddashh/AI-Intune/internal/agentadapter"
 	"github.com/teddashh/AI-Intune/internal/deploy"
+	"github.com/teddashh/AI-Intune/internal/maintenance"
 	"github.com/teddashh/AI-Intune/internal/model"
 	"golang.org/x/sys/unix"
 )
@@ -630,8 +631,10 @@ func newJobsRunner(opts jobsOptions) (*jobsRunner, error) {
 		nodeRuntime.deps.now = opts.Now
 		hermes := defaultHermesExecutor(opts.HubURL, opts.Token)
 		hermes.deps.now = opts.Now
-		opts.Executor = newKindExecutor(noopExecutor{now: opts.Now}, deviceSyncExecutor{now: opts.Now},
+		kinds := newKindExecutor(noopExecutor{now: opts.Now}, deviceSyncExecutor{now: opts.Now},
 			openclaw, nodeRuntime, hermes)
+		kinds.executors[maintenance.JobKind] = maintenanceExecutor{}
+		opts.Executor = kinds
 	}
 	w, err := loadWatermarkJournal(opts.JournalPath)
 	if err != nil {

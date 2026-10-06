@@ -9,6 +9,7 @@ import (
 
 	"github.com/teddashh/AI-Intune/internal/operator"
 	"github.com/teddashh/AI-Intune/internal/operatorclient"
+	"github.com/teddashh/AI-Intune/internal/store"
 )
 
 // Hub is the subset of operatorclient.Client these tools call.
@@ -34,6 +35,18 @@ type Hub interface {
 	AbandonDeployment(context.Context, string, string, operatorclient.DeploymentAbandonRequest) (operator.DeploymentMutationResult, error)
 	PreviewMachineProfileAssignment(context.Context, operator.MachineProfileAssignmentPreviewRequest) (operator.MachineProfileAssignmentPreviewResult, error)
 	AssignMachineProfile(context.Context, string, operator.MachineProfileAssignmentRequest) (operator.MachineProfileAssignmentResult, error)
+	DiskCleanSummaries(context.Context) ([]store.DiskCleanSummaryView, error)
+	DiskCleanSummary(context.Context, string) (store.DiskCleanSummaryView, error)
+	PreviewDiskCleanProfile(context.Context, operatorclient.DiskCleanProfilePreviewRequest) (store.DiskCleanProfilePreview, error)
+	PublishDiskCleanProfile(context.Context, string, operatorclient.DiskCleanProfilePublishRequest) (store.DiskCleanProfileResult, error)
+	PreviewDiskCleanDryRun(context.Context, operatorclient.DiskCleanTargetPreviewRequest) (store.DiskCleanDryRunPreview, error)
+	ApplyDiskCleanDryRun(context.Context, string, operatorclient.DiskCleanTargetApplyRequest) (store.DiskCleanDryRunResult, error)
+	PreviewDiskCleanCanary(context.Context, operatorclient.DiskCleanCanaryPreviewRequest) (store.DiskCleanCanaryPreview, error)
+	ApplyDiskCleanCanary(context.Context, string, operatorclient.DiskCleanCanaryApplyRequest) (store.DiskCleanCanaryResult, error)
+	PreviewDiskCleanContinue(context.Context, string) (store.DiskCleanControlPreview, error)
+	ContinueDiskClean(context.Context, string, operatorclient.DiskCleanControlApplyRequest) (store.DiskCleanRolloutResult, error)
+	PreviewDiskCleanAbandon(context.Context, string) (store.DiskCleanControlPreview, error)
+	AbandonDiskClean(context.Context, string, operatorclient.DiskCleanControlApplyRequest) (store.DiskCleanRolloutResult, error)
 }
 
 // Static check: the real client remains the Hub implementation.

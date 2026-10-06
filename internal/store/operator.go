@@ -113,6 +113,13 @@ const (
 	OperatorCodeCompliancePolicyNotFound           = "COMPLIANCE_POLICY_NOT_FOUND"
 	OperatorCodeCompliancePreviewStale             = "COMPLIANCE_PREVIEW_STALE"
 	OperatorCodeComplianceScopeInvalid             = "COMPLIANCE_SCOPE_INVALID"
+	OperatorCodeMaintenanceProfileInvalid          = "MAINTENANCE_PROFILE_INVALID"
+	OperatorCodeMaintenancePreviewStale            = "MAINTENANCE_PREVIEW_STALE"
+	OperatorCodeMaintenanceRevisionConflict        = "MAINTENANCE_REVISION_CONFLICT"
+	OperatorCodeMaintenanceNotFound                = "MAINTENANCE_NOT_FOUND"
+	OperatorCodeMaintenanceCapabilityUnconfirmed   = "MAINTENANCE_CAPABILITY_UNCONFIRMED"
+	OperatorCodeMaintenanceDryRunRequired          = "MAINTENANCE_DRY_RUN_REQUIRED"
+	OperatorCodeMaintenanceRolloutConflict         = "MAINTENANCE_ROLLOUT_CONFLICT"
 )
 
 // OperatorRequestError is safe to translate into a stable JSON API error.

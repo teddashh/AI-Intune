@@ -65,6 +65,11 @@ var allAuditActions = [...]AuditAction{
 	AuditSettingAssign,
 	AuditCompliancePolicy,
 	AuditComplianceAssign,
+	AuditMaintenanceProfile,
+	AuditMaintenanceDryRun,
+	AuditMaintenanceCanary,
+	AuditMaintenanceContinue,
+	AuditMaintenanceAbandon,
 	AuditOperatorDenied,
 }
 

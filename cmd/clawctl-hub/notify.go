@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/teddashh/AI-Intune/internal/processenv"
+	"github.com/teddashh/AI-Intune/internal/store"
 )
 
 // notifier is the delivery seam. nil means no command is configured. A later
@@ -176,4 +177,68 @@ func (h *hub) noteNotifyFailure(kind string, now time.Time) {
 	if failures <= 1 || notifyBackoff(failures) == notifyBackoffCap {
 		h.pingReportWatchdog(kind, false)
 	}
+}
+
+// notifyRetryAt is the earliest time another attempt for kind may be made.
+// It uses the daily report's schedule, lastFailed + notifyBackoff(failures),
+// where failures counts undelivered rows since the latest delivered row for
+// that kind. The second result is false when there is no failure to wait on.
+func (h *hub) notifyRetryAt(kind string) (time.Time, bool, error) {
+	stats, err := h.store.NotifyKindStats(kind)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if stats.ConsecutiveFailures <= 0 || !stats.HasAttempt {
+		return time.Time{}, false, nil
+	}
+	return stats.LastAttempt.Add(notifyBackoff(int(stats.ConsecutiveFailures))), true, nil
+}
+
+// sweepDiskCleanAlerts reconciles disk-clean rollouts and sends disk-clean
+// conditions through deliver. It runs on the report loop's minute ticker, but
+// a failed kind is retried on the same backoff as the daily report (1m, 2m,
+// 4m ... capped at 60m), not every minute. It does not touch the daily report
+// stamp or the daily watchdog.
+func (h *hub) sweepDiskCleanAlerts(now time.Time) {
+	if h.store == nil {
+		return
+	}
+	if err := h.store.ReconcileDiskCleanRollouts(now); err != nil {
+		log.Printf("disk-clean rollout reconcile: %v", err)
+	}
+	sends, err := h.store.SweepDiskCleanAlerts(now)
+	if err != nil {
+		log.Printf("disk-clean alerts: %v", err)
+		return
+	}
+	for _, send := range sends {
+		h.sendDiskCleanAlert(send, now)
+	}
+}
+
+// sendDiskCleanAlert delivers one alert unless its kind is still backing off.
+// The alert is marked delivered only after deliver reports success, so an
+// undelivered alert comes back from the next sweep and is retried once its
+// backoff has elapsed.
+func (h *hub) sendDiskCleanAlert(send store.DiskCleanAlertSend, now time.Time) bool {
+	if next, waiting, err := h.notifyRetryAt(send.Kind); err != nil {
+		log.Printf("disk-clean alert backoff lookup failed kind=%s: %v", send.Kind, err)
+		return false
+	} else if waiting && now.Before(next) {
+		return false
+	}
+	if !h.deliver(send.Kind, send.Body, now) {
+		// Unconfigured notify already logged its once-a-day warning in deliver.
+		if h.notifier() == nil {
+			return false
+		}
+		if next, waiting, err := h.notifyRetryAt(send.Kind); err == nil && waiting && next.After(now) {
+			log.Printf("disk-clean alert kind=%s not delivered; next attempt not before %s", send.Kind, next.Format(time.RFC3339))
+		}
+		return false
+	}
+	if err := h.store.MarkDiskCleanAlertDelivered(send.MachineID, send.Condition, send.Fingerprint); err != nil {
+		log.Printf("disk-clean alert mark: %v", err)
+	}
+	return true
 }
