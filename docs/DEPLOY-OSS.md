@@ -102,8 +102,15 @@ example `dst` IP with your VPS Tailscale IP).
 Tunnel origin must target the **same** address Hub listens on
 (`http://100.x.y.z:8787`), because Hub refuses to bind loopback.
 
-Enable with compose profile `tunnel` and `CLOUDFLARE_TUNNEL_TOKEN` (see
-`ops/docker/cloudflared.yml.example`).
+Enable by adding `ops/docker/docker-compose.tunnel.yml` and setting
+`CLOUDFLARE_TUNNEL_TOKEN` in `hub.env` (see
+`ops/docker/cloudflared.yml.example`). Do not use a compose profile for this.
+Compose v5 interpolates every service it loads, including profile-disabled
+ones, so a required token in `docker-compose.yml` aborts `config` and `up`
+even when the tunnel is not requested. Loading the override file is what
+uses the tunnel; a missing token then fails at interpolation with
+`CLOUDFLARE_TUNNEL_TOKEN` in the error. The default file does not read the
+variable, so `docker compose config` works with no token set.
 
 ---
 
@@ -115,6 +122,44 @@ Enable with compose profile `tunnel` and `CLOUDFLARE_TUNNEL_TOKEN` (see
 | **Local artifacts dir** (next to DB) | Working copy of artifact tarballs. Catalog and deployments read this directory. |
 | **R2 or S3 (optional)** | Durable copy of large artifact and evidence blobs when `R2_*` or `S3_*` is complete. Hub hashes the bytes itself. Unset env keeps local files only. |
 | **GitHub** | Code, Dockerfiles, docs — no secrets, no live DBs |
+| **Agent bootstrap** (on the same volume) | Linux installers Hub serves at startup |
+
+### Volume owner and agent bundles
+
+Hub's writer lock refuses the SQLite directory unless the process uid owns it
+and the mode is `0700` (no group or other permission bits). In this image that
+uid is distroless `nonroot`, **65532**. A new named volume is root-owned, so
+compose starts `hub-data-init` first (`busybox`, `restart: "no"`,
+`depends_on` condition `service_completed_successfully`). The one-shot chowns
+`clawctl-data` to `65532:65532`, sets mode `0700`, and exits before `hub` starts.
+
+On startup Hub loads agent installers from
+`<directory of CLAWCTL_DB>/agent-bootstrap/<version>/` and requires the Linux
+`amd64` and `arm64` archives. `<version>` is the binary's `main.version`.
+There is no flag or env var for a different directory. The image build arg
+`CLAWCTL_VERSION` (default `dev`) is that version. The Dockerfile cross-compiles
+`clawctl-agent` with `CGO_ENABLED=0` for both Linux architectures, packs them
+with `ops/build-agent-bundles.sh`, and writes the release the same way
+`ops/publish-agent-bundles.sh` does for a Linux-only publish:
+
+```text
+/var/lib/clawctl/agent-bootstrap/<CLAWCTL_VERSION>/
+  clawctl-agent-bootstrap-linux-amd64.tar.gz
+  clawctl-agent-bootstrap-linux-arm64.tar.gz
+  SHA256SUMS
+```
+
+`hub-data-init` copies that tree from the image into the volume when the
+version directory is absent, then sets the directory to owner 65532 and mode
+`0700`. It does not replace a directory that is already there. Darwin and
+Windows bundles are optional at startup and are not in the image.
+
+The same files are also in the Hub image at
+`/usr/local/share/clawctl/agent-bootstrap/<CLAWCTL_VERSION>/` so an image
+inspection can see them. Hub does not read that path.
+
+Pass a new `CLAWCTL_VERSION` when the agent bytes must change. Reusing a
+version string leaves the already seeded release in place.
 
 ### Backup / restore (volume)
 
@@ -176,8 +221,10 @@ docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env up
 # Health from any host that can reach the Tailscale IP
 curl -fsS "http://${CLAWCTL_LISTEN}/healthz"   # expect: alive
 
-# Optional tunnel profile
-docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env --profile tunnel up -d
+# Optional tunnel. Fails at interpolation if CLOUDFLARE_TUNNEL_TOKEN is unset.
+docker compose -f ops/docker/docker-compose.yml \
+  -f ops/docker/docker-compose.tunnel.yml \
+  --env-file ops/docker/hub.env up -d
 ```
 
 Without Docker: `make hub` then `./ops/install-hub.sh --listen … --operator-capability-prefix …`.
@@ -223,6 +270,6 @@ Not implemented:
 - [ ] `hub.env` mode `0600`, not committed
 - [ ] No enroll tokens in git
 - [ ] Tailscale grants limited to operator users / devices
-- [ ] Tunnel token only if profile `tunnel` is used
+- [ ] Tunnel token set only when `docker-compose.tunnel.yml` is used
 - [ ] Hub host is not also an enrolled production agent (or is accepted deliberately)
 - [ ] External deadman (`ops/deadman.sh` or healthchecks.io) runs **off** the Hub host
