@@ -109,6 +109,21 @@ unset _caller_token _caller_chat
 : "${TELEGRAM_BOT_TOKEN:?找不到 TELEGRAM_BOT_TOKEN（看這支腳本開頭的設定說明）}"
 : "${TELEGRAM_CHAT_ID:?找不到 TELEGRAM_CHAT_ID}"
 
+# ⚠⚠ token 不准出現在 curl 的 argv 裡。
+#
+# URL 是 https://api.telegram.org/bot<token>/<method>。原本直接把它當 curl 的
+# 參數，結果每一次送出的那幾百毫秒裡，同一台機器上任何使用者跑 `ps -ef`
+# 或讀 /proc/<pid>/cmdline 都看得到整個 token。所以 URL 改成用 curl 的
+# 設定檔語法從 stdin 餵進去（`curl -K -`）：stdin 不在 argv 裡。
+# 其他參數（chat_id、訊息內容）不是秘密，照舊放在 argv。
+_tg_config() { # $1 = Telegram method（getMe / getChat / sendMessage）
+	local t=$TELEGRAM_BOT_TOKEN
+	# curl 設定檔的雙引號字串會解讀反斜線；先跳脫 \ 與 "。
+	t=${t//\\/\\\\}
+	t=${t//\"/\\\"}
+	printf 'url = "https://api.telegram.org/bot%s/%s"\n' "$t" "$1"
+}
+
 # ⚠ --check 必須用**跟真的送出完全同一份設定**。
 #
 # 這是這個模式唯一重要的性質，也是它為什麼是這支腳本的一個旗標、
@@ -125,8 +140,8 @@ if [ "$CHECK" -eq 1 ]; then
 	# 然後它真的抓到 token 被撤銷的那天也會被忽略（§5.11 是同一個形狀）。
 	# curl 的 --retry 只重試逾時跟 5xx，**不會**重試 401，
 	# 所以「token 被撤銷」照樣第一次就失敗。
-	_r=$(curl -sS --max-time 20 --retry 2 --retry-delay 3 \
-		"https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe" 2>&1)
+	_r=$(_tg_config getMe | curl -sS --max-time 20 --retry 2 --retry-delay 3 \
+		-K - 2>&1)
 	if [ $? -ne 0 ]; then
 		echo "notify-telegram --check: ✗ 連不上 Telegram（網路或 DNS）" >&2
 		_fail=1
@@ -150,9 +165,9 @@ if [ "$CHECK" -eq 1 ]; then
 	# ⚠ 這一步不能因為第 1 步失敗就跳過。兩件事會分別壞掉，而
 	# 「token 也壞了所以我沒去看聊天室」會讓人修好 token 之後
 	# 以為全部搞定了，然後在下一次真告警時發現 bot 早就被踢出群了。
-	_r=$(curl -sS --max-time 20 --retry 2 --retry-delay 3 \
+	_r=$(_tg_config getChat | curl -sS --max-time 20 --retry 2 --retry-delay 3 \
 		--data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-		"https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getChat" 2>&1)
+		-K - 2>&1)
 	if [ $? -ne 0 ]; then
 		# ⚠ 這裡不能去 sed `_r` 裡的 description —— curl 的錯誤訊息沒有那個欄位，
 		# 結果會是「✗ 送不進這個聊天室：」後面空一片，看起來像 Telegram 回了
@@ -196,11 +211,11 @@ if [ "${#body}" -gt 3900 ]; then
 …（內容過長已截斷，完整內容在 hub 上）"
 fi
 
-resp=$(curl -sS --max-time 20 \
+resp=$(_tg_config sendMessage | curl -sS --max-time 20 \
 	--data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
 	--data-urlencode "text=${body}" \
 	--data "disable_web_page_preview=true" \
-	"https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" 2>&1)
+	-K - 2>&1)
 rc=$?
 
 if [ $rc -ne 0 ]; then

@@ -20,6 +20,8 @@
 #
 # A named volume's root is not the image directory. Compose runs hub-init
 # before hub to chown /var/lib/clawctl to uid 65532 and mode 0700.
+# The hub-fly target is the Fly.io image (kernel tailscaled + Litestream).
+# It is not the default build target. See ops/fly/README.md.
 
 # ---- build ----
 FROM golang:1.27.1-bookworm AS build
@@ -132,8 +134,57 @@ COPY --from=build --chown=nonroot:nonroot /out/clawctl-agent /usr/local/bin/claw
 # path; smoke-build.sh checks that the files are present in the image.
 COPY --from=build --chown=nonroot:nonroot /out/agent-bootstrap /usr/local/share/clawctl/agent-bootstrap
 
-# Documented port only — with network_mode: host the process binds CLAWCTL_LISTEN.
+# Conventional example port only. Hub has no production default port.
+# The process binds CLAWCTL_LISTEN. The flag default 127.0.0.1:8770 is refused.
 EXPOSE 8787
 
 ENTRYPOINT ["/usr/local/bin/clawctl-hub"]
 CMD ["--db", "/var/lib/clawctl/clawctl.sqlite", "--report-stamp", "/var/lib/clawctl/last-report.stamp"]
+
+# ---- Fly.io (kernel tailscaled + Litestream). Not the default target. ----
+# Pins are explicit image tags. Do not float to :latest.
+# tailscale/tailscale:v1.102.5 publishes tailscaled and tailscale at
+# /usr/local/bin. litestream/litestream:0.5.17 publishes litestream at
+# /usr/local/bin. Both stay in their own stages so this image does not run
+# their entrypoints.
+FROM tailscale/tailscale:v1.102.5 AS tailscale-bins
+FROM litestream/litestream:0.5.17 AS litestream-bins
+
+FROM debian:bookworm-slim AS hub-fly
+ARG CLAWCTL_VERSION=dev
+ENV CLAWCTL_VERSION=${CLAWCTL_VERSION} \
+    CLAWCTL_DB=/var/lib/clawctl/clawctl.sqlite \
+    CLAWCTL_REPORT_STAMP=/var/lib/clawctl/last-report.stamp \
+    DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      iptables \
+      iproute2 \
+      util-linux \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --system --gid 65532 nonroot \
+ && useradd --system --uid 65532 --gid 65532 --no-create-home \
+      --home-dir /var/lib/clawctl --shell /usr/sbin/nologin nonroot \
+ && mkdir -p /var/lib/clawctl /var/run/tailscale /run/clawctl \
+ && chmod 0700 /var/lib/clawctl /run/clawctl
+
+COPY --from=tailscale-bins /usr/local/bin/tailscaled /usr/local/bin/tailscaled
+COPY --from=tailscale-bins /usr/local/bin/tailscale /usr/local/bin/tailscale
+COPY --from=litestream-bins /usr/local/bin/litestream /usr/local/bin/litestream
+COPY --from=build /out/clawctl-hub /usr/local/bin/clawctl-hub
+COPY --from=build /out/agent-bootstrap /opt/clawctl-seed/agent-bootstrap
+COPY --from=build /out/agent-bootstrap /usr/local/share/clawctl/agent-bootstrap
+COPY ops/docker/hub-data-init.sh /usr/local/bin/hub-data-init.sh
+COPY ops/fly/entrypoint.sh /usr/local/bin/clawctl-fly-entrypoint
+COPY ops/fly/litestream.yml /etc/litestream.yml
+
+RUN chmod 0755 /usr/local/bin/clawctl-hub /usr/local/bin/tailscaled \
+      /usr/local/bin/tailscale /usr/local/bin/litestream \
+      /usr/local/bin/hub-data-init.sh /usr/local/bin/clawctl-fly-entrypoint \
+ && chmod 0644 /etc/litestream.yml
+
+VOLUME ["/var/lib/clawctl"]
+# No EXPOSE and no public port. Operators and agents reach Hub over Tailscale.
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/clawctl-fly-entrypoint"]

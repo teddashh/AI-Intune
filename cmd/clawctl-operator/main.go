@@ -52,7 +52,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) error {
 		fmt.Fprintln(errOut, err.Error())
 		return err
 	}
-	svc := &operatoragent.Service{Hub: client}
+	svc := &operatoragent.Service{Hub: client, Version: version}
 	switch rest[0] {
 	case "mcp":
 		if len(rest) != 1 {

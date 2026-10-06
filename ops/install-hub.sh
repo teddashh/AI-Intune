@@ -6,8 +6,8 @@
 # 用法：
 #   ./install-hub.sh                          # 僅既有 hub.env 已有兩個 auth 設定時可用
 #   ./install-hub.sh --binary /path/to/hub --agent-bundles /path/to/build
-#   ./install-hub.sh --listen 100.x.x.x:8787 \
-#     --operator-capability-prefix example.com/cap/clawctl
+#   ./install-hub.sh --listen 100.x.y.z:8787 --operator-capability-prefix example.com/cap/clawctl
+#   # Hub 沒有正式環境預設埠。8787 只是慣例範例。grant dst、CLAWCTL_PUBLIC_URL、agent --hub、tunnel origin 必須與 CLAWCTL_LISTEN 同一個埠。省略 --listen 且 tailscale ip -4 成功時，安裝器才填 $TS_IPV4:8787。
 #
 # ---------------------------------------------------------------------------
 # ⚠ 這支腳本存在的理由，是因為那份文件從來沒有被執行過。
@@ -174,6 +174,8 @@ fi
 if [[ -z "$CAP_PREFIX" && -f "$ENV_FILE" ]]; then
   CAP_PREFIX="$(sed -n 's/^CLAWCTL_OPERATOR_CAPABILITY_PREFIX=//p' "$ENV_FILE" | tail -1 | tr -d '"')"
 fi
+# 8787 is the conventional example port, not a Hub default. Grants,
+# CLAWCTL_PUBLIC_URL, agent --hub, and a tunnel origin must use this same port.
 if [[ -z "$LISTEN" ]] && command -v tailscale >/dev/null 2>&1; then
   TS_IPV4="$(tailscale ip -4 2>/dev/null | sed -n '1p')"
   [[ -z "$TS_IPV4" ]] || LISTEN="$TS_IPV4:8787"
@@ -187,6 +189,7 @@ if [[ -z "$LISTEN" || -z "$CAP_PREFIX" ]]; then
     --listen 100.x.y.z:8787 \
     --operator-capability-prefix example.com/cap/clawctl
 
+8787 只是慣例範例埠，不是 Hub 預設。grant dst、CLAWCTL_PUBLIC_URL、agent --hub、tunnel origin 必須與 --listen 同一個埠。
 請先照 docs/OPERATOR-AUTH.md 把三個 capability grant 存進 Tailscale；
 安裝腳本不會替你改 tailnet policy，也不會退回無認證的 loopback console。
 EOF

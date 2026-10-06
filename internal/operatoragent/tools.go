@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
+	"regexp"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -18,9 +21,20 @@ import (
 
 // Tool is one MCP/CLI operation. InputSchema is a JSON Schema object.
 type Tool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	InputSchema map[string]any   `json:"inputSchema"`
+	Annotations *ToolAnnotations `json:"annotations,omitempty"`
+}
+
+// ToolAnnotations is the MCP tools/list annotations object. Bool fields are
+// always encoded so a false hint is visible to the client.
+type ToolAnnotations struct {
+	Title           string `json:"title,omitempty"`
+	ReadOnlyHint    bool   `json:"readOnlyHint"`
+	DestructiveHint bool   `json:"destructiveHint"`
+	IdempotentHint  bool   `json:"idempotentHint"`
+	OpenWorldHint   bool   `json:"openWorldHint"`
 }
 
 // CallError is a tool failure. Code is stable. The Hub was not called when
@@ -40,8 +54,10 @@ func (e *CallError) Error() string {
 }
 
 // Service calls Hub. A nil Hub fails closed on every call.
+// Version is the build version reported by MCP initialize. Empty means dev.
 type Service struct {
-	Hub Hub
+	Hub     Hub
+	Version string
 }
 
 func (s *Service) Call(ctx context.Context, name string, raw json.RawMessage) (any, error) {
@@ -103,91 +119,7 @@ func (s *Service) Call(ctx context.Context, name string, raw json.RawMessage) (a
 	case "profile_assignment_apply":
 		return s.profileApply(ctx, raw)
 	default:
-		return nil, &CallError{Code: "unknown_tool", Message: "unknown tool " + name}
-	}
-}
-
-func Tools() []Tool {
-	obj := func(props map[string]any, required ...string) map[string]any {
-		schema := map[string]any{"type": "object", "additionalProperties": false, "properties": props}
-		if len(required) > 0 {
-			schema["required"] = required
-		}
-		return schema
-	}
-	str := map[string]any{"type": "string"}
-	num := map[string]any{"type": "integer"}
-	boolean := map[string]any{"type": "boolean"}
-	digest := "sha256: plus 64 lowercase hex from a prior preview response. This call does not create a preview."
-	idem := "Caller-chosen idempotency key, 1 to 200 bytes, no surrounding space. Reuse it to retry the same write."
-	return []Tool{
-		{Name: "fleet_overview", Description: "Read GET /v1/operator/machines. Totals are the fleet index. Items are one page. A non-null next_cursor means this page is not the whole fleet.", InputSchema: obj(map[string]any{})},
-		{Name: "machines_list", Description: "Read GET /v1/operator/machines with the same filters as the operator client.", InputSchema: obj(map[string]any{
-			"machine_id": str, "display_name": str, "states": map[string]any{"type": "array", "items": str},
-			"lifecycle": str, "reporting": str, "channel": str, "limit": num, "cursor": str,
-		})},
-		{Name: "machine_get", Description: "Read GET /v1/operator/machines/{id}. Reachability is Hub's judgement from outbound check-ins.", InputSchema: obj(map[string]any{"machine_id": str}, "machine_id")},
-		{Name: "machine_evidence", Description: "Read GET /v1/operator/machines/{id}/evidence. limit 0 uses the server default.", InputSchema: obj(map[string]any{"machine_id": str, "limit": num}, "machine_id")},
-		{Name: "jobs_list", Description: "Read GET /v1/operator/jobs.", InputSchema: obj(map[string]any{
-			"machine_id": str, "states": map[string]any{"type": "array", "items": str},
-			"deployment_id": str, "resource_kind": str, "resource_id": str, "limit": num, "cursor": str,
-		})},
-		{Name: "job_get", Description: "Read GET /v1/operator/jobs/{id}.", InputSchema: obj(map[string]any{"job_id": str}, "job_id")},
-		{Name: "job_evidence", Description: "Read GET /v1/operator/jobs/{id}/evidence. The agent's own status word is not in this tool.", InputSchema: obj(map[string]any{"job_id": str, "limit": num}, "job_id")},
-		{Name: "deployments_list", Description: "Read GET /v1/operator/deployments.", InputSchema: obj(map[string]any{
-			"channel": str, "states": map[string]any{"type": "array", "items": str}, "stuck": boolean, "limit": num, "cursor": str,
-		})},
-		{Name: "deployment_get", Description: "Read GET /v1/operator/deployments/{id}, including per-target Hub job state and the cross-failure-domain verdict.", InputSchema: obj(map[string]any{"deployment_id": str}, "deployment_id")},
-		{Name: "software_report", Description: "Read GET /v1/operator/software-report.", InputSchema: obj(map[string]any{})},
-		{Name: "compliance", Description: "Read GET /v1/operator/compliance.", InputSchema: obj(map[string]any{})},
-		{Name: "rollout_status", Description: "Read one deployment and return the shared canary assessment. This tool does not open a batch.", InputSchema: obj(map[string]any{"deployment_id": str}, "deployment_id")},
-		{Name: "rollout_preview", Description: "POST /v1/operator/deployments/preview with batch_size 1. Returns the server preview digest and the canary assessment of that plan. Omit batch_size or set it to 1.", InputSchema: obj(map[string]any{
-			"channel": str, "version": str, "artifact_sha256": str, "batch_size": num,
-			"execution_timeout_seconds": num, "irreversible": boolean,
-		}, "channel", "version", "artifact_sha256")},
-		{Name: "rollout_apply", Description: "POST /v1/operator/deployments for a batch_size 1 plan. Requires preview_digest from rollout_preview or deployment_create_preview. Does not call preview itself.", InputSchema: obj(map[string]any{
-			"channel": str, "version": str, "artifact_sha256": str, "batch_size": num,
-			"execution_timeout_seconds": num, "irreversible": boolean,
-			"preview_digest":  map[string]any{"type": "string", "description": digest},
-			"confirm_channel": str, "confirm_version": str, "reason": str,
-			"idempotency_key": map[string]any{"type": "string", "description": idem},
-		}, "channel", "version", "artifact_sha256", "preview_digest", "confirm_channel", "confirm_version", "reason", "idempotency_key")},
-		{Name: "rollout_expand", Description: "Continue a paused deployment only when the shared assessment says the one canary job is succeeded. Requires preview_digest from deployment_continue_preview plus the expected control revision and opened batch from rollout_status. Refuses without calling Hub when the canary is not succeeded. A new deployment pauses after that verdict; this tool does not open the next batch while the deployment is still running. Deployments created before the hold still let the Hub driver open the next batch.", InputSchema: obj(map[string]any{
-			"deployment_id":             str,
-			"preview_digest":            map[string]any{"type": "string", "description": digest},
-			"expected_control_revision": num, "expected_opened_batch": num,
-			"confirm_channel": str, "reason": str, "idempotency_key": map[string]any{"type": "string", "description": idem},
-		}, "deployment_id")},
-		{Name: "enroll_ticket_preview", Description: "POST /v1/operator/enrollment-tokens/preview. The response preview_digest is required by enroll_ticket_create.", InputSchema: obj(map[string]any{"display_name": str, "ttl_seconds": num}, "display_name", "ttl_seconds")},
-		{Name: "enroll_ticket_create", Description: "POST /v1/operator/enrollment-tokens. Requires preview_digest from enroll_ticket_preview. The one-time token is only in a fresh response.", InputSchema: obj(map[string]any{
-			"display_name": str, "ttl_seconds": num, "preview_digest": str, "reason": str, "idempotency_key": str,
-		}, "display_name", "ttl_seconds", "preview_digest", "reason", "idempotency_key")},
-		{Name: "deployment_create_preview", Description: "POST /v1/operator/deployments/preview. Same route as the deployment form.", InputSchema: obj(map[string]any{
-			"channel": str, "version": str, "artifact_sha256": str, "batch_size": num,
-			"execution_timeout_seconds": num, "irreversible": boolean,
-		}, "channel", "version", "artifact_sha256")},
-		{Name: "deployment_create", Description: "POST /v1/operator/deployments. Requires preview_digest from deployment_create_preview. confirm_channel and confirm_version must match the preview inputs.", InputSchema: obj(map[string]any{
-			"channel": str, "version": str, "artifact_sha256": str, "batch_size": num,
-			"execution_timeout_seconds": num, "irreversible": boolean,
-			"preview_digest": str, "confirm_channel": str, "confirm_version": str, "reason": str, "idempotency_key": str,
-		}, "channel", "version", "artifact_sha256", "preview_digest", "confirm_channel", "confirm_version", "reason", "idempotency_key")},
-		{Name: "deployment_continue_preview", Description: "POST /v1/operator/deployments/{id}/continue-preview.", InputSchema: obj(map[string]any{"deployment_id": str}, "deployment_id")},
-		{Name: "deployment_continue", Description: "POST the existing Continue route. Requires preview_digest, expected_control_revision, and expected_opened_batch. Plain Continue refuses a failed batch. This tool does not send skip failed batch. Use rollout_expand after a succeeded canary.", InputSchema: obj(map[string]any{
-			"deployment_id": str, "preview_digest": str, "expected_control_revision": num, "expected_opened_batch": num,
-			"confirm_channel": str, "reason": str, "idempotency_key": str,
-		}, "deployment_id", "preview_digest", "expected_control_revision", "expected_opened_batch", "confirm_channel", "reason", "idempotency_key")},
-		{Name: "deployment_abandon_preview", Description: "POST /v1/operator/deployments/{id}/abandon-preview. Abandon stops further jobs. It does not uninstall a succeeded machine.", InputSchema: obj(map[string]any{"deployment_id": str}, "deployment_id")},
-		{Name: "deployment_abandon", Description: "POST the existing Abandon route. Requires preview_digest, expected_control_revision, and expected_opened_batch.", InputSchema: obj(map[string]any{
-			"deployment_id": str, "preview_digest": str, "expected_control_revision": num, "expected_opened_batch": num,
-			"confirm_deployment_id": str, "reason": str, "idempotency_key": str,
-		}, "deployment_id", "preview_digest", "expected_control_revision", "expected_opened_batch", "confirm_deployment_id", "reason", "idempotency_key")},
-		{Name: "profile_assignment_preview", Description: "POST /v1/operator/machines/{id}/profile-assignment-preview.", InputSchema: obj(map[string]any{
-			"machine_id": str, "profile_id": str, "profile_revision": num,
-		}, "machine_id", "profile_id", "profile_revision")},
-		{Name: "profile_assignment_apply", Description: "POST /v1/operator/machines/{id}/profile-assignments. Requires preview_digest from profile_assignment_preview.", InputSchema: obj(map[string]any{
-			"machine_id": str, "profile_id": str, "profile_revision": num, "confirm_display_name": str,
-			"preview_digest": str, "reason": str, "idempotency_key": str,
-		}, "machine_id", "profile_id", "profile_revision", "confirm_display_name", "preview_digest", "reason", "idempotency_key")},
+		return nil, &CallError{Code: "invalid_arguments", Message: "unknown tool " + name}
 	}
 }
 
@@ -873,6 +805,8 @@ func decodeEmpty(raw json.RawMessage) error {
 	return decodeArgs(raw, &args)
 }
 
+var unknownFieldPattern = regexp.MustCompile(`unknown field "([^"]+)"`)
+
 func decodeArgs(raw json.RawMessage, dst any) error {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		raw = []byte("{}")
@@ -880,12 +814,64 @@ func decodeArgs(raw json.RawMessage, dst any) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		return &CallError{Code: "invalid_arguments", Message: "arguments are not valid JSON for this tool"}
+		message := "arguments are not valid JSON for this tool"
+		if match := unknownFieldPattern.FindStringSubmatch(err.Error()); match != nil {
+			message = fmt.Sprintf("unknown field %q; allowed fields: %s", match[1], allowedJSONFields(dst))
+		}
+		return &CallError{Code: "invalid_arguments", Message: message}
 	}
 	if dec.More() {
 		return &CallError{Code: "invalid_arguments", Message: "arguments contain a trailing JSON value"}
 	}
 	return nil
+}
+
+func allowedJSONFields(dst any) string {
+	valueType := reflect.TypeOf(dst)
+	for valueType != nil && valueType.Kind() == reflect.Pointer {
+		valueType = valueType.Elem()
+	}
+	if valueType == nil || valueType.Kind() != reflect.Struct {
+		return "(none)"
+	}
+	names := jsonFieldNames(valueType)
+	if len(names) == 0 {
+		return "(none)"
+	}
+	return strings.Join(names, ", ")
+}
+
+func jsonFieldNames(valueType reflect.Type) []string {
+	var names []string
+	for i := 0; i < valueType.NumField(); i++ {
+		field := valueType.Field(i)
+		if field.Anonymous {
+			embedded := field.Type
+			for embedded.Kind() == reflect.Pointer {
+				embedded = embedded.Elem()
+			}
+			if embedded.Kind() == reflect.Struct {
+				names = append(names, jsonFieldNames(embedded)...)
+				continue
+			}
+		}
+		tag := field.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		name := tag
+		if comma := strings.IndexByte(name, ','); comma >= 0 {
+			name = name[:comma]
+		}
+		if name == "" {
+			if field.PkgPath != "" {
+				continue
+			}
+			name = field.Name
+		}
+		names = append(names, name)
+	}
+	return names
 }
 
 func requireID(name, value string) error {
@@ -927,6 +913,10 @@ func hubErr(err error) error {
 	var call *CallError
 	if errors.As(err, &call) {
 		return err
+	}
+	var api *operatorclient.APIError
+	if errors.As(err, &api) && api.Code != "" {
+		return &CallError{Code: api.Code, Message: api.Message}
 	}
 	return &CallError{Code: "hub_error", Message: err.Error()}
 }

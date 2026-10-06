@@ -98,7 +98,7 @@ func handleMCP(ctx context.Context, svc *Service, payload []byte) (mcpResponse, 
 		return mcpResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
 			"protocolVersion": protocolVersion(req.Params),
 			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "clawctl-operator", "version": "3"},
+			"serverInfo":      map[string]any{"name": "clawctl-operator", "version": serverVersion(svc)},
 			"instructions":    ServerInstructions,
 		}}, true
 	case "ping":
@@ -146,6 +146,13 @@ func callTool(ctx context.Context, svc *Service, req mcpRequest) mcpResponse {
 		"content": []map[string]any{{"type": "text", "text": string(encoded)}},
 		"isError": false,
 	}}
+}
+
+func serverVersion(svc *Service) string {
+	if svc == nil || svc.Version == "" {
+		return "dev"
+	}
+	return svc.Version
 }
 
 func protocolVersion(params json.RawMessage) string {

@@ -20,6 +20,10 @@ Set the origin with `--hub-url` or `CLAWCTL_HUB_URL`:
 http://<hub-tailscale-ipv4>:<port>
 ```
 
+`<port>` is the port in Hub's `CLAWCTL_LISTEN`. Hub has no production default
+port. `8787` in other examples is only the conventional example. The `--listen`
+flag default `127.0.0.1:8770` is refused.
+
 That is the same literal Tailscale listener as the operator UI. There is no
 path, userinfo, query, or `https` hostname for this client. The command sends
 no `Authorization` header and does not read `X-Forwarded-*`. A proxy in the
@@ -51,6 +55,30 @@ one JSON line. Logs stay off stdout.
 
 `call <tool> [json]` prints the tool result as one JSON line. Errors go to
 stderr as `{"code","message"}`.
+
+Local argument errors use code `invalid_arguments`: bad JSON, a missing or
+invalid field, an unknown tool, and an unknown field. An unknown field is
+named, and the message lists the allowed fields for that tool (`(none)` when
+the tool takes no fields). Errors that come back from Hub keep the Hub code.
+A transport failure that is not a Hub error object stays `hub_error`.
+`preview_digest_required`, `expected_revision_required`, and `canary_blocked`
+stay their own codes. The MCP `tools/call` path and the CLI `call` path use
+the same `Call` result.
+
+`initialize` reports `serverInfo.version` as this binary's build version
+(`main.version`, injected with `-ldflags`, `dev` when unset). That is not a
+protocol constant. Protocol version negotiation is unchanged.
+
+`tools/list` includes MCP `annotations` on every tool: `readOnlyHint` (true
+for reads and previews), `destructiveHint` (true for apply, continue, expand,
+abandon, and profile assignment; false for `enroll_ticket_create`),
+`idempotentHint` (true for reads, previews, and writes that take an
+idempotency key), and `openWorldHint: false`. Input schemas set `enum`,
+`minLength` / `maxLength` / `pattern`, and `minimum` / `maximum` from the Hub
+validators, plus `additionalProperties: false` and `required`. They do not
+add a tighter limit than Hub enforces. `expected_control_revision` has a
+minimum and no JSON Schema maximum, because the Hub maximum is the maximum
+int64.
 
 ## Tools
 

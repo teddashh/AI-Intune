@@ -1824,10 +1824,24 @@ expect '解析設定的過程不准碰網路' 1 has '拒絕送出'
 # 那是真實環境裡最重要、也最沒辦法按需重現的一種。
 cat >"$TMP/bin/curl" <<'FAKE'
 #!/usr/bin/env bash
+# notify-telegram.sh 把 URL（含 token）用 `curl -K -` 從 stdin 餵進來，
+# 不放在 argv。假的 curl 照真的 curl 的規矩去讀 stdin，才知道要演哪個端點。
+cfg=''
+prev=''
 for a in "$@"; do
+	if [ "$prev" = "-K" ] && [ "$a" = "-" ]; then
+		cfg=$(cat)
+	fi
+	prev=$a
+done
+# 把 argv 記下來，讓測試檢查 token 沒有出現在 ps 看得到的地方。
+[ -z "${FAKE_CURL_ARGV:-}" ] || printf '%s\n' "$*" >>"$FAKE_CURL_ARGV"
+mode=''
+for a in "$@" "$cfg"; do
 	case "$a" in
-	*/getMe) mode=getMe ;;
-	*/getChat) mode=getChat ;;
+	*/getMe | */getMe\") mode=getMe ;;
+	*/getChat | */getChat\") mode=getChat ;;
+	*/sendMessage | */sendMessage\") mode=sendMessage ;;
 	esac
 done
 case "${FAKE_CURL:-ok}" in
@@ -1835,14 +1849,15 @@ ok)
 	case "$mode" in
 	getMe) echo '{"ok":true,"result":{"username":"Fake_Bot"}}' ;;
 	getChat) echo '{"ok":true,"result":{"type":"private","first_name":"Tester"}}' ;;
+	sendMessage) echo '{"ok":true,"result":{"message_id":1}}' ;;
 	esac
 	;;
 unauthorized) echo '{"ok":false,"error_code":401,"description":"Unauthorized"}' ;;
 kicked) echo '{"ok":false,"error_code":403,"description":"Forbidden: bot was kicked"}' ;;
-# ⚠ 故意把整個 argv（含 URL、含 token）吐到 stderr —— 真的 curl 就是這樣。
-# 下面有一條測試專門檢查腳本沒有把它印出去。
+# ⚠ 故意把整個 argv 和 stdin 上的設定（含 URL、含 token）吐到 stderr ——
+# 這是最壞情況。下面有測試專門檢查腳本沒有把它印出去。
 netfail)
-	echo "curl: (6) Could not resolve host -- $*" >&2
+	echo "curl: (6) Could not resolve host -- $* $cfg" >&2
 	exit 6
 	;;
 esac
@@ -1882,6 +1897,41 @@ expect '--check 永遠不准印出 token' 1 lacks "$SEKRIT"
 printf 'TELEGRAM_BOT_TOKEN=fake-a\nTELEGRAM_CHAT_ID=1\n' >"$NT/.config/clawctl/notify.env"
 run env -u CLAWCTL_NOTIFY_ENV PATH="$TMP/bin:/usr/bin:/bin" HOME="$NT" "$NOTIFY" --check
 expect '--check 走的是同一套設定解析' 0 has 'clawctl/notify.env'
+
+# --- notify-telegram.sh：token 不准出現在 curl 的 argv。
+#
+# ⚠⚠ URL 是 https://api.telegram.org/bot<token>/<method>。放在 argv 的話，
+# 每一次送出時同一台機器上任何人 `ps -ef` 都看得到 token。腳本改成
+# `curl -K -` 從 stdin 給 URL；這幾條確認 argv 裡真的沒有 token，
+# 而且送出路徑的 exit code 跟原本一樣。
+ARGV_LOG="$TMP/curl-argv.log"
+argv_clean() { [ -s "$ARGV_LOG" ] && ! grep -qF "$SEKRIT" "$ARGV_LOG"; }
+
+: >"$ARGV_LOG"
+run env PATH="$TMP/bin:/usr/bin:/bin" FAKE_CURL=ok FAKE_CURL_ARGV="$ARGV_LOG" \
+	TELEGRAM_BOT_TOKEN="$SEKRIT" TELEGRAM_CHAT_ID=1 "$NOTIFY" --check
+expect '--check 從 stdin 拿到 URL 也照樣通過' 0 has 'Fake_Bot'
+expect '--check 的 curl argv 裡沒有 token' 0 argv_clean
+
+nsend() { # $1=FAKE_CURL 模式；訊息從 stdin 進來
+	: >"$ARGV_LOG"
+	run env PATH="$TMP/bin:/usr/bin:/bin" FAKE_CURL="$1" FAKE_CURL_ARGV="$ARGV_LOG" \
+		TELEGRAM_BOT_TOKEN="$SEKRIT" TELEGRAM_CHAT_ID=1 "$NOTIFY" <<<'早報測試'
+}
+
+nsend ok
+expect '送出成功時 exit 0' 0 true
+expect '送出時 curl argv 裡沒有 token' 0 argv_clean
+argv_has_text() { grep -qF 'text=早報測試' "$ARGV_LOG"; }
+expect '送出時訊息內容照舊交給 curl' 0 argv_has_text
+
+nsend unauthorized
+expect 'Telegram 拒絕時 exit 1 並講出理由' 1 has 'Telegram 拒絕了這則訊息：Unauthorized'
+expect 'Telegram 拒絕時 curl argv 裡也沒有 token' 1 argv_clean
+
+nsend netfail
+expect '送出時網路不通 exit 1' 1 has 'curl 失敗（exit 6）'
+expect '送出失敗時永遠不准印出 token' 1 lacks "$SEKRIT"
 
 printf '\n通過：%s，失敗：%s\n' "$passed" "$failed"
 if [ "$failed" -ne 0 ]; then

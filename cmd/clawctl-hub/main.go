@@ -403,7 +403,7 @@ func runRollbackCompatibility(argv []string, out io.Writer) error {
 
 func serve(argv []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("listen", "127.0.0.1:8770", "監聽位址（literal Tailscale IP:port；未指定時讀 $CLAWCTL_LISTEN）")
+	addr := fs.String("listen", "127.0.0.1:8770", "監聽位址（literal Tailscale IP:port；未指定時讀 $CLAWCTL_LISTEN）。旗標預設 127.0.0.1:8770 是 fail-closed placeholder，Hub 會拒絕。沒有正式環境預設埠；8787 只是文件裡的慣例範例，grant dst、CLAWCTL_PUBLIC_URL、agent --hub、tunnel origin 必須與這個位址同一個埠。")
 	dbPath := fs.String("db", defaultDB(), "SQLite 檔位置")
 	hubHost := fs.String("hub-host", hostname(), "這台的名字；用來偵測 Hub 是不是裝在它自己管的機器上")
 	notify := fs.String("notify-cmd", os.Getenv("CLAWCTL_NOTIFY_CMD"), "早報要餵給哪個指令（全文走 stdin）")

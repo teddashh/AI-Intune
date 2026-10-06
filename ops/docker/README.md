@@ -1,7 +1,7 @@
 # clawctl-hub Docker 部署 / Docker deploy
 
 > **任何小型 Linux VPS / Docker host 皆可**——不是 Oracle Cloud 專屬。  
-> **Grok Bot box 不准當 Hub 主機**（這台是建置／代理環境，不是 fleet console）。
+> **不要把 Hub 放在建置／CI 機器上**（那是建置環境，不是 fleet console）。
 
 ---
 
@@ -20,6 +20,7 @@
 ### 硬性限制
 
 Hub 的 `--listen` / `CLAWCTL_LISTEN` **必須是本機的 literal Tailscale IP:port**（例如 `100.64.0.12:8787`）。  
+Hub **沒有**正式環境預設埠。`--listen` 旗標預設 `127.0.0.1:8770` 會被拒絕。`8787` 只是慣例範例。grant `dst`、`CLAWCTL_PUBLIC_URL`、agent `--hub`、tunnel origin 必須與 `CLAWCTL_LISTEN` 同一個埠。  
 `0.0.0.0`、`127.0.0.1`、LAN／公網 IP、hostname 都會在開 DB 前被拒絕。  
 因此 compose 使用 **`network_mode: host`**，並掛載 `tailscaled.sock`。
 
@@ -28,11 +29,11 @@ Hub **不信任** `X-Forwarded-*`／`Forwarded` 做 operator 身分。
 ### 步驟（任意 VPS）
 
 1. **加入免費 Tailscale tailnet**（主機安裝 `tailscaled`，記下行 `tailscale ip -4`）。
-2. 在 Tailscale ACL 寫入三個 app capability grant（`…-view` / `…-operate` / `…-admin`），`dst` 指到該 IP、`tcp:8787`。詳見 `docs/OPERATOR-AUTH.md`。
+2. 在 Tailscale ACL 寫入三個 app capability grant（`…-view` / `…-operate` / `…-admin`），`dst` 指到該 IP，埠與 `CLAWCTL_LISTEN` 相同（範例才是 `tcp:8787`）。詳見 `docs/OPERATOR-AUTH.md`。
 3. 複製環境檔並填值：
    ```bash
    cp ops/docker/hub.env.example ops/docker/hub.env
-   # CLAWCTL_LISTEN=$(tailscale ip -4):8787
+   # CLAWCTL_LISTEN=$(tailscale ip -4):<port>   # 8787 is the conventional example, not a Hub default
    # CLAWCTL_OPERATOR_CAPABILITY_PREFIX=example.com/cap/clawctl
    ```
 4. **建置並啟動**（在 repo 根目錄）。`hub-data-init` 會先把 volume `clawctl-data` 收成 uid **65532**、mode **0700**，並在第一次啟動時把 Linux agent bundles 種進 `/var/lib/clawctl/agent-bootstrap/<版本>/`，然後 Hub 才起來：
@@ -58,7 +59,7 @@ Hub **不信任** `X-Forwarded-*`／`Forwarded` 做 operator 身分。
 # 或沿用既有：make hub && ./ops/install-hub.sh --listen … --operator-capability-prefix …
 ```
 
-完整說明：`docs/DEPLOY-OSS.md`。
+完整說明：`docs/DEPLOY-OSS.md`。託管範例：`docs/DEPLOY-FLY.md`（Fly.io）。Cloudflare Containers 尚未實作。
 
 ---
 
@@ -72,11 +73,11 @@ Hub **不信任** `X-Forwarded-*`／`Forwarded` 做 operator 身分。
 - Optional **Cloudflare Tunnel** for experimental agent ingress only — Hub does **not** trust `X-Forwarded-*` for operator identity; operator UI stays on the Tailscale IP.
 - Storage split: SQLite = state and digests; optional R2/S3 = large blobs when configured; GitHub = code only.
 - **Not Oracle-only.** Any small Linux VM / Docker host works.
-- **Do not host the Hub on the Grok Bot box.**
+- **Do not host the Hub on a build/CI machine.**
 
 ### Hard constraint
 
-`CLAWCTL_LISTEN` must be this host’s literal Tailscale `IP:port`. Compose uses `network_mode: host` and mounts `/var/run/tailscale/tailscaled.sock`.
+`CLAWCTL_LISTEN` must be this host’s literal Tailscale `IP:port`. Hub has no production default port. `8787` is the conventional example. The grant `dst` port, `CLAWCTL_PUBLIC_URL`, agent `--hub`, and any tunnel origin must use that same port. Compose uses `network_mode: host` and mounts `/var/run/tailscale/tailscaled.sock`.
 
 ### Steps
 
@@ -93,4 +94,4 @@ Hub **不信任** `X-Forwarded-*`／`Forwarded` 做 operator 身分。
 
 Smoke / fallback: `./ops/docker/smoke-build.sh` (falls back to `make hub` if Docker is missing).
 
-See `docs/DEPLOY-OSS.md` for the full open-source deploy guide.
+See `docs/DEPLOY-OSS.md` for the full open-source deploy guide. Fly.io, the hosted example, is `docs/DEPLOY-FLY.md`. Cloudflare Containers is not implemented (it would need tsnet, Litestream, and a Durable Object keep-alive).
