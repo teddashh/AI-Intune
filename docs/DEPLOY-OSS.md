@@ -7,9 +7,8 @@ Status: **Milestone 4 — Hub-enforced canary hold**. The primary way to run Hub
 Tailscale, and no public HTTP service. This guide does **not** change the
 operator auth model.
 
-Related: [`ops/docker/README.md`](../ops/docker/README.md), [`ops/install-hub.sh`](../ops/install-hub.sh),
-[DEPLOY-FLY.md](DEPLOY-FLY.md),
-operator auth contract: [OPERATOR-AUTH.md](OPERATOR-AUTH.md) (Tailscale app capabilities).
+Related: [OPERATOR-AUTH.md](OPERATOR-AUTH.md), [PRODUCT.md](PRODUCT.md),
+[`ops/docker/README.md`](../ops/docker/README.md), [`ops/install-hub.sh`](../ops/install-hub.sh).
 
 ---
 
@@ -290,3 +289,46 @@ Not implemented:
 - [ ] Tunnel token set only when `docker-compose.tunnel.yml` is used
 - [ ] Hub host is not also an enrolled production agent (or is accepted deliberately)
 - [ ] External deadman (`ops/deadman.sh` or healthchecks.io) runs **off** the Hub host
+
+---
+
+## 11. Hub install contract
+
+The longer install diary this contract used to live in is a private working note and is not published here. The section below is what the repository test locks to `ops/install-hub.sh` and `ops/clawctl-hub.service`.
+
+### 2.2 Hub
+
+```bash
+# 先照 docs/OPERATOR-AUTH.md 存好 Tailscale grant，再安裝：
+./ops/install-hub.sh \
+  --listen 100.x.x.x:8787 \
+  --operator-capability-prefix example.com/cap/clawctl
+```
+
+⚠ **這裡刻意不列出它做了哪幾步。** 這一節原本就是那幾步的手抄本，
+而手抄本會過期 —— unit 檔改了 `ExecStart`、Makefile 改了輸出目錄，
+這段文字不會跟著紅。腳本會壞，文字只會過期。要知道它做什麼就去讀它，
+那份註解跟程式碼在同一個檔案裡，不會各自漂走。
+
+它會拒絕 root、先開 linger 再碰 `systemctl --user`（順序不能換，
+理由在腳本裡）、擋掉「這台已經有一個 Hub 在跑」，
+最後不只打 `/healthz`，也會打 operator 首頁確認 LocalAPI app capability 真能回 200。
+`systemctl is-active` 不是判準，它只證明檔案放對位置；只有 healthz 綠也不能證明
+管理者沒有被 policy 鎖在外面。這個首頁 probe 只驗 Hub 本機的 Tailscale principal；
+外部 operator 工作站仍必須照 [OPERATOR-AUTH.md](OPERATOR-AUTH.md) §6 驗收。
+
+裝完監聽你明示的 Tailscale literal IP；沒有 `--listen` 時腳本會嘗試用
+`tailscale ip -4`，但 capability prefix 不猜。
+資料庫在 `~/.local/share/clawctl/clawctl.sqlite`。CLI 的 `defaultDB()` 與 unit 的
+explicit `--db` 必須指向同一處，並由跨檔測試鎖住；service 明寫參數是為了讓
+`hub.env`／user-manager ambient 的 `CLAWCTL_DB` 不能把 live writer 導離 upgrade
+script 實際 snapshot／restore 的 ledger。
+
+⚠ unit 裡的 `127.0.0.1:8787` 只是 env 檔缺失時的 fail-closed placeholder；新版
+binary 會在開 DB 前拒絕 loopback、hostname、`0.0.0.0`、LAN/public IP。UI/API 逐 request
+使用 Tailscale `WhoIsForIP` 與 `view`／`operate`／`admin` app capability；完整契約見
+[OPERATOR-AUTH.md](OPERATOR-AUTH.md)。
+
+> ⚠ 直接跑 `clawctl-hub`（不透過 unit）時 `--listen` 的預設是 `127.0.0.1:8770`，
+> 跟 unit 的 8787 不同；兩者現在都會被 operator auth 的 tailnet-IP validation 擋掉，
+> 不再能安靜啟動第二個 writer。正式啟動必須明示 tailnet listener 與 capability prefix。
