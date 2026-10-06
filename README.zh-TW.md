@@ -2,6 +2,8 @@
 
 [English](README.md) · **繁體中文**
 
+完整的雙語說明在 [README.md](README.md#繁體中文)。這一頁保留較短的公開介紹。
+
 AI-Intune 是以證據為核心的控制平臺，管理執行 AI agent 與 coding tools 的機器。Hub 記錄機器清單、觀測資料、desired state、job、驗證證據與稽核事件。Agent 由受管機器主動連出。
 
 [專案介紹頁](https://teddashh.github.io/AI-Intune/?lang=zh-TW) · [Apache 2.0 授權](LICENSE)
