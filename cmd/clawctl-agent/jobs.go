@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -621,16 +622,9 @@ func newJobsRunner(opts jobsOptions) (*jobsRunner, error) {
 		opts.JournalPath = journalPath()
 	}
 	if opts.Executor == nil {
-		openclaw := defaultOpenClawExecutor(opts.HubURL, opts.Token)
-		openclaw.deps.now = opts.Now
-		nodeRuntime := defaultNodeRuntimeExecutor(opts.HubURL, opts.Token)
-		nodeRuntime.deps.now = opts.Now
-		hermes := defaultHermesExecutor(opts.HubURL, opts.Token)
-		hermes.deps.now = opts.Now
-		kinds := newKindExecutor(noopExecutor{now: opts.Now}, deviceSyncExecutor{now: opts.Now},
-			openclaw, nodeRuntime, hermes)
-		kinds.executors[maintenance.JobKind] = maintenanceExecutor{}
-		opts.Executor = kinds
+		openclaw, nodeRuntime, hermes, claude, codex, grok, batServer, antigravity := executorsForGOOS(runtime.GOOS, opts.HubURL, opts.Token, opts.Now)
+		opts.Executor = newKindExecutor(noopExecutor{now: opts.Now}, deviceSyncExecutor{now: opts.Now},
+			openclaw, nodeRuntime, hermes).withKind(agentadapter.ExecutorKindClaudeCode, claude).withKind(agentadapter.ExecutorKindCodex, codex).withKind(agentadapter.ExecutorKindGrok, grok).withKind(agentadapter.ExecutorKindBATServer, batServer).withKind(agentadapter.ExecutorKindAntigravity, antigravity).withKind(maintenance.JobKind, maintenanceExecutor{})
 	}
 	w, err := loadWatermarkJournal(opts.JournalPath)
 	if err != nil {

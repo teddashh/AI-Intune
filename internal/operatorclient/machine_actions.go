@@ -43,13 +43,15 @@ func (c *Client) MachineActions(ctx context.Context, machineID string) (operator
 }
 
 var machineActionBlockers = map[operator.MachineActionBlocker]bool{
-	operator.MachineActionBlockerRetired:           true,
-	operator.MachineActionBlockerNeverReported:     true,
-	operator.MachineActionBlockerExecutionUnknown:  true,
-	operator.MachineActionBlockerExecutionDisabled: true,
-	operator.MachineActionBlockerActiveJobs:        true,
-	operator.MachineActionBlockerNoPendingToken:    true,
-	operator.MachineActionBlockerNoConnectAddress:  true,
+	operator.MachineActionBlockerRetired:              true,
+	operator.MachineActionBlockerNeverReported:        true,
+	operator.MachineActionBlockerExecutionUnknown:     true,
+	operator.MachineActionBlockerExecutionDisabled:    true,
+	operator.MachineActionBlockerActiveJobs:           true,
+	operator.MachineActionBlockerNoPendingToken:       true,
+	operator.MachineActionBlockerNoConnectAddress:     true,
+	operator.MachineActionBlockerTerminalNotLinked:    true,
+	operator.MachineActionBlockerTerminalLimitReached: true,
 }
 
 func validateMachineActionCatalogue(result operator.MachineActionCatalogue, machineID string) error {

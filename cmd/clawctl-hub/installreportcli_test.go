@@ -63,13 +63,13 @@ func installCLIFixture(t *testing.T) (string, machineCommandDeps) {
 	for _, intent := range []struct {
 		scopeType, scopeID, kind, id, spec string
 	}{
-		{"machine", f.machine.id, "claude-cli", "claude", `{"kind":"claude-cli","version":"2.1.195"}`},
+		{"machine", f.machine.id, "claude-cli", "claude-code", `{"kind":"claude-cli","version":"2.1.195"}`},
 		{"machine", f.machine.id, "gemini-cli", "gemini", `{"kind":"gemini-cli","version":"1.0.0"}`},
 		{"machine", f.machine.id, "codex-cli", "codex", `{"kind":"codex-cli","version":"0.9.0"}`},
 		// ⚠ channel scope 那一筆是這份報告存在的理由：canary-box 自己沒有被指派過
 		// openclaw，是它所在的 channel 被指派了，而 agent 收到的就是這一筆。
 		{"channel", "canary", "openclaw", "openclaw", `{"kind":"claude-cli","version":"2026.5.26"}`},
-		{"machine", silent, "claude-cli", "claude", `{"kind":"claude-cli","version":"2.1.195"}`},
+		{"machine", silent, "claude-cli", "claude-code", `{"kind":"claude-cli","version":"2.1.195"}`},
 	} {
 		if _, _, err := f.store.CreateDesiredState(intent.scopeType, intent.scopeID,
 			intent.kind, intent.id, intent.spec, "operator@test"); err != nil {

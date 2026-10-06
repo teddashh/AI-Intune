@@ -52,17 +52,18 @@ type execHTTPGetFunc func(context.Context, string) (*http.Response, error)
 // execDeps 集中所有會碰真機或外部 process 的入口；測試用 fsRoot 把絕對路徑
 // 映到暫存根目錄，production 的空 fsRoot 則直接使用 discovery 量到的路徑。
 type execDeps struct {
-	home      string
-	fsRoot    string
-	systemctl execSystemctlFunc
-	run       execRunFunc
-	discover  func(context.Context) *model.OpenClawInstall
-	dbDir     func() (dir string, layout string, ok bool)
-	httpGet   execHTTPGetFunc
-	hubURL    string
-	token     string
-	now       func() time.Time
-	sleep     func(context.Context, time.Duration) error
+	home               string
+	fsRoot             string
+	systemctl          execSystemctlFunc
+	run                execRunFunc
+	antigravityVersion func(context.Context, string) (string, string, error)
+	discover           func(context.Context) *model.OpenClawInstall
+	dbDir              func() (dir string, layout string, ok bool)
+	httpGet            execHTTPGetFunc
+	hubURL             string
+	token              string
+	now                func() time.Time
+	sleep              func(context.Context, time.Duration) error
 }
 
 type openclawExecutor struct {

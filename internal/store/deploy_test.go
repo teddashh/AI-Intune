@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/agentadapter"
 	"github.com/teddashh/AI-Intune/internal/deploy"
 	"github.com/teddashh/AI-Intune/internal/model"
 )
@@ -1289,6 +1291,389 @@ func TestWindowsNodeRuntimeCannotSucceedFromSelfAttestedEvidence(t *testing.T) {
 }
 
 // ⚠⚠ 守住只看見一筆通過就忽略同張單的失敗證據，錯誤宣告 succeeded 的錯。
+func TestClaudeCodeCannotSucceedFromSelfAttestedEvidence(t *testing.T) {
+	s := newDeployTestStore(t)
+	registerDeployMachine(t, s, "claude-linux")
+	spec := `{"kind":"claude-code","version":"2.1.278","target_os":"linux","target_arch":"amd64","bundle_layout":"claude-code-bundle:v1","artifact":{"sha256":"` + strings.Repeat("c", 64) + `","size":1,"url":"/v1/artifacts/` + strings.Repeat("c", 64) + `"}}`
+	tx, err := s.DB().Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	desiredID, revision, err := createDesiredStateTx(tx, "machine", "claude-linux", "claude-code", "claude-code",
+		spec, "operator", deployTestNow)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	jobID, err := createManagedJobTx(tx, "claude-linux", desiredID, revision, NewJob{
+		ArtifactDigest: "sha256:" + strings.Repeat("c", 64),
+	}, deployTestNow)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.ClaimJob(jobID, "claude-linux", deployTestNow, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []deploy.Event{deploy.Start, deploy.FinishWork} {
+		if _, err := s.AdvanceJobByAgent(jobID, "claude-linux", token, event, deployTestNow); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.RecordVerification(jobID, "claude-linux", token, "self-report",
+		"echo installed", 0, "ok", "", true, deployTestNow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); !errors.Is(err, ErrNoVerification) {
+		t.Fatalf("self-attested Claude Code error=%v", err)
+	}
+	binary := "/home/operator/.local/share/clawctl/claude-code/releases/2.1.278/bin/claude"
+	for _, evidence := range []struct {
+		rule, command, stdout string
+	}{
+		{"claude-code-current-artifact", "cat /home/operator/.local/share/clawctl/claude-code/releases/2.1.278/.clawctl-artifact-sha256", "sha256:" + strings.Repeat("c", 64) + "\n"},
+		{"claude-code-current-version", binary + " --version", "2.1.278 (Claude Code)\n"},
+	} {
+		if err := s.RecordVerification(jobID, "claude-linux", token, evidence.rule,
+			evidence.command, 0, evidence.stdout, "", true, deployTestNow); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if state, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); err != nil || state != deploy.Succeeded {
+		t.Fatalf("measured Claude Code state=%q error=%v", state, err)
+	}
+}
+
+func TestCodexCannotSucceedFromSelfAttestedEvidence(t *testing.T) {
+	s := newDeployTestStore(t)
+	registerDeployMachine(t, s, "codex-linux")
+	spec := `{"kind":"codex","version":"0.155.1","target_os":"linux","target_arch":"amd64","bundle_layout":"codex-bundle:v1","artifact":{"sha256":"` + strings.Repeat("d", 64) + `","size":1,"url":"/v1/artifacts/` + strings.Repeat("d", 64) + `"}}`
+	tx, err := s.DB().Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	desiredID, revision, err := createDesiredStateTx(tx, "machine", "codex-linux", "codex", "codex",
+		spec, "operator", deployTestNow)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	jobID, err := createManagedJobTx(tx, "codex-linux", desiredID, revision, NewJob{
+		ArtifactDigest: "sha256:" + strings.Repeat("d", 64),
+	}, deployTestNow)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.ClaimJob(jobID, "codex-linux", deployTestNow, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []deploy.Event{deploy.Start, deploy.FinishWork} {
+		if _, err := s.AdvanceJobByAgent(jobID, "codex-linux", token, event, deployTestNow); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.RecordVerification(jobID, "codex-linux", token, "self-report",
+		"echo installed", 0, "ok", "", true, deployTestNow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); !errors.Is(err, ErrNoVerification) {
+		t.Fatalf("self-attested Codex error=%v", err)
+	}
+	binary := "/home/operator/.local/share/clawctl/codex/releases/0.155.1/bin/codex"
+	for _, evidence := range []struct {
+		rule, command, stdout string
+	}{
+		{"codex-current-artifact", "cat /home/operator/.local/share/clawctl/codex/releases/0.155.1/.clawctl-artifact-sha256", "sha256:" + strings.Repeat("d", 64) + "\n"},
+		{"codex-current-version", binary + " --version", "codex-cli 0.155.1\n"},
+	} {
+		if err := s.RecordVerification(jobID, "codex-linux", token, evidence.rule,
+			evidence.command, 0, evidence.stdout, "", true, deployTestNow); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if state, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); err != nil || state != deploy.Succeeded {
+		t.Fatalf("measured Codex state=%q error=%v", state, err)
+	}
+}
+
+func TestGrokCannotSucceedFromSelfAttestedEvidence(t *testing.T) {
+	s := newDeployTestStore(t)
+	registerDeployMachine(t, s, "grok-linux")
+	spec := `{"kind":"grok","version":"1.0.40","target_os":"linux","target_arch":"amd64","bundle_layout":"grok-bundle:v1","artifact":{"sha256":"` + strings.Repeat("e", 64) + `","size":1,"url":"/v1/artifacts/` + strings.Repeat("e", 64) + `"}}`
+	jobID := insertMeasuredEvidenceJob(t, s, "grok-linux", "grok", spec)
+	token := advanceMeasuredEvidenceJob(t, s, jobID, "grok-linux")
+	if err := s.RecordVerification(jobID, "grok-linux", token, "self-report",
+		"echo installed", 0, "ok", "", true, deployTestNow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); !errors.Is(err, ErrNoVerification) {
+		t.Fatalf("self-attested Grok error=%v", err)
+	}
+	binary := "/home/operator/.local/share/clawctl/grok/releases/1.0.40/bin/grok"
+	for _, evidence := range []struct {
+		rule, command, stdout string
+	}{
+		{"grok-current-artifact", "cat /home/operator/.local/share/clawctl/grok/releases/1.0.40/.clawctl-artifact-sha256", "sha256:" + strings.Repeat("e", 64) + "\n"},
+		{"grok-current-version", binary + " --version", "grok 1.0.40 (eb1a2256660d) [stable]\n"},
+	} {
+		if err := s.RecordVerification(jobID, "grok-linux", token, evidence.rule,
+			evidence.command, 0, evidence.stdout, "", true, deployTestNow); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if state, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); err != nil || state != deploy.Succeeded {
+		t.Fatalf("measured Grok state=%q error=%v", state, err)
+	}
+}
+
+func TestBATServerCannotSucceedFromSelfAttestedEvidence(t *testing.T) {
+	s := newDeployTestStore(t)
+	registerDeployMachine(t, s, "bat-linux")
+	artifactHash := strings.Repeat("e", 64)
+	binaryHash := strings.Repeat("c", 64)
+	spec := batServerEvidenceSpec("amd64", artifactHash, binaryHash)
+	jobID := insertMeasuredEvidenceJob(t, s, "bat-linux", "bat-server", spec)
+	token := advanceMeasuredEvidenceJob(t, s, jobID, "bat-linux")
+	if err := s.RecordVerification(jobID, "bat-linux", token, "self-report",
+		"echo installed", 0, "ok", "", true, deployTestNow); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); !errors.Is(err, ErrNoVerification) {
+		t.Fatalf("self-attested BAT Server error=%v", err)
+	}
+	recordBATServerEvidence(t, s, jobID, "bat-linux", token, "3.2.10", artifactHash, binaryHash,
+		"bat-server-linux-x86_64/bat-server", "active\n")
+	if state, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); err != nil || state != deploy.Succeeded {
+		t.Fatalf("measured BAT Server state=%q error=%v", state, err)
+	}
+}
+
+func TestBATServerMeasuredEvidenceRequiresInstalledBinaryHash(t *testing.T) {
+	s := newDeployTestStore(t)
+	registerDeployMachine(t, s, "bat-hash")
+	artifactHash := strings.Repeat("e", 64)
+	binaryHash := strings.Repeat("c", 64)
+	spec := batServerEvidenceSpec("amd64", artifactHash, binaryHash)
+	jobID := insertMeasuredEvidenceJob(t, s, "bat-hash", "bat-server", spec)
+	token := advanceMeasuredEvidenceJob(t, s, jobID, "bat-hash")
+	recordBATServerEvidence(t, s, jobID, "bat-hash", token, "3.2.10", artifactHash, strings.Repeat("d", 64),
+		"bat-server-linux-x86_64/bat-server", "active\n")
+	_, ready, err := s.measuredEvidenceStatus(jobID)
+	if err != nil || ready {
+		t.Fatalf("ready=%t err=%v", ready, err)
+	}
+}
+
+func TestBATServerMeasuredEvidenceRequiresActiveUnit(t *testing.T) {
+	s := newDeployTestStore(t)
+	registerDeployMachine(t, s, "bat-unit")
+	artifactHash := strings.Repeat("e", 64)
+	binaryHash := strings.Repeat("c", 64)
+	spec := batServerEvidenceSpec("amd64", artifactHash, binaryHash)
+	jobID := insertMeasuredEvidenceJob(t, s, "bat-unit", "bat-server", spec)
+	token := advanceMeasuredEvidenceJob(t, s, jobID, "bat-unit")
+	recordBATServerEvidence(t, s, jobID, "bat-unit", token, "3.2.10", artifactHash, binaryHash,
+		"bat-server-linux-x86_64/bat-server", "inactive\n")
+	_, ready, err := s.measuredEvidenceStatus(jobID)
+	if err != nil || ready {
+		t.Fatalf("ready=%t err=%v", ready, err)
+	}
+}
+
+func TestBATServerMeasuredEvidenceAcceptsARM64BinaryPath(t *testing.T) {
+	s := newDeployTestStore(t)
+	registerDeployMachine(t, s, "bat-arm")
+	artifactHash := strings.Repeat("a", 64)
+	binaryHash := strings.Repeat("b", 64)
+	spec := batServerEvidenceSpec("arm64", artifactHash, binaryHash)
+	jobID := insertMeasuredEvidenceJob(t, s, "bat-arm", "bat-server", spec)
+	token := advanceMeasuredEvidenceJob(t, s, jobID, "bat-arm")
+	recordBATServerEvidence(t, s, jobID, "bat-arm", token, "3.2.10", artifactHash, binaryHash,
+		"bat-server-linux-x86_64/bat-server", "active\n")
+	if _, ready, err := s.measuredEvidenceStatus(jobID); err != nil || ready {
+		t.Fatalf("amd64 path satisfied arm64 ready=%t err=%v", ready, err)
+	}
+	jobID = insertMeasuredEvidenceJob(t, s, "bat-arm", "bat-server", spec)
+	token = advanceMeasuredEvidenceJob(t, s, jobID, "bat-arm")
+	recordBATServerEvidence(t, s, jobID, "bat-arm", token, "3.2.10", artifactHash, binaryHash,
+		"bat-server-linux-aarch64/bat-server", "active\n")
+	if state, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); err != nil || state != deploy.Succeeded {
+		t.Fatalf("arm64 state=%q err=%v", state, err)
+	}
+}
+
+func batServerEvidenceSpec(arch, artifactHash, binaryHash string) string {
+	return fmt.Sprintf(`{"kind":"bat-server","version":"3.2.10","target_os":"linux","target_arch":%q,"bundle_layout":"bat-server-bundle:v1","binary_sha256":%q,"artifact":{"sha256":%q,"size":1,"url":"/v1/artifacts/%s"}}`,
+		arch, binaryHash, artifactHash, artifactHash)
+}
+
+func recordBATServerEvidence(t *testing.T, s *Store, jobID, machine, token, version, artifactHash, binaryHash, binaryRel, unitStdout string) {
+	t.Helper()
+	release := "/home/operator/.local/share/clawctl/bat-server/releases/" + version
+	for _, evidence := range []struct {
+		rule, command, stdout string
+	}{
+		{"bat-server-release", "test -d " + release, release + "\n"},
+		{"bat-server-artifact", "cat " + release + "/.clawctl-artifact-sha256", "sha256:" + artifactHash + "\n"},
+		{"bat-server-binary", "sha256sum " + release + "/" + binaryRel, binaryHash + "\n"},
+		{"bat-server-unit", "systemctl --user is-active " + model.BATServerUnit, unitStdout},
+		{"bat-server-endpoint", model.BATServerEndpointCommand, "authenticated\n"},
+	} {
+		if err := s.RecordVerification(jobID, machine, token, evidence.rule,
+			evidence.command, 0, evidence.stdout, "", true, deployTestNow); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestGrokMeasuredVersionUsesCommandThenExactVersion(t *testing.T) {
+	const version = "1.0.40"
+	if !grokMeasuredVersionMatches("\n\ngrok 1.0.40 (eb1a2256660d) [stable]\n", version) {
+		t.Fatal("official version line was not accepted")
+	}
+	if grokMeasuredVersionMatches("1.0.40 grok\n", version) {
+		t.Fatal("accepted a line that does not start with grok")
+	}
+	if grokMeasuredVersionMatches("grokx 1.0.40\n", version) {
+		t.Fatal("accepted a command that is not grok")
+	}
+	if grokMeasuredVersionMatches("grok 1.0.41 (eb1a2256660d) [stable]\n", version) {
+		t.Fatal("accepted a different version")
+	}
+}
+
+func TestMeasuredEvidenceCheckersClaimEveryDeclaredKind(t *testing.T) {
+	s := newDeployTestStore(t)
+	registerDeployMachine(t, s, "measured-registry")
+	declared := 0
+	for _, contract := range agentadapter.Contracts() {
+		if !contract.RequiresMeasuredEvidence {
+			continue
+		}
+		declared++
+		claimed := false
+		var statusErr error
+		for _, platform := range contract.Platforms {
+			spec := fmt.Sprintf(`{"kind":%q,"version":"1.2.3","target_os":%q,"target_arch":%q,"bundle_layout":"bundle","artifact":{"sha256":"%s","size":1,"url":"/v1/artifacts/%s"}}`,
+				contract.ExecutorKind, platform.OS, platform.Arch, strings.Repeat("a", 64), strings.Repeat("a", 64))
+			jobID := insertMeasuredEvidenceJob(t, s, "measured-registry", contract.ExecutorKind, spec)
+			required, _, err := s.measuredEvidenceStatus(jobID)
+			if err != nil {
+				statusErr = err
+				break
+			}
+			if required {
+				claimed = true
+				break
+			}
+		}
+		if statusErr != nil || !claimed {
+			t.Fatalf("kind %s claimed=%t err=%v", contract.ExecutorKind, claimed, statusErr)
+		}
+	}
+	if declared == 0 {
+		t.Fatal("no adapter declares measured evidence")
+	}
+}
+
+func TestDeclaredMeasuredEvidenceKindsHaveAChecker(t *testing.T) {
+	s := newDeployTestStore(t)
+	registerDeployMachine(t, s, "measured-unwired")
+	declared := 0
+	for _, contract := range agentadapter.Contracts() {
+		if !contract.RequiresMeasuredEvidence {
+			continue
+		}
+		declared++
+		spec := fmt.Sprintf(`{"kind":%q,"version":"1.2.3","target_os":"linux","target_arch":"amd64"}`, contract.ExecutorKind)
+		jobID := insertMeasuredEvidenceJob(t, s, "measured-unwired", contract.ExecutorKind, spec)
+		wired, _, _, err := s.measuredEvidenceDecision(jobID)
+		if err != nil || !wired {
+			t.Fatalf("kind %s wired=%t err=%v", contract.ExecutorKind, wired, err)
+		}
+	}
+	if declared == 0 {
+		t.Fatal("no adapter declares measured evidence")
+	}
+	jobID := insertMeasuredEvidenceJob(t, s, "measured-unwired", "openclaw", `{"kind":"openclaw","version":"1.2.3"}`)
+	wired, required, _, err := s.measuredEvidenceDecision(jobID)
+	if err != nil || wired || required {
+		t.Fatalf("openclaw wired=%t required=%t err=%v", wired, required, err)
+	}
+}
+
+func TestUndeclaredMeasuredEvidenceKindsStillSucceedFromExecutorEvidence(t *testing.T) {
+	s := newDeployTestStore(t)
+	registerDeployMachine(t, s, "measured-undeclared")
+	undeclared := 0
+	for _, contract := range agentadapter.Contracts() {
+		if contract.RequiresMeasuredEvidence {
+			continue
+		}
+		undeclared++
+		spec := fmt.Sprintf(`{"kind":%q,"version":"1.2.3"}`, contract.ExecutorKind)
+		jobID := insertMeasuredEvidenceJob(t, s, "measured-undeclared", contract.ExecutorKind, spec)
+		token := advanceMeasuredEvidenceJob(t, s, jobID, "measured-undeclared")
+		if err := s.RecordVerification(jobID, "measured-undeclared", token, "self-report",
+			"echo installed", 0, "ok", "", true, deployTestNow); err != nil {
+			t.Fatal(err)
+		}
+		if state, err := s.MarkSucceededIfVerified(jobID, deployTestNow.Add(time.Second)); err != nil || state != deploy.Succeeded {
+			t.Fatalf("kind %s state=%q err=%v", contract.ExecutorKind, state, err)
+		}
+	}
+	if undeclared == 0 {
+		t.Fatal("no adapter keeps executor evidence")
+	}
+}
+
+func insertMeasuredEvidenceJob(t *testing.T, s *Store, machineID, kind, spec string) string {
+	t.Helper()
+	tx, err := s.DB().Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	desiredID, revision, err := createDesiredStateTx(tx, "machine", machineID, kind, kind, spec, "operator", deployTestNow)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	jobID, err := createManagedJobTx(tx, machineID, desiredID, revision, NewJob{
+		ArtifactDigest: "sha256:" + strings.Repeat("a", 64),
+	}, deployTestNow)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	return jobID
+}
+
+func advanceMeasuredEvidenceJob(t *testing.T, s *Store, jobID, machineID string) string {
+	t.Helper()
+	token, err := s.ClaimJob(jobID, machineID, deployTestNow, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []deploy.Event{deploy.Start, deploy.FinishWork} {
+		if _, err := s.AdvanceJobByAgent(jobID, machineID, token, event, deployTestNow); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return token
+}
+
 func TestMarkSucceededIfVerifiedRejectsAnyFailedResult(t *testing.T) {
 	s := newDeployTestStore(t)
 	registerDeployMachine(t, s, "machine-a")
@@ -2018,5 +2403,57 @@ func TestHubTimeoutOnIrreversibleJobLandsInManualIntervention(t *testing.T) {
 	}
 	if job.State != deploy.ManualIntervention || job.TerminalAt == nil {
 		t.Errorf("終態或終態時間不符：%+v", job)
+	}
+}
+
+func TestBATServerMeasuredEvidenceRequiresOwnUnitAndEndpoint(t *testing.T) {
+	artifactHash := strings.Repeat("e", 64)
+	binaryHash := strings.Repeat("c", 64)
+	release := "/home/operator/.local/share/clawctl/bat-server/releases/3.2.10"
+	type evidenceRow struct{ rule, command, stdout string }
+	for _, tc := range []struct {
+		name  string
+		edit  func([]evidenceRow) []evidenceRow
+		ready bool
+	}{
+		{"every row", func(rows []evidenceRow) []evidenceRow { return rows }, true},
+		{"the machine's own unit", func(rows []evidenceRow) []evidenceRow {
+			rows[3].command = "systemctl --user is-active bat-server.service"
+			return rows
+		}, false},
+		{"no endpoint row", func(rows []evidenceRow) []evidenceRow { return rows[:4] }, false},
+		{"endpoint row for another address", func(rows []evidenceRow) []evidenceRow {
+			rows[4].command = "bat-remote auth 127.0.0.1:9876"
+			return rows
+		}, false},
+		{"endpoint row without its newline", func(rows []evidenceRow) []evidenceRow {
+			rows[4].stdout = "authenticated"
+			return rows
+		}, false},
+		{"endpoint row with other output", func(rows []evidenceRow) []evidenceRow {
+			rows[4].stdout = "authenticated\nclosed\n"
+			return rows
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newDeployTestStore(t)
+			registerDeployMachine(t, s, "bat-endpoint")
+			jobID := insertMeasuredEvidenceJob(t, s, "bat-endpoint", "bat-server", batServerEvidenceSpec("amd64", artifactHash, binaryHash))
+			token := advanceMeasuredEvidenceJob(t, s, jobID, "bat-endpoint")
+			for _, row := range tc.edit([]evidenceRow{
+				{"bat-server-release", "test -d " + release, release + "\n"},
+				{"bat-server-artifact", "cat " + release + "/.clawctl-artifact-sha256", "sha256:" + artifactHash + "\n"},
+				{"bat-server-binary", "sha256sum " + release + "/bat-server-linux-x86_64/bat-server", binaryHash + "\n"},
+				{"bat-server-unit", "systemctl --user is-active " + model.BATServerUnit, "active\n"},
+				{"bat-server-endpoint", model.BATServerEndpointCommand, "authenticated\n"},
+			}) {
+				if err := s.RecordVerification(jobID, "bat-endpoint", token, row.rule, row.command, 0, row.stdout, "", true, deployTestNow); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, ready, err := s.measuredEvidenceStatus(jobID); err != nil || ready != tc.ready {
+				t.Fatalf("ready=%t err=%v, want ready=%t", ready, err, tc.ready)
+			}
+		})
 	}
 }

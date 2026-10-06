@@ -1124,9 +1124,20 @@ SELECT command, exit_code, stdout_excerpt, stderr_excerpt, passed, verified_at
 // MarkSucceededIfVerified 只依 Hub 已保存的驗證證據判定工作單成功。
 // ⚠ 回傳的是判決後工作單真正停在的狀態；呼叫端不得假設 nil 就等於 succeeded。
 func (s *Store) MarkSucceededIfVerified(jobID string, now time.Time) (deploy.JobState, error) {
-	required, ready, err := s.nodeRuntimeMeasuredEvidenceReady(jobID)
+	wired, required, ready, err := s.measuredEvidenceDecision(jobID)
 	if err != nil {
 		return "", err
+	}
+	// A declared kind with no wired checker cannot succeed. A wired checker can
+	// still report required=false for a variant that does not use this evidence.
+	if !wired {
+		declared, declareErr := s.jobDeclaresMeasuredEvidence(jobID)
+		if declareErr != nil {
+			return "", declareErr
+		}
+		if declared {
+			required, ready = true, false
+		}
 	}
 	// ⚠⚠ EXISTS 與 NOT EXISTS 跟狀態更新在同一個 SQL 敘述中，擋的是
 	// 沒有證據便成功，以及檢查後才插入失敗證據的競態。
@@ -1223,6 +1234,68 @@ SELECT jobs.state,
 		return "", ErrNotVerifying
 	}
 	return "", fmt.Errorf("store: 工作單 %s 未能寫入成功狀態", jobID)
+}
+
+func (s *Store) measuredEvidenceStatus(jobID string) (required, ready bool, err error) {
+	_, required, ready, err = s.measuredEvidenceDecision(jobID)
+	return required, ready, err
+}
+
+func (s *Store) measuredEvidenceDecision(jobID string) (wired, required, ready bool, err error) {
+	kind, err := s.jobResourceKind(jobID)
+	if err != nil {
+		return false, false, false, err
+	}
+	switch kind {
+	case agentadapter.ExecutorKindNodeRuntime:
+		required, ready, err = s.nodeRuntimeMeasuredEvidenceReady(jobID)
+		return true, required, ready, err
+	case agentadapter.ExecutorKindClaudeCode:
+		required, ready, err = s.claudeCodeMeasuredEvidenceReady(jobID)
+		return true, required, ready, err
+	case agentadapter.ExecutorKindCodex:
+		required, ready, err = s.codexMeasuredEvidenceReady(jobID)
+		return true, required, ready, err
+	case agentadapter.ExecutorKindGrok:
+		required, ready, err = s.grokMeasuredEvidenceReady(jobID)
+		return true, required, ready, err
+	case agentadapter.ExecutorKindBATServer:
+		required, ready, err = s.batServerMeasuredEvidenceReady(jobID)
+		return true, required, ready, err
+	case agentadapter.ExecutorKindAntigravity:
+		required, ready, err = s.antigravityMeasuredEvidenceReady(jobID)
+		return true, required, ready, err
+	default:
+		return false, false, false, nil
+	}
+}
+
+func (s *Store) jobResourceKind(jobID string) (string, error) {
+	var resourceKind string
+	err := s.rdb.QueryRow(`
+SELECT desired_state.resource_kind
+  FROM jobs JOIN desired_state ON desired_state.desired_id=jobs.desired_id
+ WHERE jobs.job_id=?`, jobID).Scan(&resourceKind)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrJobNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("store: inspect measured evidence contract: %w", err)
+	}
+	return resourceKind, nil
+}
+
+func (s *Store) jobDeclaresMeasuredEvidence(jobID string) (bool, error) {
+	resourceKind, err := s.jobResourceKind(jobID)
+	if err != nil {
+		return false, err
+	}
+	for _, contract := range agentadapter.Contracts() {
+		if contract.ExecutorKind == resourceKind && contract.RequiresMeasuredEvidence {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Store) nodeRuntimeMeasuredEvidenceReady(jobID string) (required, ready bool, err error) {
@@ -1368,6 +1441,574 @@ func windowsDrivePath(value string) bool {
 	return len(value) >= 3 &&
 		((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) &&
 		value[1] == ':' && value[2] == '/'
+}
+
+func (s *Store) claudeCodeMeasuredEvidenceReady(jobID string) (required, ready bool, err error) {
+	var state deploy.JobState
+	var resourceKind, resourceID, rawSpec string
+	err = s.rdb.QueryRow(`
+SELECT jobs.state,desired_state.resource_kind,desired_state.resource_id,desired_state.spec
+  FROM jobs JOIN desired_state ON desired_state.desired_id=jobs.desired_id
+ WHERE jobs.job_id=?`, jobID).Scan(&state, &resourceKind, &resourceID, &rawSpec)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, ErrJobNotFound
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("store: inspect Claude Code job: %w", err)
+	}
+	if deploy.IsTerminal(state) || resourceKind != agentadapter.ExecutorKindClaudeCode ||
+		resourceID != agentadapter.ExecutorKindClaudeCode {
+		return false, false, nil
+	}
+	var spec model.ClaudeCodeSpec
+	if json.Unmarshal([]byte(rawSpec), &spec) != nil || spec.Kind != agentadapter.ExecutorKindClaudeCode ||
+		(spec.TargetOS != "linux" && spec.TargetOS != "darwin" && spec.TargetOS != "windows") {
+		return false, false, nil
+	}
+	required = true
+	if !validMeasuredNodeRuntimeVersion(spec.Version) || spec.Artifact == nil ||
+		!validLowerSHA256(spec.Artifact.SHA256) {
+		return true, false, nil
+	}
+	binary := "/bin/claude"
+	if spec.TargetOS == "windows" {
+		binary = "/bin/claude.exe"
+	}
+	type evidencePair struct {
+		releasePath string
+		binaryPath  string
+		artifact    bool
+		version     bool
+	}
+	pairs := map[string]*evidencePair{
+		"claude-code-activate": {},
+		"claude-code-current":  {},
+	}
+	rows, err := s.rdb.Query(`
+SELECT verification_results.rule_id,verification_results.command,
+       COALESCE(verification_results.stdout_excerpt,'')
+  FROM verification_results JOIN jobs ON jobs.job_id=verification_results.job_id
+ WHERE verification_results.job_id=?
+   AND verification_results.exit_code=0
+   AND verification_results.passed=1
+   AND verification_results.producer_kind=?
+   AND verification_results.producer_id=jobs.machine_id
+   AND verification_results.evidence_role=?
+   AND verification_results.authority=?
+   AND verification_results.provenance_recorded=1
+   AND verification_results.received_at<>''
+   AND verification_results.observed_digest=''
+   AND verification_results.observed_version=''
+   AND verification_results.verifier_id=''
+ ORDER BY verification_results.rowid`, jobID,
+		JobVerificationProducerExecutorAgent, JobVerificationRoleExecutor,
+		JobVerificationAuthorityMachineLease)
+	if err != nil {
+		return true, false, fmt.Errorf("store: read Claude Code evidence: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ruleID, command, stdout string
+		if err := rows.Scan(&ruleID, &command, &stdout); err != nil {
+			return true, false, fmt.Errorf("store: scan Claude Code evidence: %w", err)
+		}
+		command = normalizeNodeRuntimeEvidenceCommand(command)
+		for prefix, pair := range pairs {
+			switch ruleID {
+			case prefix + "-artifact":
+				suffix := "/.local/share/clawctl/claude-code/releases/" + spec.Version +
+					"/.clawctl-artifact-sha256"
+				if nodeRuntimeEvidenceLocationOK(spec.TargetOS, command, "cat /") &&
+					strings.HasSuffix(command, suffix) && !strings.ContainsAny(command, "\r\n") &&
+					stdout == "sha256:"+spec.Artifact.SHA256+"\n" {
+					pair.releasePath = strings.TrimSuffix(strings.TrimPrefix(command, "cat "),
+						"/.clawctl-artifact-sha256")
+					pair.artifact = true
+				}
+			case prefix + "-version":
+				suffix := "/.local/share/clawctl/claude-code/releases/" + spec.Version + binary + " --version"
+				fields := strings.Fields(strings.TrimSpace(stdout))
+				if nodeRuntimeEvidenceLocationOK(spec.TargetOS, command, "/") &&
+					strings.HasSuffix(command, suffix) && !strings.ContainsAny(command, "\r\n") &&
+					len(fields) > 0 && fields[0] == spec.Version {
+					pair.binaryPath = strings.TrimSuffix(command, " --version")
+					pair.version = true
+				}
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return true, false, fmt.Errorf("store: iterate Claude Code evidence: %w", err)
+	}
+	for _, pair := range pairs {
+		releasePath := strings.TrimSuffix(pair.binaryPath, binary)
+		if pair.artifact && pair.version && pair.releasePath == releasePath {
+			return true, true, nil
+		}
+	}
+	return true, false, nil
+}
+
+func (s *Store) codexMeasuredEvidenceReady(jobID string) (required, ready bool, err error) {
+	var state deploy.JobState
+	var resourceKind, resourceID, rawSpec string
+	err = s.rdb.QueryRow(`
+SELECT jobs.state,desired_state.resource_kind,desired_state.resource_id,desired_state.spec
+  FROM jobs JOIN desired_state ON desired_state.desired_id=jobs.desired_id
+ WHERE jobs.job_id=?`, jobID).Scan(&state, &resourceKind, &resourceID, &rawSpec)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, ErrJobNotFound
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("store: inspect Codex job: %w", err)
+	}
+	if deploy.IsTerminal(state) || resourceKind != agentadapter.ExecutorKindCodex ||
+		resourceID != agentadapter.ExecutorKindCodex {
+		return false, false, nil
+	}
+	var spec model.CodexSpec
+	if json.Unmarshal([]byte(rawSpec), &spec) != nil || spec.Kind != agentadapter.ExecutorKindCodex ||
+		(spec.TargetOS != "linux" && spec.TargetOS != "darwin" && spec.TargetOS != "windows") {
+		return false, false, nil
+	}
+	required = true
+	if !validMeasuredNodeRuntimeVersion(spec.Version) || spec.Artifact == nil ||
+		!validLowerSHA256(spec.Artifact.SHA256) {
+		return true, false, nil
+	}
+	binary := "/bin/codex"
+	if spec.TargetOS == "windows" {
+		binary = "/bin/codex.exe"
+	}
+	type evidencePair struct {
+		releasePath string
+		binaryPath  string
+		artifact    bool
+		version     bool
+	}
+	pairs := map[string]*evidencePair{
+		"codex-activate": {},
+		"codex-current":  {},
+	}
+	rows, err := s.rdb.Query(`
+SELECT verification_results.rule_id,verification_results.command,
+       COALESCE(verification_results.stdout_excerpt,'')
+  FROM verification_results JOIN jobs ON jobs.job_id=verification_results.job_id
+ WHERE verification_results.job_id=?
+   AND verification_results.exit_code=0
+   AND verification_results.passed=1
+   AND verification_results.producer_kind=?
+   AND verification_results.producer_id=jobs.machine_id
+   AND verification_results.evidence_role=?
+   AND verification_results.authority=?
+   AND verification_results.provenance_recorded=1
+   AND verification_results.received_at<>''
+   AND verification_results.observed_digest=''
+   AND verification_results.observed_version=''
+   AND verification_results.verifier_id=''
+ ORDER BY verification_results.rowid`, jobID,
+		JobVerificationProducerExecutorAgent, JobVerificationRoleExecutor,
+		JobVerificationAuthorityMachineLease)
+	if err != nil {
+		return true, false, fmt.Errorf("store: read Codex evidence: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ruleID, command, stdout string
+		if err := rows.Scan(&ruleID, &command, &stdout); err != nil {
+			return true, false, fmt.Errorf("store: scan Codex evidence: %w", err)
+		}
+		command = normalizeNodeRuntimeEvidenceCommand(command)
+		for prefix, pair := range pairs {
+			switch ruleID {
+			case prefix + "-artifact":
+				suffix := "/.local/share/clawctl/codex/releases/" + spec.Version +
+					"/.clawctl-artifact-sha256"
+				if nodeRuntimeEvidenceLocationOK(spec.TargetOS, command, "cat /") &&
+					strings.HasSuffix(command, suffix) && !strings.ContainsAny(command, "\r\n") &&
+					stdout == "sha256:"+spec.Artifact.SHA256+"\n" {
+					pair.releasePath = strings.TrimSuffix(strings.TrimPrefix(command, "cat "),
+						"/.clawctl-artifact-sha256")
+					pair.artifact = true
+				}
+			case prefix + "-version":
+				suffix := "/.local/share/clawctl/codex/releases/" + spec.Version + binary + " --version"
+				if nodeRuntimeEvidenceLocationOK(spec.TargetOS, command, "/") &&
+					strings.HasSuffix(command, suffix) && !strings.ContainsAny(command, "\r\n") &&
+					codexMeasuredVersionMatches(stdout, spec.Version) {
+					pair.binaryPath = strings.TrimSuffix(command, " --version")
+					pair.version = true
+				}
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return true, false, fmt.Errorf("store: iterate Codex evidence: %w", err)
+	}
+	for _, pair := range pairs {
+		releasePath := strings.TrimSuffix(pair.binaryPath, binary)
+		if pair.artifact && pair.version && pair.releasePath == releasePath {
+			return true, true, nil
+		}
+	}
+	return true, false, nil
+}
+
+func codexMeasuredVersionMatches(stdout, version string) bool {
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		return len(fields) > 0 && fields[len(fields)-1] == version
+	}
+	return false
+}
+
+func (s *Store) grokMeasuredEvidenceReady(jobID string) (required, ready bool, err error) {
+	var state deploy.JobState
+	var resourceKind, resourceID, rawSpec string
+	err = s.rdb.QueryRow(`
+SELECT jobs.state,desired_state.resource_kind,desired_state.resource_id,desired_state.spec
+  FROM jobs JOIN desired_state ON desired_state.desired_id=jobs.desired_id
+ WHERE jobs.job_id=?`, jobID).Scan(&state, &resourceKind, &resourceID, &rawSpec)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, ErrJobNotFound
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("store: inspect Grok job: %w", err)
+	}
+	if deploy.IsTerminal(state) || resourceKind != agentadapter.ExecutorKindGrok ||
+		resourceID != agentadapter.ExecutorKindGrok {
+		return false, false, nil
+	}
+	var spec model.GrokSpec
+	if json.Unmarshal([]byte(rawSpec), &spec) != nil || spec.Kind != agentadapter.ExecutorKindGrok ||
+		(spec.TargetOS != "linux" && spec.TargetOS != "darwin" && spec.TargetOS != "windows") {
+		return false, false, nil
+	}
+	required = true
+	if !validMeasuredNodeRuntimeVersion(spec.Version) || spec.Artifact == nil ||
+		!validLowerSHA256(spec.Artifact.SHA256) {
+		return true, false, nil
+	}
+	binary := "/bin/grok"
+	if spec.TargetOS == "windows" {
+		binary = "/bin/grok.exe"
+	}
+	type evidencePair struct {
+		releasePath string
+		binaryPath  string
+		artifact    bool
+		version     bool
+	}
+	pairs := map[string]*evidencePair{
+		"grok-activate": {},
+		"grok-current":  {},
+	}
+	rows, err := s.rdb.Query(`
+SELECT verification_results.rule_id,verification_results.command,
+       COALESCE(verification_results.stdout_excerpt,'')
+  FROM verification_results JOIN jobs ON jobs.job_id=verification_results.job_id
+ WHERE verification_results.job_id=?
+   AND verification_results.exit_code=0
+   AND verification_results.passed=1
+   AND verification_results.producer_kind=?
+   AND verification_results.producer_id=jobs.machine_id
+   AND verification_results.evidence_role=?
+   AND verification_results.authority=?
+   AND verification_results.provenance_recorded=1
+   AND verification_results.received_at<>''
+   AND verification_results.observed_digest=''
+   AND verification_results.observed_version=''
+   AND verification_results.verifier_id=''
+ ORDER BY verification_results.rowid`, jobID,
+		JobVerificationProducerExecutorAgent, JobVerificationRoleExecutor,
+		JobVerificationAuthorityMachineLease)
+	if err != nil {
+		return true, false, fmt.Errorf("store: read Grok evidence: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ruleID, command, stdout string
+		if err := rows.Scan(&ruleID, &command, &stdout); err != nil {
+			return true, false, fmt.Errorf("store: scan Grok evidence: %w", err)
+		}
+		command = normalizeNodeRuntimeEvidenceCommand(command)
+		for prefix, pair := range pairs {
+			switch ruleID {
+			case prefix + "-artifact":
+				suffix := "/.local/share/clawctl/grok/releases/" + spec.Version +
+					"/.clawctl-artifact-sha256"
+				if nodeRuntimeEvidenceLocationOK(spec.TargetOS, command, "cat /") &&
+					strings.HasSuffix(command, suffix) && !strings.ContainsAny(command, "\r\n") &&
+					stdout == "sha256:"+spec.Artifact.SHA256+"\n" {
+					pair.releasePath = strings.TrimSuffix(strings.TrimPrefix(command, "cat "),
+						"/.clawctl-artifact-sha256")
+					pair.artifact = true
+				}
+			case prefix + "-version":
+				suffix := "/.local/share/clawctl/grok/releases/" + spec.Version + binary + " --version"
+				if nodeRuntimeEvidenceLocationOK(spec.TargetOS, command, "/") &&
+					strings.HasSuffix(command, suffix) && !strings.ContainsAny(command, "\r\n") &&
+					grokMeasuredVersionMatches(stdout, spec.Version) {
+					pair.binaryPath = strings.TrimSuffix(command, " --version")
+					pair.version = true
+				}
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return true, false, fmt.Errorf("store: iterate Grok evidence: %w", err)
+	}
+	for _, pair := range pairs {
+		releasePath := strings.TrimSuffix(pair.binaryPath, binary)
+		if pair.artifact && pair.version && pair.releasePath == releasePath {
+			return true, true, nil
+		}
+	}
+	return true, false, nil
+}
+
+func antigravityMeasuredVersionMatches(stdout, version string) bool {
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		return line == version
+	}
+	return false
+}
+
+func (s *Store) antigravityMeasuredEvidenceReady(jobID string) (required, ready bool, err error) {
+	var state deploy.JobState
+	var resourceKind, resourceID, rawSpec string
+	err = s.rdb.QueryRow(`
+SELECT jobs.state,desired_state.resource_kind,desired_state.resource_id,desired_state.spec
+  FROM jobs JOIN desired_state ON desired_state.desired_id=jobs.desired_id
+ WHERE jobs.job_id=?`, jobID).Scan(&state, &resourceKind, &resourceID, &rawSpec)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, ErrJobNotFound
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("store: inspect Antigravity job: %w", err)
+	}
+	if deploy.IsTerminal(state) || resourceKind != agentadapter.ExecutorKindAntigravity ||
+		resourceID != agentadapter.ExecutorKindAntigravity {
+		return false, false, nil
+	}
+	var spec model.AntigravitySpec
+	if json.Unmarshal([]byte(rawSpec), &spec) != nil || spec.Kind != agentadapter.ExecutorKindAntigravity ||
+		(spec.TargetOS != "linux" && spec.TargetOS != "darwin" && spec.TargetOS != "windows") {
+		return false, false, nil
+	}
+	required = true
+	if !validMeasuredNodeRuntimeVersion(spec.Version) || spec.Artifact == nil ||
+		!validLowerSHA256(spec.Artifact.SHA256) {
+		return true, false, nil
+	}
+	binary := "/bin/agy"
+	if spec.TargetOS == "windows" {
+		binary = "/bin/agy.exe"
+	}
+	type evidencePair struct {
+		releasePath string
+		binaryPath  string
+		artifact    bool
+		version     bool
+	}
+	pairs := map[string]*evidencePair{
+		"antigravity-activate": {},
+		"antigravity-current":  {},
+	}
+	rows, err := s.rdb.Query(`
+SELECT verification_results.rule_id,verification_results.command,
+       COALESCE(verification_results.stdout_excerpt,'')
+  FROM verification_results JOIN jobs ON jobs.job_id=verification_results.job_id
+ WHERE verification_results.job_id=?
+   AND verification_results.exit_code=0
+   AND verification_results.passed=1
+   AND verification_results.producer_kind=?
+   AND verification_results.producer_id=jobs.machine_id
+   AND verification_results.evidence_role=?
+   AND verification_results.authority=?
+   AND verification_results.provenance_recorded=1
+   AND verification_results.received_at<>''
+   AND verification_results.observed_digest=''
+   AND verification_results.observed_version=''
+   AND verification_results.verifier_id=''
+ ORDER BY verification_results.rowid`, jobID,
+		JobVerificationProducerExecutorAgent, JobVerificationRoleExecutor,
+		JobVerificationAuthorityMachineLease)
+	if err != nil {
+		return true, false, fmt.Errorf("store: read Antigravity evidence: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ruleID, command, stdout string
+		if err := rows.Scan(&ruleID, &command, &stdout); err != nil {
+			return true, false, fmt.Errorf("store: scan Antigravity evidence: %w", err)
+		}
+		command = normalizeNodeRuntimeEvidenceCommand(command)
+		for prefix, pair := range pairs {
+			switch ruleID {
+			case prefix + "-artifact":
+				suffix := "/.local/share/clawctl/antigravity/releases/" + spec.Version +
+					"/.clawctl-artifact-sha256"
+				if nodeRuntimeEvidenceLocationOK(spec.TargetOS, command, "cat /") &&
+					strings.HasSuffix(command, suffix) && !strings.ContainsAny(command, "\r\n") &&
+					stdout == "sha256:"+spec.Artifact.SHA256+"\n" {
+					pair.releasePath = strings.TrimSuffix(strings.TrimPrefix(command, "cat "),
+						"/.clawctl-artifact-sha256")
+					pair.artifact = true
+				}
+			case prefix + "-version":
+				suffix := "/.local/share/clawctl/antigravity/releases/" + spec.Version + binary + " --version"
+				if nodeRuntimeEvidenceLocationOK(spec.TargetOS, command, "/") &&
+					strings.HasSuffix(command, suffix) && !strings.ContainsAny(command, "\r\n") &&
+					antigravityMeasuredVersionMatches(stdout, spec.Version) {
+					pair.binaryPath = strings.TrimSuffix(command, " --version")
+					pair.version = true
+				}
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return true, false, fmt.Errorf("store: iterate Antigravity evidence: %w", err)
+	}
+	for _, pair := range pairs {
+		releasePath := strings.TrimSuffix(pair.binaryPath, binary)
+		if pair.artifact && pair.version && pair.releasePath == releasePath {
+			return true, true, nil
+		}
+	}
+	return true, false, nil
+}
+
+func (s *Store) batServerMeasuredEvidenceReady(jobID string) (required, ready bool, err error) {
+	var state deploy.JobState
+	var resourceKind, resourceID, rawSpec string
+	err = s.rdb.QueryRow(`
+SELECT jobs.state,desired_state.resource_kind,desired_state.resource_id,desired_state.spec
+  FROM jobs JOIN desired_state ON desired_state.desired_id=jobs.desired_id
+ WHERE jobs.job_id=?`, jobID).Scan(&state, &resourceKind, &resourceID, &rawSpec)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, ErrJobNotFound
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("store: inspect BAT Server job: %w", err)
+	}
+	if deploy.IsTerminal(state) || resourceKind != agentadapter.ExecutorKindBATServer ||
+		resourceID != agentadapter.ExecutorKindBATServer {
+		return false, false, nil
+	}
+	var spec model.BATServerSpec
+	if json.Unmarshal([]byte(rawSpec), &spec) != nil || spec.Kind != agentadapter.ExecutorKindBATServer ||
+		spec.TargetOS != "linux" || (spec.TargetArch != "amd64" && spec.TargetArch != "arm64") {
+		return false, false, nil
+	}
+	required = true
+	binaryRel, binaryOK := model.BATServerInstalledBinary(spec.TargetArch)
+	if !validMeasuredNodeRuntimeVersion(spec.Version) || spec.BundleLayout != model.BATServerBundleLayoutV1 ||
+		spec.Artifact == nil || !validLowerSHA256(spec.Artifact.SHA256) || !validLowerSHA256(spec.BinarySHA256) ||
+		!binaryOK {
+		return required, false, nil
+	}
+	rows, err := s.rdb.Query(`
+SELECT verification_results.rule_id,verification_results.command,
+       COALESCE(verification_results.stdout_excerpt,'')
+  FROM verification_results JOIN jobs ON jobs.job_id=verification_results.job_id
+ WHERE verification_results.job_id=?
+   AND verification_results.exit_code=0
+   AND verification_results.passed=1
+   AND verification_results.producer_kind=?
+   AND verification_results.producer_id=jobs.machine_id
+   AND verification_results.evidence_role=?
+   AND verification_results.authority=?
+   AND verification_results.provenance_recorded=1
+   AND verification_results.received_at<>''
+   AND verification_results.observed_digest=''
+   AND verification_results.observed_version=''
+   AND verification_results.verifier_id=''
+ ORDER BY verification_results.rowid`, jobID,
+		JobVerificationProducerExecutorAgent, JobVerificationRoleExecutor,
+		JobVerificationAuthorityMachineLease)
+	if err != nil {
+		return required, false, fmt.Errorf("store: read BAT Server evidence: %w", err)
+	}
+	defer rows.Close()
+	var releasePath, artifactRelease, binaryRelease string
+	var artifactOK, binaryOKEvidence, unitOK, endpointOK bool
+	for rows.Next() {
+		var ruleID, command, stdout string
+		if err := rows.Scan(&ruleID, &command, &stdout); err != nil {
+			return required, false, fmt.Errorf("store: scan BAT Server evidence: %w", err)
+		}
+		command = normalizeNodeRuntimeEvidenceCommand(command)
+		switch ruleID {
+		case "bat-server-release":
+			path := strings.TrimPrefix(command, "test -d ")
+			if strings.HasPrefix(command, "test -d /") && !strings.ContainsAny(command, "\r\n") &&
+				batServerEvidenceRelease(path, spec.Version) && strings.TrimSpace(stdout) == path {
+				releasePath = path
+			}
+		case "bat-server-artifact":
+			suffix := "/.clawctl-artifact-sha256"
+			path := strings.TrimSuffix(strings.TrimPrefix(command, "cat "), suffix)
+			if strings.HasPrefix(command, "cat /") && strings.HasSuffix(command, suffix) &&
+				!strings.ContainsAny(command, "\r\n") && batServerEvidenceRelease(path, spec.Version) &&
+				stdout == "sha256:"+spec.Artifact.SHA256+"\n" {
+				artifactRelease = path
+				artifactOK = true
+			}
+		case "bat-server-binary":
+			suffix := "/" + binaryRel
+			path := strings.TrimSuffix(strings.TrimPrefix(command, "sha256sum "), suffix)
+			if strings.HasPrefix(command, "sha256sum /") && strings.HasSuffix(command, suffix) &&
+				!strings.ContainsAny(command, "\r\n") && batServerEvidenceRelease(path, spec.Version) &&
+				strings.TrimSpace(stdout) == spec.BinarySHA256 {
+				binaryRelease = path
+				binaryOKEvidence = true
+			}
+		case "bat-server-unit":
+			if command == "systemctl --user is-active "+model.BATServerUnit && strings.TrimSpace(stdout) == "active" {
+				unitOK = true
+			}
+		case "bat-server-endpoint":
+			if command == model.BATServerEndpointCommand && stdout == "authenticated\n" {
+				endpointOK = true
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return required, false, fmt.Errorf("store: iterate BAT Server evidence: %w", err)
+	}
+	if artifactOK && binaryOKEvidence && unitOK && endpointOK && releasePath != "" &&
+		releasePath == artifactRelease && releasePath == binaryRelease {
+		return required, true, nil
+	}
+	return required, false, nil
+}
+
+func batServerEvidenceRelease(path, version string) bool {
+	suffix := "/.local/share/clawctl/bat-server/releases/" + version
+	return strings.HasPrefix(path, "/") && strings.HasSuffix(path, suffix) &&
+		!strings.Contains(path, "..") && !strings.ContainsAny(path, "\r\n") &&
+		strings.Count(path, suffix) == 1
+}
+
+func grokMeasuredVersionMatches(stdout, version string) bool {
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		return len(fields) >= 2 && fields[0] == "grok" && fields[1] == version
+	}
+	return false
 }
 
 func validMeasuredNodeRuntimeVersion(value string) bool {

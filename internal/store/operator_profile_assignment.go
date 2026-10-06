@@ -663,6 +663,28 @@ func validPreparedAssignmentSpec(contract agentadapter.Contract, manifest appcat
 			spec.Artifact.SHA256 == manifest.Artifact.SHA256 && spec.Artifact.Size == manifest.Artifact.Size &&
 			spec.Artifact.URL == "/v1/artifacts/"+manifest.Artifact.SHA256 && spec.Artifact.EnginesNode == "" &&
 			spec.Artifact.UpstreamTarball == "" && spec.Artifact.SHA512 == ""
+	case agentadapter.ExecutorKindCodex:
+		var spec model.CodexSpec
+		if !decodeCanonicalProfileAssignmentSpec(raw, &spec) {
+			return false
+		}
+		return spec.Kind == contract.ExecutorKind && spec.Version == manifest.Version &&
+			spec.TargetOS == target.OS && spec.TargetArch == target.Arch &&
+			spec.BundleLayout == model.CodexBundleLayoutV1 && spec.Artifact != nil &&
+			spec.Artifact.SHA256 == manifest.Artifact.SHA256 && spec.Artifact.Size == manifest.Artifact.Size &&
+			spec.Artifact.URL == "/v1/artifacts/"+manifest.Artifact.SHA256 && spec.Artifact.EnginesNode == "" &&
+			spec.Artifact.UpstreamTarball == "" && spec.Artifact.SHA512 == ""
+	case agentadapter.ExecutorKindGrok:
+		var spec model.GrokSpec
+		if !decodeCanonicalProfileAssignmentSpec(raw, &spec) {
+			return false
+		}
+		return spec.Kind == contract.ExecutorKind && spec.Version == manifest.Version &&
+			spec.TargetOS == target.OS && spec.TargetArch == target.Arch &&
+			spec.BundleLayout == model.GrokBundleLayoutV1 && spec.Artifact != nil &&
+			spec.Artifact.SHA256 == manifest.Artifact.SHA256 && spec.Artifact.Size == manifest.Artifact.Size &&
+			spec.Artifact.URL == "/v1/artifacts/"+manifest.Artifact.SHA256 && spec.Artifact.EnginesNode == "" &&
+			spec.Artifact.UpstreamTarball == "" && spec.Artifact.SHA512 == ""
 	case agentadapter.ExecutorKindAntigravity:
 		var spec model.AntigravitySpec
 		if !decodeCanonicalProfileAssignmentSpec(raw, &spec) {
@@ -671,6 +693,30 @@ func validPreparedAssignmentSpec(contract agentadapter.Contract, manifest appcat
 		return spec.Kind == contract.ExecutorKind && spec.Version == manifest.Version &&
 			spec.TargetOS == target.OS && spec.TargetArch == target.Arch &&
 			spec.BundleLayout == model.AntigravityBundleLayoutV1 && spec.Artifact != nil &&
+			spec.Artifact.SHA256 == manifest.Artifact.SHA256 && spec.Artifact.Size == manifest.Artifact.Size &&
+			spec.Artifact.URL == "/v1/artifacts/"+manifest.Artifact.SHA256 && spec.Artifact.EnginesNode == "" &&
+			spec.Artifact.UpstreamTarball == "" && spec.Artifact.SHA512 == ""
+	case agentadapter.ExecutorKindBATServer:
+		var spec model.BATServerSpec
+		if !decodeCanonicalProfileAssignmentSpec(raw, &spec) {
+			return false
+		}
+		return spec.Kind == contract.ExecutorKind && spec.Version == manifest.Version &&
+			spec.TargetOS == target.OS && spec.TargetArch == target.Arch &&
+			spec.TargetOS == "linux" && (spec.TargetArch == "amd64" || spec.TargetArch == "arm64") &&
+			spec.BundleLayout == model.BATServerBundleLayoutV1 && validLowerSHA256(spec.BinarySHA256) &&
+			spec.Artifact != nil && spec.Artifact.SHA256 == manifest.Artifact.SHA256 &&
+			spec.Artifact.Size == manifest.Artifact.Size &&
+			spec.Artifact.URL == "/v1/artifacts/"+manifest.Artifact.SHA256 && spec.Artifact.EnginesNode == "" &&
+			spec.Artifact.UpstreamTarball == "" && spec.Artifact.SHA512 == ""
+	case agentadapter.ExecutorKindClaudeCode:
+		var spec model.ClaudeCodeSpec
+		if !decodeCanonicalProfileAssignmentSpec(raw, &spec) {
+			return false
+		}
+		return spec.Kind == contract.ExecutorKind && spec.Version == manifest.Version &&
+			spec.TargetOS == target.OS && spec.TargetArch == target.Arch &&
+			spec.BundleLayout == model.ClaudeCodeBundleLayoutV1 && spec.Artifact != nil &&
 			spec.Artifact.SHA256 == manifest.Artifact.SHA256 && spec.Artifact.Size == manifest.Artifact.Size &&
 			spec.Artifact.URL == "/v1/artifacts/"+manifest.Artifact.SHA256 && spec.Artifact.EnginesNode == "" &&
 			spec.Artifact.UpstreamTarball == "" && spec.Artifact.SHA512 == ""

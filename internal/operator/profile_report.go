@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/agentadapter"
 	"github.com/teddashh/AI-Intune/internal/store"
 )
 
@@ -567,7 +568,11 @@ func profileSeenVersions(tools []store.FleetToolRow, retired map[string]bool,
 		if version == "" {
 			continue
 		}
-		key := profileVersionKey{packageID: row.Name, version: version}
+		packageID := row.Name
+		if id, ok := agentadapter.PackageForProbeTool(row.Name); ok {
+			packageID = id
+		}
+		key := profileVersionKey{packageID: packageID, version: version}
 		count := out[key]
 		count.on++
 		// ⚠ 判準跟軟體清查與每機安裝狀態共用同一份 ToolRuntimeOf。這一頁自己再判一次

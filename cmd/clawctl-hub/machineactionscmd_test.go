@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/teddashh/AI-Intune/internal/model"
 	"github.com/teddashh/AI-Intune/internal/operator"
 )
 
@@ -121,6 +123,36 @@ func TestMachineActionsCLIJSONIsTheOperatorCatalogue(t *testing.T) {
 	if catalogue.MachineID != f.machine.id || len(catalogue.Actions) != 7 ||
 		catalogue.SchemaVersion != operator.MachineActionsSchemaVersion {
 		t.Fatalf("catalogue=%+v", catalogue)
+	}
+}
+
+func TestMachineActionsCLIShowsOpenTerminalBlockedUntilTheLinkIsUp(t *testing.T) {
+	f := observedOperatorFixture(t)
+	if _, err := f.store.DB().Exec(`UPDATE machine_registry SET assigned_user_id=? WHERE machine_id=?`,
+		"42", f.machine.id); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.RecordObservation(f.machine.id, model.ObservationBatch{
+		SchemaVersion: model.SchemaVersion, MeasuredAt: jobsTestNow.Add(time.Minute),
+		Identity: model.Identity{Hostname: "cnode-operator", OS: "linux", Arch: "amd64", UnixUser: "example-user"},
+	}, jobsTestNow.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	base, deps := machineActionsCLIServer(t, f, true, true)
+	var out, errOut bytes.Buffer
+	if err := runMachineCommandWithDeps(t.Context(), []string{
+		"actions", "--hub-url", base, "--machine", f.machine.id,
+	}, &out, &errOut, deps); err != nil {
+		t.Fatalf("err=%v errOut=%s", err, errOut.String())
+	}
+	text := out.String()
+	row := machineActionsTableRow(t, text, "開啟終端")
+	if !strings.Contains(row, "被擋") {
+		t.Fatalf("開啟終端那一列應該被擋：%q", row)
+	}
+	want := "開啟終端：這台的終端連線目前沒有接上 Hub。　下一步：確認這台機器上的 agent 與 bat-server 都在執行。"
+	if !strings.Contains(text, want) {
+		t.Fatalf("輸出少了 %q：\n%s", want, text)
 	}
 }
 
