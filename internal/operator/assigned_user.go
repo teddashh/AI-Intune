@@ -131,6 +131,13 @@ func AssignedUserSemanticDigest(req MachineAssignedUserRequest) string {
 }
 
 func (s *Service) assignedUserLogin(ctx context.Context, userID string) (string, error) {
+	if strings.HasPrefix(userID, "local:") {
+		login, err := s.store.LocalAccountLogin(strings.TrimPrefix(userID, "local:"))
+		if err != nil {
+			return "", &store.OperatorRequestError{Code: store.OperatorCodeAssignedUserNotInRoster, Detail: "Local account is unavailable"}
+		}
+		return login, nil
+	}
 	if s.tailnetSource == nil {
 		return "", assignedUserSourceError("沒有 tailnet 來源，不能核對要指派的使用者")
 	}

@@ -28,6 +28,11 @@ import (
 type AuditAction string
 
 const (
+	AuditHubSetup                  AuditAction = "hub-setup"
+	AuditHubLoginOK                AuditAction = "hub-login-ok"
+	AuditHubLoginFailed            AuditAction = "hub-login-failed"
+	AuditHubLockout                AuditAction = "hub-lockout"
+	AuditHubLogout                 AuditAction = "hub-logout"
 	AuditConnect                   AuditAction = "connect"
 	AuditRetire                    AuditAction = "retire"
 	AuditUnretire                  AuditAction = "unretire"

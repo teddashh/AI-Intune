@@ -196,6 +196,11 @@ func main() {
 			log.Fatal(err)
 		}
 		switch command {
+		case "reset-admin-password":
+			if err := runResetAdminPassword(os.Args[2:], os.Stdin); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "enroll-token":
 			cmdEnrollToken(os.Args[2:])
 			return
@@ -376,7 +381,7 @@ func classifyTopLevel(argv []string) (string, error) {
 		return "", nil
 	}
 	switch argv[0] {
-	case "enroll-token", "machines", "audit", "retire", "report", "data", "tickets", "tailnet",
+	case "reset-admin-password", "enroll-token", "machines", "audit", "retire", "report", "data", "tickets", "tailnet",
 		"enrollment-limit", "prune", "restore-drill", "job", "machine", "deployment",
 		"artifact", "catalog", "verifier", "settings", "compliance", "version", "notify-check":
 		return argv[0], nil
@@ -623,6 +628,12 @@ func serve(argv []string) {
 		log.Fatalf("failed to load agent bootstrap bundles: %v", err)
 	}
 
+	if mode != authModeTailscale {
+		operatorAuthorizer, err = withSessionAuthorizer(h.store, mode, cloud[0].public.Scheme() == "https", *operatorCapabilityPrefix, operatorAuthorizer)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 	handler, err := newHubHTTPHandler(h, ui, operatorAuthorizer, operatorAuthority, cloud...)
 	if err != nil {
 		log.Fatalf("operator route policy incomplete: %v", err)

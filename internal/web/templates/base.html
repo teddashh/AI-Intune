@@ -319,6 +319,7 @@ blockquote.summary .meta{display:block;color:var(--dim);font-size:12px;margin-bo
       <a href="/machines/diagnostics" class="nav-item {{if eq .Nav "machines-diagnostics"}}on{{end}}" {{if eq .Nav "machines-diagnostics"}}aria-current="page"{{end}}>
         <span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 4a6 6 0 0 0-6 8l-5 5 4 4 5-5a6 6 0 0 0 8-6"/><path d="m15 7 2 2"/></svg></span><span>{{.Locale.SupportLabel}}</span>
       </a>
+    {{if .Access.LocalSession}}<form method="post" action="/logout"><button type="submit" class="nav-item">Sign out</button></form>{{end}}
     </nav>
   </aside>
   <div class="workspace-shell {{if .SubNav.Items}}with-workload-nav{{end}}">

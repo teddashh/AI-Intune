@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -166,10 +167,10 @@ func (s *Store) ApplyOperatorMachineAssignedUser(req OperatorMachineAssignedUser
 	case AssignedUserNone:
 		targetID, targetLogin = "", ""
 	case "":
-		return reject(OperatorCodeBadAssignedUser, "指派使用者只接受 tailnet 使用者 ID 或 none")
+		return reject(OperatorCodeBadAssignedUser, "指派使用者只接受 operator 使用者 ID 或 none")
 	default:
 		if !canonicalAssignedUserID(req.UserID) || requestedLogin == "" || len(requestedLogin) > 320 || strings.ContainsAny(requestedLogin, "\r\n") {
-			return reject(OperatorCodeBadAssignedUser, "指派使用者只接受 tailnet 使用者 ID 或 none")
+			return reject(OperatorCodeBadAssignedUser, "指派使用者只接受 operator 使用者 ID 或 none")
 		}
 		targetID, targetLogin = req.UserID, requestedLogin
 	}
@@ -277,7 +278,12 @@ func requestedAssignedUser(req OperatorMachineAssignedUserRequest) (id, login st
 	return req.UserID, strings.TrimSpace(req.UserLogin)
 }
 
+var localAssignedUserID = regexp.MustCompile(`^local:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
 func canonicalAssignedUserID(id string) bool {
+	if localAssignedUserID.MatchString(id) {
+		return true
+	}
 	n, err := strconv.ParseInt(id, 10, 64)
 	if err != nil || n <= 0 {
 		return false

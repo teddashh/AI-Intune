@@ -5,6 +5,7 @@ go 1.27.1
 require (
 	github.com/andybalholm/brotli v1.2.4
 	github.com/coder/websocket v1.8.14
+	golang.org/x/crypto v0.54.0
 	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.58.0
 	tailscale.com v1.102.2
@@ -31,7 +32,6 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
-	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect

@@ -1504,3 +1504,26 @@ CREATE TABLE IF NOT EXISTS maintenance_alert_state (
   updated_at  TEXT NOT NULL,
   PRIMARY KEY (machine_id, condition)
 );
+
+-- Local operator credentials. Session bearer tokens are never persisted.
+CREATE TABLE IF NOT EXISTS hub_accounts (
+ account_id TEXT PRIMARY KEY,
+ username TEXT UNIQUE NOT NULL CHECK(length(username) BETWEEN 3 AND 64 AND username NOT GLOB '*[^a-z0-9._-]*'),
+ password_hash TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ failed_attempts INTEGER NOT NULL DEFAULT 0,
+ locked_until TEXT,
+ disabled_at TEXT
+);
+CREATE TABLE IF NOT EXISTS hub_sessions (
+ session_hash TEXT PRIMARY KEY,
+ account_id TEXT NOT NULL REFERENCES hub_accounts(account_id),
+ created_at TEXT NOT NULL,
+ last_seen_at TEXT NOT NULL,
+ idle_expires_at TEXT NOT NULL,
+ absolute_expires_at TEXT NOT NULL,
+ revoked_at TEXT,
+ source_addr TEXT,
+ user_agent TEXT
+);
+CREATE INDEX IF NOT EXISTS hub_sessions_account ON hub_sessions(account_id);

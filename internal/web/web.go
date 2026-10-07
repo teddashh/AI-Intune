@@ -676,15 +676,16 @@ func selectSubNavigationLocation(nav *subNavigation, section string) {
 }
 
 type accessView struct {
-	Known       bool
-	Login       string
-	Device      string
-	Subject     string
-	Permissions string
-	Attribution string
-	CanView     bool
-	CanOperate  bool
-	CanAdmin    bool
+	LocalSession bool
+	Known        bool
+	Login        string
+	Device       string
+	Subject      string
+	Permissions  string
+	Attribution  string
+	CanView      bool
+	CanOperate   bool
+	CanAdmin     bool
 }
 
 func accessFromRequest(r *http.Request) accessView {
@@ -696,7 +697,8 @@ func accessFromRequest(r *http.Request) accessView {
 		return accessView{}
 	}
 	return accessView{
-		Known: true, Login: principal.TailnetUserLogin, Device: principal.DeviceName,
+		LocalSession: principal.AuthMethod == operatorauth.AuthMethodLocalAccountSession,
+		Known:        true, Login: principal.TailnetUserLogin, Device: principal.DeviceName,
 		Subject: principal.StableSubject(), Permissions: principal.PermissionLabel(),
 		Attribution: principal.Attribution(), CanView: principal.Has(operatorauth.View),
 		CanOperate: principal.Has(operatorauth.Operate), CanAdmin: principal.Has(operatorauth.Admin),
@@ -1258,7 +1260,7 @@ func (s *Server) machine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	assignedUser.UserLogin = assignedUserWebLabel(assignedUser.UserID, assignedUser.UserLogin)
-	directory := assignedUserDirectory(s.tailnet.Get(r.Context()))
+	directory := s.assignedUserDirectoryForRequest(r, s.tailnet.Get(r.Context()))
 	channelKey, err := operator.NewIdempotencyKey("web-machine-channel")
 	if err != nil {
 		s.fail(w, "產生 channel 表單 request key 失敗", err)

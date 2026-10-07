@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -96,6 +97,7 @@ type nonOperatorRouteClass uint8
 const (
 	nonOperatorAgent nonOperatorRouteClass = iota + 1
 	nonOperatorHealth
+	nonOperatorAccount
 	nonOperatorMetrics
 )
 
@@ -106,9 +108,15 @@ type nonOperatorRoutePolicy struct {
 // nonOperatorRoutePolicies is the other half of the routing security boundary.
 // Routes on the root mux bypass human/operator authorization by design, so
 // every one must be named here and classified as machine, liveness, or
-// telemetry traffic. In particular, /v1/operator/* can never be classified as
+// public account traffic. In particular, /v1/operator/* can never be classified as
 // a machine route.
 var nonOperatorRoutePolicies = map[string]nonOperatorRoutePolicy{
+	"GET /setup":   {nonOperatorAccount},
+	"POST /setup":  {nonOperatorAccount},
+	"GET /login":   {nonOperatorAccount},
+	"POST /login":  {nonOperatorAccount},
+	"POST /logout": {nonOperatorAccount},
+
 	"POST /v1/enrollments":             {nonOperatorAgent},
 	"POST /v1/checkins":                {nonOperatorAgent},
 	"POST /v1/observations:batch":      {nonOperatorAgent},
@@ -402,6 +410,7 @@ func newHubHTTPHandler(h *hub, ui *web.Server, authorizer operatorRequestAuthori
 	}
 	root := http.NewServeMux()
 	nonOperatorRegistered := h.machineAndPublicRoutes(root)
+	nonOperatorRegistered = append(nonOperatorRegistered, registerAccountRoutes(root, h.store, ui, authority, cloud...)...)
 
 	operatorMux := http.NewServeMux()
 	operatorRegistered := h.operatorRoutes(operatorMux)
@@ -460,6 +469,10 @@ func validateNonOperatorRoutePolicies(registered []string, policies map[string]n
 			if len(segments) < 2 || segments[0] != "v1" ||
 				!validMachinePlaneDiscriminator(segments[1]) {
 				return fmt.Errorf("non-operator route %q machine-plane discriminator must be literal", pattern)
+			}
+		case nonOperatorAccount:
+			if !isAccountRoute(pattern) {
+				return fmt.Errorf("invalid account route %q", pattern)
 			}
 		case nonOperatorHealth:
 			if pattern != "GET /healthz" {
@@ -597,10 +610,23 @@ func (b *operatorBoundary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		b.observeAuthDenial(r, pattern, policy, string(decision.Code), decision.Detail,
 			decision.Principal, cause)
+		if decision.Code == operatorauth.Unauthenticated && policy.Representation == operatorHTML && b.authMode() != authModeTailscale && b.store != nil {
+			n, err := b.store.CountAccounts()
+			if err != nil {
+				http.Error(w, "Authentication unavailable", 503)
+				return
+			}
+			target := "/login?next=" + url.QueryEscape(r.URL.RequestURI())
+			if n == 0 {
+				target = "/setup"
+			}
+			http.Redirect(w, r, target, http.StatusSeeOther)
+			return
+		}
 		writeOperatorBoundaryError(w, policy.Representation, decision.HTTPStatus, string(decision.Code), decision.Detail)
 		return
 	}
-	_, breach := validateAuthorizedResult(before, authed, decision, policy.Permission)
+	_, breach := validateAuthorizedResult(before, authed, decision, policy.Permission, b.authMode())
 	if breach != "" {
 		b.observeAuthDenial(r, pattern, policy, string(operatorauth.AuthConfigurationInvalid),
 			string(breach), operatorauth.Principal{}, nil)
@@ -680,7 +706,7 @@ func routingOf(r *http.Request) requestRouting {
 }
 
 func validateAuthorizedResult(before requestRouting, authed *http.Request, decision operatorauth.Decision,
-	required operatorauth.Permission,
+	required operatorauth.Permission, modes ...authMode,
 ) (operatorauth.Principal, operatorAuthBreach) {
 	after := routingOf(authed)
 	if !after.complete {
@@ -705,7 +731,12 @@ func validateAuthorizedResult(before requestRouting, authed *http.Request, decis
 	if principal.TailnetUserLogin == "" {
 		return principal, operatorAuthSuccessIdentityLoginEmpty
 	}
-	if principal.AuthMethod != operatorauth.AuthMethodLocalAPI {
+	mode := authModeTailscale
+	if len(modes) > 0 {
+		mode = modes[0]
+	}
+	allowedMethod := (principal.AuthMethod == operatorauth.AuthMethodLocalAPI && (mode == authModeTailscale || mode == authModeBoth)) || (principal.AuthMethod == operatorauth.AuthMethodLocalAccountSession && (mode == authModeLocal || mode == authModeBoth))
+	if !allowedMethod {
 		return principal, operatorAuthSuccessIdentityMethodNotLocalAPI
 	}
 	var expectedCapability string
@@ -1083,4 +1114,11 @@ func (b *operatorBoundary) matchesAuthority(host string) bool {
 	}
 	canonical, ok := canonicalLiteralAuthority(host)
 	return ok && canonical == b.authority
+}
+
+func (b *operatorBoundary) authMode() authMode {
+	if b.cloud != nil {
+		return b.cloud.mode
+	}
+	return authModeTailscale
 }

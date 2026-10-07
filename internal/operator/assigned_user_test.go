@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/store"
 	"github.com/teddashh/AI-Intune/internal/tailnet"
 )
@@ -142,5 +143,42 @@ func assignedUserStatus(userID, login, display string) tailnet.Status {
 		TailnetUsers: []tailnet.TailnetUser{{
 			UserID: userID, Login: login, DisplayName: display,
 		}},
+	}
+}
+
+func TestLocalAccountAssignmentAndTerminalAudit(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "hub.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a, err := st.CreateFirstAdmin("admin", "long admin password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := enrollMachine(t, st, "samplehub1", false)
+	service := New(st)
+	revision := int64(0)
+	_, err = service.ChangeMachineAssignedUser(context.Background(), MachineAssignedUserRequest{MachineID: id, UserID: "local:" + a.AccountID, ExpectedRevision: &revision, ConfirmDisplayName: "samplehub1", IdempotencyKey: "assign-local", Actor: Actor{SourceAddr: "127.0.0.1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := operatorauth.Principal{TailnetUserID: "local:" + a.AccountID, TailnetUserLogin: a.Username, AuthMethod: operatorauth.AuthMethodLocalAccountSession, SourceAddr: "127.0.0.1", NodeStableID: "local-session", AuthorizedCapability: "local/cap/clawctl-operate"}
+	_, err = service.OpenAgentSession(AgentSessionOpenRequest{MachineID: id, SessionID: "local-terminal", IdempotencyKey: "local-open", Principal: p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var subject string
+	if err = st.DB().QueryRow(`SELECT auth_subject FROM audit_log WHERE action=?`, store.AuditAgentSessionOpen).Scan(&subject); err != nil {
+		t.Fatal(err)
+	}
+	if subject != "local-user:"+a.AccountID {
+		t.Fatal(subject)
+	}
+	if _, err = st.AgentSessionForOperator(id, "local-terminal", a.AccountID); err == nil {
+		t.Fatal("unprefixed identity matched local operator")
+	}
+	if _, err = st.AgentSessionForOperator(id, "local-terminal", p.TailnetUserID); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -30,6 +30,7 @@ func parseAuthMode(raw string) (authMode, error) {
 
 // cloudBoundaryConfig contains only startup-validated origins, never proxy headers.
 type cloudBoundaryConfig struct {
+	mode             authMode
 	public           operatorendpoint.PublicURL
 	tailnetAuthority string
 }
@@ -70,7 +71,7 @@ func cloudConfiguration(mode authMode, listen string) (cloudBoundaryConfig, erro
 	if err != nil {
 		return cloudBoundaryConfig{}, err
 	}
-	config := cloudBoundaryConfig{public: public}
+	config := cloudBoundaryConfig{public: public, mode: mode}
 	if mode == authModeBoth {
 		if endpoint, err := operatorendpoint.ParseListen(listen); err == nil {
 			config.tailnetAuthority = endpoint.Authority()

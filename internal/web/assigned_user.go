@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/teddashh/AI-Intune/internal/operator"
+	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/store"
 	"github.com/teddashh/AI-Intune/internal/tailnet"
 )
@@ -59,7 +60,7 @@ func (s *Server) previewMachineAssignedUser(w http.ResponseWriter, r *http.Reque
 	userID := r.FormValue("user_id")
 	target := "未指派"
 	if userID != store.AssignedUserNone {
-		directory := assignedUserDirectory(s.tailnet.Get(r.Context()))
+		directory := s.assignedUserDirectoryForRequest(r, s.tailnet.Get(r.Context()))
 		if !directory.Available {
 			s.renderActionStatus(w, r, http.StatusServiceUnavailable, id, "來源不可用", "使用者名冊：來源不可用", "/machines/"+id)
 			return
@@ -110,4 +111,15 @@ func (s *Server) doMachineAssignedUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/machines/"+id, http.StatusSeeOther)
+}
+
+// The first local admin can own machines without a Tailscale directory.
+func (s *Server) assignedUserDirectoryForRequest(r *http.Request, status tailnet.Status) tailnet.UserDirectory {
+	directory := assignedUserDirectory(status)
+	if p, ok := operatorauth.PrincipalFromContext(r.Context()); ok && p.AuthMethod == operatorauth.AuthMethodLocalAccountSession {
+		directory.Available = true
+		directory.Unavailable = ""
+		directory.Users = append(directory.Users, tailnet.User{UserID: p.TailnetUserID, Login: p.TailnetUserLogin})
+	}
+	return directory
 }
