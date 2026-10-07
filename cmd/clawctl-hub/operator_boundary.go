@@ -352,6 +352,7 @@ const (
 )
 
 type operatorBoundary struct {
+	cloud      *cloudBoundaryConfig
 	next       *http.ServeMux
 	authorizer operatorRequestAuthorizer
 	store      *store.Store
@@ -362,12 +363,16 @@ type operatorBoundary struct {
 }
 
 func newOperatorBoundary(next *http.ServeMux, authorizer operatorRequestAuthorizer,
-	st *store.Store, policies map[string]operatorRoutePolicy, authority string,
+	st *store.Store, policies map[string]operatorRoutePolicy, authority string, cloud ...cloudBoundaryConfig,
 ) *operatorBoundary {
 	canonicalAuthority, _ := canonicalLiteralAuthority(authority)
 	b := &operatorBoundary{
 		next: next, authorizer: authorizer, store: st, policies: policies,
 		authority: canonicalAuthority, denials: newOperatorDenialLimiter(time.Now),
+	}
+	if len(cloud) > 0 {
+		b.cloud = &cloud[0]
+		b.authority = cloud[0].public.Authority()
 	}
 	csrf := http.NewCrossOriginProtection()
 	csrf.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -390,9 +395,9 @@ func newOperatorBoundary(next *http.ServeMux, authorizer operatorRequestAuthoriz
 // middleware. A machine bearer token can never acquire operator authority, and
 // a LocalAPI outage can never stop agents from checking in.
 func newHubHTTPHandler(h *hub, ui *web.Server, authorizer operatorRequestAuthorizer,
-	authority string,
+	authority string, cloud ...cloudBoundaryConfig,
 ) (http.Handler, error) {
-	if canonical, ok := canonicalLiteralAuthority(authority); !ok || canonical != authority {
+	if canonical, ok := canonicalLiteralAuthority(authority); len(cloud) == 0 && (!ok || canonical != authority) {
 		return nil, fmt.Errorf("operator authority %q must be canonical literal-ip:port", authority)
 	}
 	root := http.NewServeMux()
@@ -401,12 +406,12 @@ func newHubHTTPHandler(h *hub, ui *web.Server, authorizer operatorRequestAuthori
 	operatorMux := http.NewServeMux()
 	operatorRegistered := h.operatorRoutes(operatorMux)
 	operatorRegistered = append(operatorRegistered, ui.Routes(operatorMux)...)
-	operatorRegistered = append(operatorRegistered, registerOperatorTerminalSocket(operatorMux, h, authorizer, authority))
+	operatorRegistered = append(operatorRegistered, registerOperatorTerminalSocket(operatorMux, h, authorizer, authority, cloud...))
 	if err := validateRouteManifests(nonOperatorRegistered, nonOperatorRoutePolicies,
 		operatorRegistered, operatorRoutePolicies); err != nil {
 		return nil, err
 	}
-	root.Handle("/", newOperatorBoundary(operatorMux, authorizer, h.store, operatorRoutePolicies, authority))
+	root.Handle("/", newOperatorBoundary(operatorMux, authorizer, h.store, operatorRoutePolicies, authority, cloud...))
 	return root, nil
 }
 
@@ -563,7 +568,7 @@ func (b *operatorBoundary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// a hostile hostname that DNS-rebinds to the Hub and still truthfully send
 	// Sec-Fetch-Site: same-origin. Pinning Host to the configured literal
 	// listener authority closes that gap; Host is routing input, never identity.
-	if requestAuthority, valid := canonicalLiteralAuthority(r.Host); !valid || requestAuthority != b.authority {
+	if !b.matchesAuthority(r.Host) {
 		b.observeBoundaryDenial(r, pattern, policy, operatorAuthorityDecisionCode,
 			"HTTP Host 與啟動時釘住的 operator authority 不符")
 		writeOperatorBoundaryError(w, policy.Representation, http.StatusMisdirectedRequest,
@@ -757,7 +762,15 @@ const terminalDocumentCSPSuffix = "; style-src 'unsafe-inline'; img-src 'self' d
 func (b *operatorBoundary) writeSecurityHeaders(w http.ResponseWriter, r *http.Request, profile operatorSecurityProfile) {
 	header := w.Header()
 	header.Set("Cache-Control", "no-store")
-	header.Set("Content-Security-Policy", contentSecurityPolicy(profile, b.authority, r))
+	csp := contentSecurityPolicy(profile, b.authority, r)
+	if b.cloud != nil && profile == operatorSecurityTerminal {
+		scheme := "ws"
+		if b.cloud.public.Scheme() == "https" {
+			scheme = "wss"
+		}
+		csp = terminalDocumentCSPPrefix + scheme + "://" + b.cloud.public.Authority() + terminalDocumentCSPSuffix
+	}
+	header.Set("Content-Security-Policy", csp)
 	header.Set("Referrer-Policy", "no-referrer")
 	header.Set("X-Content-Type-Options", "nosniff")
 	header.Set("X-Frame-Options", "DENY")
@@ -1062,4 +1075,12 @@ func isSafeMethod(method string) bool {
 	default:
 		return false
 	}
+}
+
+func (b *operatorBoundary) matchesAuthority(host string) bool {
+	if b.cloud != nil {
+		return b.cloud.matches(host)
+	}
+	canonical, ok := canonicalLiteralAuthority(host)
+	return ok && canonical == b.authority
 }

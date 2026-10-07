@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -186,9 +187,9 @@ func (s operatorTerminalSettings) normalized(h *hub) operatorTerminalSettings {
 	return base
 }
 
-func registerOperatorTerminalSocket(mux *http.ServeMux, h *hub, authorizer operatorRequestAuthorizer, authority string) string {
+func registerOperatorTerminalSocket(mux *http.ServeMux, h *hub, authorizer operatorRequestAuthorizer, authority string, cloud ...cloudBoundaryConfig) string {
 	mux.HandleFunc(operatorTerminalSocketPattern, func(w http.ResponseWriter, r *http.Request) {
-		h.handleOperatorTerminalSocket(w, r, authorizer, authority)
+		h.handleOperatorTerminalSocket(w, r, authorizer, authority, cloud...)
 	})
 	return operatorTerminalSocketPattern
 }
@@ -196,7 +197,22 @@ func registerOperatorTerminalSocket(mux *http.ServeMux, h *hub, authorizer opera
 // operatorTerminalOriginAllowed requires exactly one Origin whose scheme
 // matches the connection and whose host, with the scheme default port filled
 // in, canonicalizes to the pinned listener authority.
-func operatorTerminalOriginAllowed(r *http.Request, authority string) bool {
+func operatorTerminalOriginAllowed(r *http.Request, authority string, cloud ...cloudBoundaryConfig) bool {
+	if len(cloud) > 0 {
+		values := r.Header.Values("Origin")
+		if len(values) != 1 {
+			return false
+		}
+		parsed, err := url.Parse(values[0])
+		if err != nil || parsed.User != nil || parsed.Opaque != "" || parsed.Path != "" || strings.ContainsAny(values[0], "?#") {
+			return false
+		}
+		if parsed.Scheme == cloud[0].public.Scheme() && cloud[0].public.MatchesAuthority(parsed.Host) {
+			return true
+		}
+		return cloud[0].tailnetAuthority != "" && operatorTerminalOriginAllowed(r, cloud[0].tailnetAuthority)
+	}
+
 	values := r.Header.Values("Origin")
 	if len(values) != 1 {
 		return false
@@ -224,13 +240,13 @@ func operatorTerminalOriginAllowed(r *http.Request, authority string) bool {
 	return ok && canonical == authority
 }
 
-func (h *hub) handleOperatorTerminalSocket(w http.ResponseWriter, r *http.Request, authorizer operatorRequestAuthorizer, authority string) {
+func (h *hub) handleOperatorTerminalSocket(w http.ResponseWriter, r *http.Request, authorizer operatorRequestAuthorizer, authority string, cloud ...cloudBoundaryConfig) {
 	principal, ok := operatorauth.PrincipalFromContext(r.Context())
 	if !ok || principal.TailnetUserID == "" {
 		http.Error(w, operatorTerminalSessionMissing, http.StatusNotFound)
 		return
 	}
-	if !operatorTerminalOriginAllowed(r, authority) {
+	if !operatorTerminalOriginAllowed(r, authority, cloud...) {
 		http.Error(w, operatorTerminalOriginRefused, http.StatusForbidden)
 		return
 	}
