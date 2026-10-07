@@ -2,5 +2,5 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · clawctl</title>
 <style>body{font:16px system-ui;color:#323130;background:#faf9f8;margin:4rem auto;max-width:28rem;padding:1rem}form{background:white;padding:2rem;border:1px solid #edebe9}label{display:block;margin:1rem 0}input{display:block;box-sizing:border-box;width:100%;padding:.6rem;margin-top:.4rem}button{background:#0078d4;color:white;padding:.7rem 1rem;border:0}p{line-height:1.5}</style></head>
 <body><h1>Sign in</h1>{{if .Error}}<p role="alert">{{.Error}}</p>{{end}}<form method="post" action="/login">
-<input type="hidden" name="next" value="{{.Next}}"><label>Username<input name="username" autocomplete="username" required minlength="3" maxlength="64" pattern="[a-z0-9._\-]+"></label>
+<input type="hidden" name="next" value="{{.Next}}"><label>Username<input name="username" autocomplete="username" required minlength="3" maxlength="64"></label>
 <label>Password<input type="password" name="password" autocomplete="current-password" required maxlength="256"></label><button type="submit">Sign in</button></form></body></html>

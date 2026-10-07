@@ -1,9 +1,16 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -21,6 +28,10 @@ func localAccountHandler(t *testing.T) (http.Handler, *store.Store) {
 		t.Fatal(err)
 	}
 	st := boundaryStore(t)
+	t.Setenv("CLAWCTL_SETUP_CODE", "abcd-efgh-ijkl-mnop")
+	if err := initializeSetupCode(st, &config, func(string, ...any) {}); err != nil {
+		t.Fatal(err)
+	}
 	ui, err := web.New(st, "hub")
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +71,16 @@ func TestLocalAccountLifecycle(t *testing.T) {
 			t.Fatalf("%s: %d %s", tt.path, w.Code, w.Body.String())
 		}
 	}
-	body := url.Values{"username": {"admin"}, "password": {"long admin password"}}.Encode()
+	for _, path := range []string{"/setup", "/login"} {
+		w := accountRequest(h, "GET", path, "", nil)
+		if strings.Contains(w.Body.String(), `pattern="[a-z0-9`) {
+			t.Fatal("browser blocks username normalization")
+		}
+		if path == "/setup" && (!strings.Contains(w.Body.String(), `name="setup_code"`) || !strings.Contains(w.Body.String(), "Find the setup code in the Hub log")) {
+			t.Fatal("missing setup code field/help")
+		}
+	}
+	body := url.Values{"username": {"  AdMiN  "}, "password": {"long admin password"}, "setup_code": {" abcd efgh-ijkl-mnop "}}.Encode()
 	w := accountRequest(h, "POST", "/setup", body, nil)
 	if w.Code != 303 {
 		t.Fatalf("setup: %d %s", w.Code, w.Body.String())
@@ -86,6 +106,9 @@ func TestLocalAccountLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if a.Username != "admin" {
+		t.Fatalf("username not normalized: %q", a.Username)
+	}
 	authorizer, _ := localauth.New(st, true, "")
 	r := httptest.NewRequest("GET", "https://hub.example.com/", nil)
 	r.AddCookie(c)
@@ -95,6 +118,10 @@ func TestLocalAccountLifecycle(t *testing.T) {
 	}
 	if w = accountRequest(h, "POST", "/logout", "", c); w.Code != 303 {
 		t.Fatal(w.Code)
+	}
+	cs := w.Result().Cookies()
+	if len(cs) != 1 || cs[0].Name != c.Name || !cs[0].Secure || !cs[0].HttpOnly || cs[0].Path != "/" || cs[0].Domain != "" || cs[0].SameSite != c.SameSite || cs[0].MaxAge != -1 || !strings.Contains(w.Header().Get("Set-Cookie"), "Max-Age=0") {
+		t.Fatalf("logout cookie: %v", w.Header())
 	}
 	if _, err = st.LookupSession(c.Value); err == nil {
 		t.Fatal("logout did not revoke")
@@ -247,5 +274,138 @@ func TestResetAdminPasswordCommand(t *testing.T) {
 	}
 	if _, err = st.VerifyPassword("admin", "replacement password"); err != nil {
 		t.Fatal("lockout not cleared", err)
+	}
+}
+
+func TestSetupCodeRequired(t *testing.T) {
+	h, st := localAccountHandler(t)
+	for _, code := range []string{"", "wrong-code"} {
+		body := url.Values{"username": {"admin"}, "password": {"long admin password"}, "setup_code": {code}}.Encode()
+		w := accountRequest(h, "POST", "/setup", body, nil)
+		if w.Code != 401 || !strings.Contains(w.Body.String(), "Unable to create admin.") || len(w.Result().Cookies()) != 0 {
+			t.Fatalf("setup: %d %s", w.Code, w.Body.String())
+		}
+	}
+	if n, err := st.CountAccounts(); err != nil || n != 0 {
+		t.Fatal(n, err)
+	}
+	w := accountRequest(h, "POST", "/setup", "username=admin&password=long+admin+password&setup_code=abcdefghijklmnop", nil)
+	if w.Code != 303 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if _, err := st.LookupSession(w.Result().Cookies()[0].Value); err != nil {
+		t.Fatal(err)
+	}
+	assertSetupCodeNotPersisted(t, st, "abcd-efgh-ijkl-mnop")
+}
+
+func assertSetupCodeNotPersisted(t *testing.T, st *store.Store, code string) {
+	t.Helper()
+	var seq int
+	var name, path string
+	if err := st.DB().QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(normalizeSetupCode(code)))
+	// Check all SQLite storage, including audit records and uncheckpointed WAL data.
+	for _, file := range []string{path, path + "-wal"} {
+		data, err := os.ReadFile(file)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, secret := range [][]byte{[]byte(code), []byte(normalizeSetupCode(code)), sum[:], []byte(hex.EncodeToString(sum[:]))} {
+			if bytes.Contains(data, secret) {
+				t.Fatalf("setup secret persisted in %s", file)
+			}
+		}
+	}
+}
+
+func TestInitializeSetupCode(t *testing.T) {
+	st := boundaryStore(t)
+	t.Setenv("CLAWCTL_PUBLIC_URL", "https://hub.example.com")
+	t.Setenv("CLAWCTL_SETUP_CODE", "placeholder")
+	os.Unsetenv("CLAWCTL_SETUP_CODE")
+	config, err := cloudConfiguration(authModeBoth, testOperatorAuthority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	logger := func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+	if err := initializeSetupCode(st, &config, logger); err != nil {
+		t.Fatal(err)
+	}
+	pattern := regexp.MustCompile(`^first-run setup: open https://hub.example.com/setup and enter setup code ([A-Z2-7]{4}(?:-[A-Z2-7]{4}){7}) \(valid until the first admin is created; restart the Hub to rotate it\)$`)
+	if len(lines) != 1 {
+		t.Fatal(lines)
+	}
+	matches := pattern.FindStringSubmatch(lines[0])
+	if len(matches) != 2 || !config.setupCode.matches(matches[1]) {
+		t.Fatal(lines)
+	}
+	old := config.setupCode
+	if err := initializeSetupCode(st, &config, logger); err != nil {
+		t.Fatal(err)
+	}
+	if *old == *config.setupCode {
+		t.Fatal("restart did not rotate code")
+	}
+	assertSetupCodeNotPersisted(t, st, matches[1])
+	for _, code := range []string{"", "short", "----------------"} {
+		t.Setenv("CLAWCTL_SETUP_CODE", code)
+		if err := initializeSetupCode(st, &config, logger); err == nil {
+			t.Fatal("accepted short code")
+		}
+	}
+	code := "operator-secret-code-1234"
+	t.Setenv("CLAWCTL_SETUP_CODE", code)
+	lines = nil
+	if err := initializeSetupCode(st, &config, logger); err != nil {
+		t.Fatal(err)
+	}
+	if !config.setupCode.matches(code) || len(lines) != 1 || strings.Contains(lines[0], code) || !strings.Contains(lines[0], "operator-provided setup code is required") {
+		t.Fatal(lines)
+	}
+	assertSetupCodeNotPersisted(t, st, code)
+	if _, err := st.CreateFirstAdmin("admin", "long admin password"); err != nil {
+		t.Fatal(err)
+	}
+	lines = nil
+	config.setupCode = nil
+	if err := initializeSetupCode(st, &config, logger); err != nil || len(lines) != 0 || config.setupCode != nil {
+		t.Fatal(err, lines)
+	}
+}
+
+func TestBootstrapAdminCommand(t *testing.T) {
+	st := boundaryStore(t)
+	var seq int
+	var name, path string
+	if err := st.DB().QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"--db", path, "--username", "admin"}
+	if command, err := classifyTopLevel(append([]string{"bootstrap-admin"}, args...)); err != nil || command != "bootstrap-admin" {
+		t.Fatal(command, err)
+	}
+	for _, password := range []string{"short", strings.Repeat("x", 259)} {
+		if err := runBootstrapAdmin(args, strings.NewReader(password)); err == nil {
+			t.Fatal("accepted invalid password")
+		}
+	}
+	if err := runBootstrapAdmin(args, strings.NewReader("headless admin password\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.VerifyPassword("admin", "headless admin password"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runBootstrapAdmin(args, strings.NewReader("another admin password")); !errors.Is(err, store.ErrAdminExists) {
+		t.Fatal(err)
+	}
+	if n, err := st.CountAccounts(); err != nil || n != 1 {
+		t.Fatal(n, err)
 	}
 }

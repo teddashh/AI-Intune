@@ -196,6 +196,11 @@ func main() {
 			log.Fatal(err)
 		}
 		switch command {
+		case "bootstrap-admin":
+			if err := runBootstrapAdmin(os.Args[2:], os.Stdin); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "reset-admin-password":
 			if err := runResetAdminPassword(os.Args[2:], os.Stdin); err != nil {
 				log.Fatal(err)
@@ -381,7 +386,7 @@ func classifyTopLevel(argv []string) (string, error) {
 		return "", nil
 	}
 	switch argv[0] {
-	case "reset-admin-password", "enroll-token", "machines", "audit", "retire", "report", "data", "tickets", "tailnet",
+	case "bootstrap-admin", "reset-admin-password", "enroll-token", "machines", "audit", "retire", "report", "data", "tickets", "tailnet",
 		"enrollment-limit", "prune", "restore-drill", "job", "machine", "deployment",
 		"artifact", "catalog", "verifier", "settings", "compliance", "version", "notify-check":
 		return argv[0], nil
@@ -632,6 +637,11 @@ func serve(argv []string) {
 		operatorAuthorizer, err = withSessionAuthorizer(h.store, mode, cloud[0].public.Scheme() == "https", *operatorCapabilityPrefix, operatorAuthorizer)
 		if err != nil {
 			log.Fatal(err)
+		}
+	}
+	if len(cloud) > 0 {
+		if err := initializeSetupCode(st, &cloud[0], log.Printf); err != nil {
+			log.Fatalf("first-run setup unavailable: %v", err)
 		}
 	}
 	handler, err := newHubHTTPHandler(h, ui, operatorAuthorizer, operatorAuthority, cloud...)

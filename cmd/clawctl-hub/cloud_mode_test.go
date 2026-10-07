@@ -131,6 +131,7 @@ func TestCloudBothTailnetAndCSP(t *testing.T) {
 		}
 		boundary := newOperatorBoundary(http.NewServeMux(), auth, nil, nil, config.public.Authority(), config)
 		req := httptest.NewRequest("GET", "/", nil)
+		req.Host = "hub.example.com"
 		req.Header.Set("X-Forwarded-Proto", "http")
 		rec := httptest.NewRecorder()
 		boundary.writeSecurityHeaders(rec, req, operatorSecurityTerminal)
@@ -149,5 +150,72 @@ func TestCloudBothTailnetAndCSP(t *testing.T) {
 				t.Fatal("bad origin accepted")
 			}
 		}
+	}
+}
+
+func TestCloudSecurityResponses(t *testing.T) {
+	for _, public := range []string{"https://hub.example.com", "http://localhost:8787"} {
+		t.Run(public, func(t *testing.T) {
+			t.Setenv("CLAWCTL_PUBLIC_URL", public)
+			config, err := cloudConfiguration(authModeBoth, testOperatorAuthority)
+			if err != nil {
+				t.Fatal(err)
+			}
+			st := boundaryStore(t)
+			ui, err := web.New(st, "hub")
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler, err := newHubHTTPHandler(&hub{store: st}, ui, denyOperatorAuthorizer{}, config.public.Authority(), config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hsts := ""
+			if config.public.Scheme() == "https" {
+				hsts = "max-age=31536000"
+			}
+			for _, host := range []string{config.public.Authority(), testOperatorAuthority, "evil.example"} {
+				for _, path := range []string{"/login", "/setup", "/logout", "/v1/operator/machines", "/healthz"} {
+					method := "GET"
+					if path == "/logout" {
+						method = "POST"
+					}
+					r := httptest.NewRequest(method, public+path, nil)
+					r.Host = host
+					r.Header.Set("X-Forwarded-Proto", "https")
+					w := httptest.NewRecorder()
+					handler.ServeHTTP(w, r)
+					wantHSTS := hsts
+					if path == "/healthz" {
+						wantHSTS = ""
+					}
+					if got := w.Header().Get("Strict-Transport-Security"); got != wantHSTS {
+						t.Fatalf("%s %s HSTS=%q want %q", host, path, got, wantHSTS)
+					}
+					if path == "/login" || path == "/setup" || path == "/logout" {
+						if host != config.public.Authority() && (w.Code != 421 || strings.TrimSpace(w.Body.String()) != "Sign in at "+public) {
+							t.Fatalf("%s %s: %d %s", host, path, w.Code, w.Body.String())
+						}
+					}
+					if path == "/v1/operator/machines" && host == "evil.example" && (w.Code != 421 || !strings.Contains(w.Body.String(), "Use the Hub public URL") || strings.Contains(w.Body.String(), "Tailscale IP")) {
+						t.Fatal(w.Code, w.Body.String())
+					}
+				}
+			}
+			boundary := newOperatorBoundary(http.NewServeMux(), nil, nil, nil, config.public.Authority(), config)
+			for _, host := range []string{config.public.Authority(), testOperatorAuthority} {
+				r := httptest.NewRequest("GET", public+"/", nil)
+				r.Host = host
+				w := httptest.NewRecorder()
+				boundary.writeSecurityHeaders(w, r, operatorSecurityTerminal)
+				scheme := "ws"
+				if host == config.public.Authority() && config.public.Scheme() == "https" {
+					scheme = "wss"
+				}
+				if !strings.Contains(w.Header().Get("Content-Security-Policy"), "connect-src "+scheme+"://"+host+";") {
+					t.Fatal(host, w.Header())
+				}
+			}
+		})
 	}
 }

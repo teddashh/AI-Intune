@@ -30,6 +30,7 @@ func parseAuthMode(raw string) (authMode, error) {
 
 // cloudBoundaryConfig contains only startup-validated origins, never proxy headers.
 type cloudBoundaryConfig struct {
+	setupCode        *setupCodeHash
 	mode             authMode
 	public           operatorendpoint.PublicURL
 	tailnetAuthority string

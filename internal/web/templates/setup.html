@@ -2,5 +2,6 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Create your Hub admin · clawctl</title>
 <style>body{font:16px system-ui;color:#323130;background:#faf9f8;margin:4rem auto;max-width:28rem;padding:1rem}form{background:white;padding:2rem;border:1px solid #edebe9}label{display:block;margin:1rem 0}input{display:block;box-sizing:border-box;width:100%;padding:.6rem;margin-top:.4rem}button{background:#0078d4;color:white;padding:.7rem 1rem;border:0}p{line-height:1.5}</style></head>
 <body><h1>Create your Hub admin</h1>{{if .Error}}<p role="alert">{{.Error}}</p>{{end}}<form method="post" action="/setup">
-<input type="hidden" name="next" value="{{.Next}}"><label>Username<input name="username" autocomplete="username" required minlength="3" maxlength="64" pattern="[a-z0-9._\-]+"></label>
+<input type="hidden" name="next" value="{{.Next}}"><label>Username<input name="username" autocomplete="username" required minlength="3" maxlength="64"></label>
+<label>Setup code<input name="setup_code" autocomplete="off" required aria-describedby="setup-help"></label><p id="setup-help">Find the setup code in the Hub log (e.g. <code>docker logs</code>, <code>fly logs</code>, <code>journalctl -u clawctl-hub</code>).</p>
 <label>Password<input type="password" name="password" autocomplete="new-password" required minlength="12" maxlength="256"></label><p>Use 12–256 bytes for your password.</p><button type="submit">Create admin</button></form></body></html>

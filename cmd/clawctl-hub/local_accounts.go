@@ -1,6 +1,10 @@
 package main
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base32"
 	"errors"
 	"flag"
 	"fmt"
@@ -8,15 +12,72 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/teddashh/AI-Intune/internal/localauth"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/store"
 	"github.com/teddashh/AI-Intune/internal/web"
 )
+
+// Only the normalized code's digest survives startup; it is never persisted.
+type setupCodeHash [sha256.Size]byte
+
+func normalizeSetupCode(code string) string {
+	return strings.ToUpper(strings.Map(func(r rune) rune {
+		if r == '-' || unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, code))
+}
+
+func (h *setupCodeHash) matches(code string) bool {
+	if h == nil {
+		return false
+	}
+	sum := sha256.Sum256([]byte(normalizeSetupCode(code)))
+	return subtle.ConstantTimeCompare(h[:], sum[:]) == 1
+}
+
+func initializeSetupCode(st *store.Store, config *cloudBoundaryConfig, printf func(string, ...any)) error {
+	if config.mode != authModeLocal && config.mode != authModeBoth {
+		return nil
+	}
+	n, err := st.CountAccounts()
+	if err != nil || n != 0 {
+		return err
+	}
+	code, provided := os.LookupEnv("CLAWCTL_SETUP_CODE")
+	if provided {
+		if len(normalizeSetupCode(code)) < 16 {
+			return fmt.Errorf("CLAWCTL_SETUP_CODE must contain at least 16 characters excluding spaces and hyphens")
+		}
+	} else {
+		var random [20]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			return err
+		}
+		raw := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(random[:])
+		var groups []string
+		for i := 0; i < len(raw); i += 4 {
+			groups = append(groups, raw[i:i+4])
+		}
+		code = strings.Join(groups, "-")
+	}
+	hash := setupCodeHash(sha256.Sum256([]byte(normalizeSetupCode(code))))
+	config.setupCode = &hash
+	if provided {
+		printf("first-run setup: open %s/setup; the operator-provided setup code is required (valid until the first admin is created; restart the Hub to rotate it)", config.public.BaseURL())
+	} else {
+		printf("first-run setup: open %s/setup and enter setup code %s (valid until the first admin is created; restart the Hub to rotate it)", config.public.BaseURL(), code)
+	}
+	return nil
+}
 
 type sessionFirstAuthorizer struct {
 	session  *localauth.Authorizer
@@ -75,7 +136,7 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 		}
 		boundary.writeSecurityHeaders(w, r, operatorSecurityLocked)
 		if !boundary.cloud.public.MatchesAuthority(r.Host) {
-			http.Error(w, "Unexpected Host", 421)
+			http.Error(w, "Sign in at "+boundary.cloud.public.BaseURL(), 421)
 			return
 		}
 		if err := csrf.Check(r); err != nil {
@@ -128,10 +189,15 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 		next = safeLoginNext(r.Form.Get("next"))
 		var account store.HubAccount
 		var err error
+		username := strings.ToLower(strings.TrimSpace(r.PostForm.Get("username")))
 		if setup {
-			account, err = st.CreateFirstAdmin(r.PostForm.Get("username"), r.PostForm.Get("password"), metadata)
+			if !boundary.cloud.setupCode.matches(r.PostForm.Get("setup_code")) {
+				err = store.ErrAccountAuth
+			} else {
+				account, err = st.CreateFirstAdmin(username, r.PostForm.Get("password"), metadata)
+			}
 		} else {
-			account, err = st.VerifyPassword(r.PostForm.Get("username"), r.PostForm.Get("password"), metadata)
+			account, err = st.VerifyPassword(username, r.PostForm.Get("password"), metadata)
 		}
 		if err != nil {
 			if setup && errors.Is(err, store.ErrAdminExists) {
@@ -142,7 +208,7 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 			w.WriteHeader(401)
 			message := "Invalid username or password"
 			if setup {
-				message = "Unable to create admin. Use a lowercase username (3–64 letters, digits, dots, underscores or hyphens) and a password of 12–256 bytes."
+				message = "Unable to create admin. Check the setup code and use a username (3–64 letters, digits, dots, underscores or hyphens) and a password of 12–256 bytes."
 			}
 			ui.RenderAccountForm(w, setup, next, message)
 			return
@@ -223,14 +289,22 @@ func (l *ipLimiter) wrap(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func runResetAdminPassword(args []string, in io.Reader) error {
-	fs := flag.NewFlagSet("reset-admin-password", flag.ContinueOnError)
+	return runAdminPasswordCommand("reset-admin-password", args, in)
+}
+
+func runBootstrapAdmin(args []string, in io.Reader) error {
+	return runAdminPasswordCommand("bootstrap-admin", args, in)
+}
+
+func runAdminPasswordCommand(command string, args []string, in io.Reader) error {
+	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	db := fs.String("db", "", "path to existing Hub database")
 	username := fs.String("username", "", "admin username")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *db == "" || *username == "" || fs.NArg() != 0 {
-		return fmt.Errorf("reset-admin-password requires --db PATH --username U")
+		return fmt.Errorf("%s requires --db PATH --username U", command)
 	}
 	data, err := io.ReadAll(io.LimitReader(in, 259))
 	if err != nil {
@@ -245,5 +319,9 @@ func runResetAdminPassword(args []string, in io.Reader) error {
 		return err
 	}
 	defer st.Close()
+	if command == "bootstrap-admin" {
+		_, err := st.CreateFirstAdmin(*username, password)
+		return err
+	}
 	return st.ResetAdminPassword(*username, password)
 }

@@ -584,8 +584,12 @@ func (b *operatorBoundary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !b.matchesAuthority(r.Host) {
 		b.observeBoundaryDenial(r, pattern, policy, operatorAuthorityDecisionCode,
 			"HTTP Host 與啟動時釘住的 operator authority 不符")
+		detail := "請使用 Hub 明示的 Tailscale IP 與 port"
+		if b.cloud != nil {
+			detail = "Use the Hub public URL"
+		}
 		writeOperatorBoundaryError(w, policy.Representation, http.StatusMisdirectedRequest,
-			operatorAuthorityDecisionCode, "請使用 Hub 明示的 Tailscale IP 與 port")
+			operatorAuthorityDecisionCode, detail)
 		return
 	}
 	if b.authorizer == nil {
@@ -794,12 +798,21 @@ func (b *operatorBoundary) writeSecurityHeaders(w http.ResponseWriter, r *http.R
 	header := w.Header()
 	header.Set("Cache-Control", "no-store")
 	csp := contentSecurityPolicy(profile, b.authority, r)
+	if b.cloud != nil && b.cloud.public.Scheme() == "https" {
+		header.Set("Strict-Transport-Security", "max-age=31536000")
+	}
 	if b.cloud != nil && profile == operatorSecurityTerminal {
 		scheme := "ws"
 		if b.cloud.public.Scheme() == "https" {
 			scheme = "wss"
 		}
-		csp = terminalDocumentCSPPrefix + scheme + "://" + b.cloud.public.Authority() + terminalDocumentCSPSuffix
+		authority := b.cloud.public.Authority()
+		if b.cloud.mode == authModeBoth && !b.cloud.public.MatchesAuthority(r.Host) {
+			if canonical, ok := canonicalLiteralAuthority(r.Host); ok && canonical == b.cloud.tailnetAuthority {
+				scheme, authority = "ws", b.cloud.tailnetAuthority
+			}
+		}
+		csp = terminalDocumentCSPPrefix + scheme + "://" + authority + terminalDocumentCSPSuffix
 	}
 	header.Set("Content-Security-Policy", csp)
 	header.Set("Referrer-Policy", "no-referrer")
