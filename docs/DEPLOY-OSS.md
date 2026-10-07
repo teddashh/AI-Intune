@@ -246,6 +246,28 @@ Without Docker: `make hub` then `./ops/install-hub.sh --listen <tailscale-ip>:<p
 
 ---
 
+## Notifications
+
+The Hub can send the daily report and disk-clean alerts through built-in Telegram and webhook channels. Secrets live only in the file named by `CLAWCTL_NOTIFY_ENV` / `--notify-env` (see `ops/notify.env.example`). They are never taken from flags or the process environment.
+
+**Precedence**
+
+1. If `CLAWCTL_NOTIFY_CMD` / `--notify-cmd` is set, Hub uses that command (legacy). Built-in channels in the env file are not used; the child still inherits `CLAWCTL_NOTIFY_ENV`, so `ops/notify-telegram.sh` keeps working.
+2. Else if the env file defines at least one channel, Hub uses the built-in notifier.
+3. Else notifications are not configured.
+
+**Migration from notify-telegram.sh:** remove `CLAWCTL_NOTIFY_CMD` and keep `CLAWCTL_NOTIFY_ENV`. `ops/notify-telegram.sh` remains for `ops/deadman.sh` and Alertmanager install.
+
+Check the pipes without sending a message:
+
+```bash
+clawctl-hub notify-check --notify-env /path/to/notify.env
+```
+
+Docker: add `-f ops/docker/docker-compose.notify.yml` and set `CLAWCTL_NOTIFY_ENV_HOST` to the host env file. It is mounted read-only at `/etc/clawctl/notify.env`, and the overlay sets `CLAWCTL_NOTIFY_ENV` to that path. The Hub container runs as uid 65532, so the file must be readable by that uid (`sudo chown 65532 notify.env && chmod 0600 notify.env`). An unreadable file stops the Hub at startup when the built-in notifier is in use. With a legacy notify command it only logs a warning.
+
+---
+
 ## 8. Operator MCP and CLI
 
 An agent on a tailnet node uses `clawctl-operator` (stdio MCP or `call`). It
@@ -284,6 +306,7 @@ Not implemented:
 ## 10. Security checklist
 
 - [ ] `hub.env` mode `0600`, not committed
+- [ ] `notify.env` mode `0600`, not committed; `CLAWCTL_NOTIFY_ENV` set (or legacy `CLAWCTL_NOTIFY_CMD`)
 - [ ] No enroll tokens in git
 - [ ] Tailscale grants limited to operator users / devices
 - [ ] Tunnel token set only when `docker-compose.tunnel.yml` is used

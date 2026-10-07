@@ -171,6 +171,9 @@ func rejectCLIWhileUpgradeMaintenance(argv []string) error {
 // rejectDBWhileUpgradeMaintenance for its exact target instead. Keep job
 // create and deployment mutations outside this exception.
 func rejectTopLevelCLIWhileUpgradeMaintenance(command string, argv []string) error {
+	if command == "notify-check" {
+		return nil
+	}
 	if command == "machine" || command == "machines" || command == "audit" {
 		return nil
 	}

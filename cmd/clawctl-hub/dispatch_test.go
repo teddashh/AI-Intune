@@ -28,7 +28,7 @@ func TestClassifyTopLevelPreservesCommandsAndServeFlags(t *testing.T) {
 	for _, name := range []string{
 		"enroll-token", "machines", "audit", "retire", "report", "tickets", "tailnet",
 		"prune", "restore-drill", "job", "machine", "deployment",
-		"artifact", "catalog", "verifier", "settings", "compliance", "version",
+		"artifact", "catalog", "verifier", "settings", "compliance", "version", "notify-check",
 	} {
 		command, err := classifyTopLevel([]string{name, "--help"})
 		if err != nil || command != name {

@@ -20,6 +20,7 @@
 # Do not put the Cloudflare Tunnel in this file. Compose v5 interpolates
 # profile-disabled services, so a required token here aborts every command.
 # Optional tunnel: add -f ops/docker/docker-compose.tunnel.yml (see that file).
+# Optional built-in notify env file: add -f ops/docker/docker-compose.notify.yml.
 #
 # hub-data-init runs as root, exits 0, and only then hub starts. It chowns
 # the named volume to distroless nonroot (uid 65532) mode 0700 and seeds

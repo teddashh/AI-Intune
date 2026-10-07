@@ -77,13 +77,21 @@ type hub struct {
 	// ⚠ 它可能是「沒設定」也可能是「設定了但讀壞了」，兩者不一樣，
 	// 所以整個 Set 都留著，不是只留 rules。見 internal/expect。
 	expects *expect.Set
-	// notifyCmd 收到早報全文（stdin）。
-	//
-	// ⚠ 這裡刻意不內建 Telegram / Slack / email 任何一家。推播管道是會爛的
-	// 東西，而爛掉的那天你要能在不重編譯的情況下換掉它。一個吃 stdin 的
-	// 指令可以接上任何東西，包括 operator 已經有的那些 bot。
+	// notifyCmd is the legacy --notify-cmd / CLAWCTL_NOTIFY_CMD. When set it
+	// wins over built-in channels: the child still inherits CLAWCTL_NOTIFY_ENV
+	// so ops/notify-telegram.sh keeps working.
 	notifyCmd string
-	reportAt  string // 本地時間 HH:MM
+	// notifyEnv is the path from --notify-env / CLAWCTL_NOTIFY_ENV. Secrets
+	// are read from that file only, never from flags or the process environment.
+	notifyEnv string
+	// notifyBuiltin is set when prepareNotify selected the built-in channels.
+	notifyBuiltin *builtinNotifier
+	// notifyKind is "command", "telegram", "webhook", or "telegram+webhook".
+	notifyKind string
+	// notifyEnvChannelsIgnored is true when a notify command is used even
+	// though the env file also defines built-in channels.
+	notifyEnvChannelsIgnored bool
+	reportAt                 string // 本地時間 HH:MM
 
 	// reportStamp 是外部死人之鐘要讀的那個檔（ops/deadman.sh）。
 	//
@@ -260,6 +268,9 @@ func main() {
 		case "version":
 			fmt.Println(version)
 			return
+		case "notify-check":
+			cmdNotifyCheck(os.Args[2:])
+			return
 		}
 	}
 	serve(os.Args[1:])
@@ -364,10 +375,10 @@ func classifyTopLevel(argv []string) (string, error) {
 	switch argv[0] {
 	case "enroll-token", "machines", "audit", "retire", "report", "data", "tickets", "tailnet",
 		"enrollment-limit", "prune", "restore-drill", "job", "machine", "deployment",
-		"artifact", "catalog", "verifier", "settings", "compliance", "version":
+		"artifact", "catalog", "verifier", "settings", "compliance", "version", "notify-check":
 		return argv[0], nil
 	default:
-		return "", fmt.Errorf("不認得命令 %q；啟動 Hub 時只接受 --listen、--db 等 flags", argv[0])
+		return "", fmt.Errorf("不認得命令 %q；啟動 Hub 時只接受 --listen、--db 等 flags，或子指令（例如 notify-check）", argv[0])
 	}
 }
 
@@ -408,7 +419,8 @@ func serve(argv []string) {
 	addr := fs.String("listen", "127.0.0.1:8770", "監聽位址（literal Tailscale IP:port；未指定時讀 $CLAWCTL_LISTEN）。旗標預設 127.0.0.1:8770 是 fail-closed placeholder，Hub 會拒絕。沒有正式環境預設埠；8787 只是文件裡的慣例範例，grant dst、CLAWCTL_PUBLIC_URL、agent --hub、tunnel origin 必須與這個位址同一個埠。")
 	dbPath := fs.String("db", defaultDB(), "SQLite 檔位置")
 	hubHost := fs.String("hub-host", hostname(), "這台的名字；用來偵測 Hub 是不是裝在它自己管的機器上")
-	notify := fs.String("notify-cmd", os.Getenv("CLAWCTL_NOTIFY_CMD"), "早報要餵給哪個指令（全文走 stdin）")
+	notify := fs.String("notify-cmd", os.Getenv("CLAWCTL_NOTIFY_CMD"), "legacy command that receives the report on stdin; when set, built-in channels are not used")
+	notifyEnv := fs.String("notify-env", os.Getenv("CLAWCTL_NOTIFY_ENV"), "path to the notify env file (Telegram/webhook secrets; never taken from flags or the process environment)")
 	reportAt := fs.String("report-at", "08:00", "每天送早報的本地時間 HH:MM")
 	stamp := fs.String("report-stamp", os.Getenv("CLAWCTL_REPORT_STAMP"),
 		"早報送達後把 unix 時間寫進這個檔；外部死人之鐘讀它（見 ops/deadman.sh）")
@@ -453,6 +465,13 @@ func serve(argv []string) {
 	objectBlobs, objectBlobSummary, err := blobstore.FromEnv(os.Getenv)
 	if err != nil {
 		log.Fatalf("object storage 設定不合法：%v", err)
+	}
+	notifySetup, err := prepareNotify(*notify, *notifyEnv)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	if notifySetup.modeWarn != "" {
+		log.Print(notifySetup.modeWarn)
 	}
 	// Own the exact configured address before opening/migrating SQLite. A
 	// syntactically valid 100.x address can belong to another tailnet peer; if
@@ -511,7 +530,10 @@ func serve(argv []string) {
 		store: st, tailnet: tailnetCache, agentLinks: agentlink.New(), artifactsDir: artifactsDir, blobs: objectBlobs, operatorService: operatorService, publicURL: operatorBase,
 		hubHost:   *hubHost,
 		startedAt: time.Now(), drillStamp: drillStampPath(*dbPath),
-		notifyCmd: *notify, reportAt: *reportAt, reportStamp: *stamp,
+		notifyCmd: notifySetup.cmd, notifyEnv: notifySetup.envPath,
+		notifyBuiltin: notifySetup.builtin, notifyKind: notifySetup.kind,
+		notifyEnvChannelsIgnored: notifySetup.cmdHidesBuiltin,
+		reportAt:                 *reportAt, reportStamp: *stamp,
 		expects:           exps,
 		reportPingURL:     os.Getenv("CLAWCTL_REPORT_PING_URL"),
 		reportPingFailURL: os.Getenv("CLAWCTL_REPORT_PING_FAIL_URL"),

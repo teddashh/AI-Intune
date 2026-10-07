@@ -209,7 +209,7 @@ func TestLogNotifyConfiguredDoesNotRunTheCommand(t *testing.T) {
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("startup executed the notify command: %v", err)
 	}
-	if !strings.Contains(buf.String(), "notify command is configured") {
+	if !strings.Contains(buf.String(), "notify: using command") {
 		t.Fatalf("startup log = %q", buf.String())
 	}
 	if strings.Contains(buf.String(), marker) || strings.Contains(buf.String(), "touch") {

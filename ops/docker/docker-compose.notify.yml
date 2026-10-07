@@ -1,0 +1,24 @@
+# Optional built-in notify env file for clawctl-hub.
+#
+# Compose v5 interpolates every service in the files it loads. A required
+# CLAWCTL_NOTIFY_ENV_HOST in docker-compose.yml would abort every command
+# even when notifications are not used. This override is loaded only when
+# the built-in notifier is actually used.
+#
+#   docker compose \
+#     -f ops/docker/docker-compose.yml \
+#     -f ops/docker/docker-compose.notify.yml \
+#     --env-file ops/docker/hub.env up -d
+#
+# CLAWCTL_NOTIFY_ENV_HOST is the host path of the env file (mode 0600,
+# owned by uid 65532, the Hub container user; never committed). See
+# ops/notify.env.example. Do not put tokens in hub.env.
+
+name: clawctl
+
+services:
+  hub:
+    environment:
+      CLAWCTL_NOTIFY_ENV: /etc/clawctl/notify.env
+    volumes:
+      - ${CLAWCTL_NOTIFY_ENV_HOST:?set CLAWCTL_NOTIFY_ENV_HOST to the host path of notify.env}:/etc/clawctl/notify.env:ro

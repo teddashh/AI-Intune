@@ -593,7 +593,7 @@ func (h *hub) appendNotifyMetrics(b *strings.Builder) error {
 	if h.notifier() != nil {
 		configured = 1
 	}
-	fmt.Fprintf(b, "# HELP clawctl_notify_configured 1 when a notify command is configured, otherwise 0.\n")
+	fmt.Fprintf(b, "# HELP clawctl_notify_configured 1 when a notifier (command or built-in channel) is configured, otherwise 0.\n")
 	fmt.Fprintf(b, "# TYPE clawctl_notify_configured gauge\n")
 	fmt.Fprintf(b, "clawctl_notify_configured %d\n", configured)
 	if h.store == nil {
