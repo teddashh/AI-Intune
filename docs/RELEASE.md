@@ -26,6 +26,8 @@ git push origin v1.2.3
 
 The workflow refuses tags that are not `vMAJOR.MINOR.PATCH[-pre]`, because the tag becomes `CLAWCTL_VERSION` and the agent bootstrap path. It needs `packages: write` and `id-token: write`. Both are granted to that job only.
 
+The job runs only in a public repository. A private copy of this repo under the same owner (for example a downstream fork that carries site overlays) skips it entirely, for tags, pull requests and manual runs. That way it can never push or sign over the public package names.
+
 ## Dry run
 
 Every pull request that touches the workflow, `ops/docker/**`, `go.mod` or `go.sum` runs the same job, and so does a manual run (`workflow_dispatch`). It:
