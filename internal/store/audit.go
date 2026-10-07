@@ -28,9 +28,16 @@ import (
 type AuditAction string
 
 const (
+	AuditHubGuessing               AuditAction = "hub-login-guessing"
+	AuditHubSetup                  AuditAction = "hub-setup"
+	AuditHubLoginOK                AuditAction = "hub-login-ok"
+	AuditHubLoginFailed            AuditAction = "hub-login-failed"
+	AuditHubLockout                AuditAction = "hub-lockout"
+	AuditHubLogout                 AuditAction = "hub-logout"
 	AuditConnect                   AuditAction = "connect"
 	AuditRetire                    AuditAction = "retire"
 	AuditUnretire                  AuditAction = "unretire"
+	AuditKeyedInstaller            AuditAction = "keyed-installer-download"
 	AuditEnrollToken               AuditAction = "enroll-token"
 	AuditRevokeToken               AuditAction = "revoke-token"
 	AuditEnrollmentLimit           AuditAction = "enrollment-limit"

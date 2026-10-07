@@ -814,7 +814,7 @@ agent_installer_complete_fixture() {
 	local fixture="$TMP/agent-installer-complete" mock home token tailscale_key log install_agent system_unit_dir
 	mock="$fixture/mock"
 	home="$fixture/home"
-	token="$fixture/enroll-token"
+	token="$fixture/explicit-token"
 	tailscale_key="$fixture/tailscale-key"
 	log="$fixture/calls"
 	system_unit_dir="$fixture/systemd/system"
@@ -867,6 +867,7 @@ agent_installer_complete_fixture() {
 		'case "$1" in' \
 		'  version) echo test-version ;;' \
 		'  enroll) ' \
+		'    for ((i=1;i<=$#;i++)); do if [[ "${!i}" == "--token-file" ]]; then j=$((i+1)); [[ "$(cat -- "${!j}")" == "${EXPECTED_ENROLL_TOKEN:-one-time-token}" ]] || exit 4; fi; done ' \
 		'    if [[ "$FAIL_ENROLL" == "1" ]]; then exit 1; fi ' \
 		'    hub=""; for ((i=1;i<=$#;i++)); do if [[ "${!i}" == "--hub" ]]; then j=$((i+1)); hub="${!j}"; break; fi; done ' \
 		'    mkdir -p "$HOME/.config/clawctl"; printf "{\"hub_url\":\"%s\"}\\n" "$hub" >"$HOME/.config/clawctl/agent.json"; chmod 0600 "$HOME/.config/clawctl/agent.json" ;;' \
@@ -985,6 +986,67 @@ agent_installer_complete_fixture() {
 	[[ ${#verify_fail_backups[@]} -eq 1 ]] || return 125
 	[[ -f "${verify_fail_backups[0]}" ]] || return 126
 	grep -Fq "Previous configuration backed up at: ${verify_fail_backups[0]} (see docs/MOVE-AGENTS.md, Rollback)" "$fixture/out6" || return 127
+
+	# Keyed package cases use the same full installer stubs and re-enroll path.
+	keyed_fixture_run() {
+		HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
+			TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
+			CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+			AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
+			"$install_agent" "$@" >"$fixture/keyed-output" 2>&1
+	}
+	printf '%s\r\n' 'https://hub.example.com' >"$fixture/hub-url"
+	printf '%s\n' 'one-time-token' >"$fixture/enroll-token"
+	chmod 0644 "$fixture/enroll-token"
+	if keyed_fixture_run --reenroll; then return 130; fi
+	grep -Fq 'chmod 600 enroll-token' "$fixture/keyed-output" || return 131
+	[[ -f "$fixture/enroll-token" ]] || return 132
+
+	chmod 0600 "$fixture/enroll-token"
+	rm -f "$log"
+	keyed_fixture_run --reenroll || return 133
+	grep -Fq "enroll --hub https://hub.example.com --token-file $fixture/enroll-token" "$log" || return 134
+	grep -Fq 'Tailscale: skipped (Hub reached over HTTPS)' "$fixture/keyed-output" || return 135
+	grep -Fq 'tailscale=skipped' "$fixture/keyed-output" || return 136
+	grep -Fq 'Embedded enroll-token removed' "$fixture/keyed-output" || return 137
+	[[ ! -e "$fixture/enroll-token" ]] || return 138
+	! grep -q 'tailscale' "$log" || return 139
+	! grep -q 'one-time-token' "$fixture/keyed-output" || return 140
+
+	# Explicit Hub and token-file override even invalid/insecure embedded files.
+	printf '%s\n' 'invalid-hub' >"$fixture/hub-url"
+	printf '%s\n' 'unused-embedded-secret' >"$fixture/enroll-token"
+	chmod 0644 "$fixture/enroll-token"
+	rm -f "$log"
+	keyed_fixture_run --reenroll --hub http://100.64.0.4:8787 --token-file "$token" --no-tailscale || return 141
+	grep -Fq "enroll --hub http://100.64.0.4:8787 --token-file $token" "$log" || return 142
+	grep -Fq 'Tailscale: skipped (--no-tailscale)' "$fixture/keyed-output" || return 143
+	! grep -q 'tailscale' "$log" || return 144
+	[[ -f "$fixture/enroll-token" ]] || return 145
+
+	# Explicit --token also overrides the embedded file and never appears in output.
+	rm -f "$log"
+	EXPECTED_ENROLL_TOKEN=explicit-secret keyed_fixture_run --reenroll --hub https://override.example.com --token explicit-secret || return 146
+	grep -Fq 'enroll --hub https://override.example.com --token-file' "$log" || return 147
+	! grep -q 'explicit-secret' "$fixture/keyed-output" "$log" || return 148
+	[[ -f "$fixture/enroll-token" ]] || return 149
+
+	# Failed enrollment retains the embedded secret and restores the old config.
+	printf '%s\n' 'https://hub.example.com' >"$fixture/hub-url"
+	printf '%s\n' 'one-time-token' >"$fixture/enroll-token"
+	chmod 0600 "$fixture/enroll-token"
+	cp "$home/.config/clawctl/agent.json" "$fixture/keyed-before"
+	if FAIL_ENROLL=1 keyed_fixture_run --reenroll; then return 150; fi
+	[[ -f "$fixture/enroll-token" ]] || return 151
+	cmp -s "$home/.config/clawctl/agent.json" "$fixture/keyed-before" || return 152
+
+	# Fresh install consumes the embedded files without flags.
+	rm -f "$home/.config/clawctl/agent.json" "$log"
+	keyed_fixture_run || return 153
+	[[ ! -e "$fixture/enroll-token" ]] || return 154
+	grep -Fq 'enroll --hub https://hub.example.com --token-file' "$log" || return 155
+	unset -f keyed_fixture_run
+
 }
 
 macos_agent_installer_complete_fixture() {
@@ -2238,6 +2300,12 @@ expect 'rejection curl argv does not contain token' 1 argv_clean
 nsend netfail
 expect 'exits 1 on delivery network failure' 1 has 'curl failed (exit 6)'
 expect 'delivery failure never prints token' 1 lacks "$SEKRIT"
+
+if bash "$ROOT/ops/docker/test-autopilot.sh"; then
+	passed=$((passed + 1))
+else
+	failed=$((failed + 1))
+fi
 
 if bash "$ROOT/ops/test-fly.sh"; then
 	passed=$((passed + 1))

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -96,6 +97,7 @@ type nonOperatorRouteClass uint8
 const (
 	nonOperatorAgent nonOperatorRouteClass = iota + 1
 	nonOperatorHealth
+	nonOperatorAccount
 	nonOperatorMetrics
 )
 
@@ -106,9 +108,15 @@ type nonOperatorRoutePolicy struct {
 // nonOperatorRoutePolicies is the other half of the routing security boundary.
 // Routes on the root mux bypass human/operator authorization by design, so
 // every one must be named here and classified as machine, liveness, or
-// telemetry traffic. In particular, /v1/operator/* can never be classified as
+// public account traffic. In particular, /v1/operator/* can never be classified as
 // a machine route.
 var nonOperatorRoutePolicies = map[string]nonOperatorRoutePolicy{
+	"GET /setup":   {nonOperatorAccount},
+	"POST /setup":  {nonOperatorAccount},
+	"GET /login":   {nonOperatorAccount},
+	"POST /login":  {nonOperatorAccount},
+	"POST /logout": {nonOperatorAccount},
+
 	"POST /v1/enrollments":             {nonOperatorAgent},
 	"POST /v1/checkins":                {nonOperatorAgent},
 	"POST /v1/observations:batch":      {nonOperatorAgent},
@@ -297,6 +305,7 @@ var operatorRoutePolicies = map[string]operatorRoutePolicy{
 	"POST /enrollments":                                                   {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /enrollments/preview":                                           {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /machines/{id}/revoke-token/preview":                            {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /machines/{id}/keyed-installer":                                 {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /machines/{id}/revoke-token":                                    {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /machines/{id}/channel":                                         {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /machines/{id}/assigned-user":                                   {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
@@ -352,6 +361,7 @@ const (
 )
 
 type operatorBoundary struct {
+	cloud      *cloudBoundaryConfig
 	next       *http.ServeMux
 	authorizer operatorRequestAuthorizer
 	store      *store.Store
@@ -362,12 +372,16 @@ type operatorBoundary struct {
 }
 
 func newOperatorBoundary(next *http.ServeMux, authorizer operatorRequestAuthorizer,
-	st *store.Store, policies map[string]operatorRoutePolicy, authority string,
+	st *store.Store, policies map[string]operatorRoutePolicy, authority string, cloud ...cloudBoundaryConfig,
 ) *operatorBoundary {
 	canonicalAuthority, _ := canonicalLiteralAuthority(authority)
 	b := &operatorBoundary{
 		next: next, authorizer: authorizer, store: st, policies: policies,
 		authority: canonicalAuthority, denials: newOperatorDenialLimiter(time.Now),
+	}
+	if len(cloud) > 0 {
+		b.cloud = &cloud[0]
+		b.authority = cloud[0].public.Authority()
 	}
 	csrf := http.NewCrossOriginProtection()
 	csrf.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -390,23 +404,24 @@ func newOperatorBoundary(next *http.ServeMux, authorizer operatorRequestAuthoriz
 // middleware. A machine bearer token can never acquire operator authority, and
 // a LocalAPI outage can never stop agents from checking in.
 func newHubHTTPHandler(h *hub, ui *web.Server, authorizer operatorRequestAuthorizer,
-	authority string,
+	authority string, cloud ...cloudBoundaryConfig,
 ) (http.Handler, error) {
-	if canonical, ok := canonicalLiteralAuthority(authority); !ok || canonical != authority {
+	if canonical, ok := canonicalLiteralAuthority(authority); len(cloud) == 0 && (!ok || canonical != authority) {
 		return nil, fmt.Errorf("operator authority %q must be canonical literal-ip:port", authority)
 	}
 	root := http.NewServeMux()
 	nonOperatorRegistered := h.machineAndPublicRoutes(root)
+	nonOperatorRegistered = append(nonOperatorRegistered, registerAccountRoutes(root, h.store, ui, authority, h.clientIP, cloud...)...)
 
 	operatorMux := http.NewServeMux()
 	operatorRegistered := h.operatorRoutes(operatorMux)
 	operatorRegistered = append(operatorRegistered, ui.Routes(operatorMux)...)
-	operatorRegistered = append(operatorRegistered, registerOperatorTerminalSocket(operatorMux, h, authorizer, authority))
+	operatorRegistered = append(operatorRegistered, registerOperatorTerminalSocket(operatorMux, h, authorizer, authority, cloud...))
 	if err := validateRouteManifests(nonOperatorRegistered, nonOperatorRoutePolicies,
 		operatorRegistered, operatorRoutePolicies); err != nil {
 		return nil, err
 	}
-	root.Handle("/", newOperatorBoundary(operatorMux, authorizer, h.store, operatorRoutePolicies, authority))
+	root.Handle("/", newOperatorBoundary(operatorMux, authorizer, h.store, operatorRoutePolicies, authority, cloud...))
 	return root, nil
 }
 
@@ -455,6 +470,10 @@ func validateNonOperatorRoutePolicies(registered []string, policies map[string]n
 			if len(segments) < 2 || segments[0] != "v1" ||
 				!validMachinePlaneDiscriminator(segments[1]) {
 				return fmt.Errorf("non-operator route %q machine-plane discriminator must be literal", pattern)
+			}
+		case nonOperatorAccount:
+			if !isAccountRoute(pattern) {
+				return fmt.Errorf("invalid account route %q", pattern)
 			}
 		case nonOperatorHealth:
 			if pattern != "GET /healthz" {
@@ -563,11 +582,15 @@ func (b *operatorBoundary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// a hostile hostname that DNS-rebinds to the Hub and still truthfully send
 	// Sec-Fetch-Site: same-origin. Pinning Host to the configured literal
 	// listener authority closes that gap; Host is routing input, never identity.
-	if requestAuthority, valid := canonicalLiteralAuthority(r.Host); !valid || requestAuthority != b.authority {
+	if !b.matchesAuthority(r.Host) {
 		b.observeBoundaryDenial(r, pattern, policy, operatorAuthorityDecisionCode,
 			"HTTP Host 與啟動時釘住的 operator authority 不符")
+		detail := "請使用 Hub 明示的 Tailscale IP 與 port"
+		if b.cloud != nil {
+			detail = "Use the Hub public URL"
+		}
 		writeOperatorBoundaryError(w, policy.Representation, http.StatusMisdirectedRequest,
-			operatorAuthorityDecisionCode, "請使用 Hub 明示的 Tailscale IP 與 port")
+			operatorAuthorityDecisionCode, detail)
 		return
 	}
 	if b.authorizer == nil {
@@ -592,10 +615,23 @@ func (b *operatorBoundary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		b.observeAuthDenial(r, pattern, policy, string(decision.Code), decision.Detail,
 			decision.Principal, cause)
+		if decision.Code == operatorauth.Unauthenticated && policy.Representation == operatorHTML && b.authMode() != authModeTailscale && b.store != nil {
+			n, err := b.store.CountAccounts()
+			if err != nil {
+				http.Error(w, "Authentication unavailable", 503)
+				return
+			}
+			target := "/login?next=" + url.QueryEscape(r.URL.RequestURI())
+			if n == 0 {
+				target = "/setup"
+			}
+			http.Redirect(w, r, target, http.StatusSeeOther)
+			return
+		}
 		writeOperatorBoundaryError(w, policy.Representation, decision.HTTPStatus, string(decision.Code), decision.Detail)
 		return
 	}
-	_, breach := validateAuthorizedResult(before, authed, decision, policy.Permission)
+	_, breach := validateAuthorizedResult(before, authed, decision, policy.Permission, b.authMode())
 	if breach != "" {
 		b.observeAuthDenial(r, pattern, policy, string(operatorauth.AuthConfigurationInvalid),
 			string(breach), operatorauth.Principal{}, nil)
@@ -675,7 +711,7 @@ func routingOf(r *http.Request) requestRouting {
 }
 
 func validateAuthorizedResult(before requestRouting, authed *http.Request, decision operatorauth.Decision,
-	required operatorauth.Permission,
+	required operatorauth.Permission, modes ...authMode,
 ) (operatorauth.Principal, operatorAuthBreach) {
 	after := routingOf(authed)
 	if !after.complete {
@@ -700,7 +736,12 @@ func validateAuthorizedResult(before requestRouting, authed *http.Request, decis
 	if principal.TailnetUserLogin == "" {
 		return principal, operatorAuthSuccessIdentityLoginEmpty
 	}
-	if principal.AuthMethod != operatorauth.AuthMethodLocalAPI {
+	mode := authModeTailscale
+	if len(modes) > 0 {
+		mode = modes[0]
+	}
+	allowedMethod := (principal.AuthMethod == operatorauth.AuthMethodLocalAPI && (mode == authModeTailscale || mode == authModeBoth)) || (principal.AuthMethod == operatorauth.AuthMethodLocalAccountSession && (mode == authModeLocal || mode == authModeBoth))
+	if !allowedMethod {
 		return principal, operatorAuthSuccessIdentityMethodNotLocalAPI
 	}
 	var expectedCapability string
@@ -757,7 +798,24 @@ const terminalDocumentCSPSuffix = "; style-src 'unsafe-inline'; img-src 'self' d
 func (b *operatorBoundary) writeSecurityHeaders(w http.ResponseWriter, r *http.Request, profile operatorSecurityProfile) {
 	header := w.Header()
 	header.Set("Cache-Control", "no-store")
-	header.Set("Content-Security-Policy", contentSecurityPolicy(profile, b.authority, r))
+	csp := contentSecurityPolicy(profile, b.authority, r)
+	if b.cloud != nil && b.cloud.public.Scheme() == "https" {
+		header.Set("Strict-Transport-Security", "max-age=31536000")
+	}
+	if b.cloud != nil && profile == operatorSecurityTerminal {
+		scheme := "ws"
+		if b.cloud.public.Scheme() == "https" {
+			scheme = "wss"
+		}
+		authority := b.cloud.public.Authority()
+		if b.cloud.mode == authModeBoth && !b.cloud.public.MatchesAuthority(r.Host) {
+			if canonical, ok := canonicalLiteralAuthority(r.Host); ok && canonical == b.cloud.tailnetAuthority {
+				scheme, authority = "ws", b.cloud.tailnetAuthority
+			}
+		}
+		csp = terminalDocumentCSPPrefix + scheme + "://" + authority + terminalDocumentCSPSuffix
+	}
+	header.Set("Content-Security-Policy", csp)
 	header.Set("Referrer-Policy", "no-referrer")
 	header.Set("X-Content-Type-Options", "nosniff")
 	header.Set("X-Frame-Options", "DENY")
@@ -1062,4 +1120,19 @@ func isSafeMethod(method string) bool {
 	default:
 		return false
 	}
+}
+
+func (b *operatorBoundary) matchesAuthority(host string) bool {
+	if b.cloud != nil {
+		return b.cloud.matches(host)
+	}
+	canonical, ok := canonicalLiteralAuthority(host)
+	return ok && canonical == b.authority
+}
+
+func (b *operatorBoundary) authMode() authMode {
+	if b.cloud != nil {
+		return b.cloud.mode
+	}
+	return authModeTailscale
 }

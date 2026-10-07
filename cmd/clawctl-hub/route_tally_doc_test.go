@@ -36,9 +36,19 @@ type routeTally struct {
 func TestRouteTallyDocumentsMatchManifest(t *testing.T) {
 	tally := routeTallyFromPolicies(t)
 	assertAPISurfaceTally(t, tally)
-	assertFeatureInventoryTally(t, tally)
-	assertControlPlaneTally(t, tally)
-	assertOperatorAuthTally(t, tally)
+	// The inventory and control-plane contract exclude public account routes,
+	// which API-SURFACE tallies separately.
+	tailscale := tally
+	tailscale.total -= len(accountRoutePatterns)
+	tailscale.nonOperator -= len(accountRoutePatterns)
+	assertFeatureInventoryTally(t, tailscale)
+	assertControlPlaneTally(t, tailscale)
+	policy, ok := operatorRoutePolicies["POST /machines/{id}/keyed-installer"]
+	if !ok || policy.Permission != operatorauth.Admin || policy.Representation != operatorHTML || policy.SecurityProfile != operatorSecurityLocked {
+		t.Fatal("keyed installer must remain an Admin-only locked HTML route")
+	}
+	// The Tailscale contract excludes the five public local-account operations.
+	assertOperatorAuthTally(t, tailscale)
 }
 
 func routeTallyFromPolicies(t *testing.T) routeTally {
@@ -50,10 +60,16 @@ func routeTallyFromPolicies(t *testing.T) routeTally {
 
 	var agent []string
 	health := 0
+	accounts := 0
 	for pattern, policy := range nonOperatorRoutePolicies {
 		switch policy.Class {
 		case nonOperatorAgent:
 			agent = append(agent, pattern)
+		case nonOperatorAccount:
+			accounts++
+			if !isAccountRoute(pattern) {
+				t.Fatalf("invalid account route %q", pattern)
+			}
 		case nonOperatorHealth:
 			health++
 			if pattern != "GET /healthz" {
@@ -84,7 +100,10 @@ func routeTallyFromPolicies(t *testing.T) routeTally {
 		}
 	}
 	tally.verifier = len(verifierSet)
-	if tally.machine+tally.verifier+health != tally.nonOperator {
+	if accounts != 5 {
+		t.Fatalf("account routes=%d, want 5", accounts)
+	}
+	if tally.machine+tally.verifier+health+accounts != tally.nonOperator {
 		t.Fatalf("machine %d + verifier %d + health %d != non-operator %d",
 			tally.machine, tally.verifier, health, tally.nonOperator)
 	}
@@ -281,7 +300,10 @@ func verifierRoutesNamedByOperatorAuth(t *testing.T) []string {
 
 func nonOperatorKeys() []string {
 	keys := make([]string, 0, len(nonOperatorRoutePolicies))
-	for pattern := range nonOperatorRoutePolicies {
+	for pattern, policy := range nonOperatorRoutePolicies {
+		if policy.Class == nonOperatorAccount {
+			continue
+		}
 		keys = append(keys, pattern)
 	}
 	return keys

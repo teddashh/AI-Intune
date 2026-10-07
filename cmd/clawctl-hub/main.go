@@ -25,6 +25,7 @@ import (
 
 	"github.com/teddashh/AI-Intune/internal/agentlink"
 	"github.com/teddashh/AI-Intune/internal/blobstore"
+	"github.com/teddashh/AI-Intune/internal/clientip"
 	"github.com/teddashh/AI-Intune/internal/expect"
 	"github.com/teddashh/AI-Intune/internal/ledgerlock"
 	"github.com/teddashh/AI-Intune/internal/objectref"
@@ -43,6 +44,7 @@ import (
 var version = "dev"
 
 type hub struct {
+	clientIP   clientip.Resolver
 	store      *store.Store
 	tailnet    *tailnet.Cache
 	agentLinks *agentlink.Registry
@@ -196,6 +198,16 @@ func main() {
 			log.Fatal(err)
 		}
 		switch command {
+		case "bootstrap-admin":
+			if err := runBootstrapAdmin(os.Args[2:], os.Stdin); err != nil {
+				log.Fatal(err)
+			}
+			return
+		case "reset-admin-password":
+			if err := runResetAdminPassword(os.Args[2:], os.Stdin); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "enroll-token":
 			cmdEnrollToken(os.Args[2:])
 			return
@@ -376,7 +388,7 @@ func classifyTopLevel(argv []string) (string, error) {
 		return "", nil
 	}
 	switch argv[0] {
-	case "enroll-token", "machines", "audit", "retire", "report", "data", "tickets", "tailnet",
+	case "bootstrap-admin", "reset-admin-password", "enroll-token", "machines", "audit", "retire", "report", "data", "tickets", "tailnet",
 		"enrollment-limit", "prune", "restore-drill", "job", "machine", "deployment",
 		"artifact", "catalog", "verifier", "settings", "compliance", "version", "notify-check":
 		return argv[0], nil
@@ -419,6 +431,7 @@ func runRollbackCompatibility(argv []string, out io.Writer) error {
 
 func serve(argv []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	authModeFlag := fs.String("auth-mode", os.Getenv("CLAWCTL_AUTH_MODE"), "operator auth mode: tailscale (default), local, or both")
 	addr := fs.String("listen", "127.0.0.1:8770", "listen address (literal Tailscale IP:port; reads $CLAWCTL_LISTEN when unset). Flag default 127.0.0.1:8770 is a fail-closed placeholder that Hub rejects. No production default port; 8787 is only a convention example in docs; grant dst, CLAWCTL_PUBLIC_URL, agent --hub, and tunnel origin must use the same port as this address")
 	dbPath := fs.String("db", defaultDB(), "path to SQLite database")
 	hubHost := fs.String("hub-host", hostname(), "name of this host; used to detect whether Hub is running on a machine it manages")
@@ -455,21 +468,53 @@ func serve(argv []string) {
 		log.Fatalf("unable to canonicalize database path: %v", err)
 	}
 	*dbPath = canonicalDBPath
-	destination, err := operatorDestinationFromListen(*addr)
+	mode, err := parseAuthMode(*authModeFlag)
 	if err != nil {
-		log.Fatalf("invalid operator auth configuration: rejected --listen %q: %v", *addr, err)
+		log.Fatal(err)
 	}
-	operatorAuthority, err := operatorAuthorityFromListen(*addr)
+	ipResolver, err := clientip.Parse(os.Getenv("CLAWCTL_TRUSTED_PROXIES"), os.Getenv("CLAWCTL_CLIENT_IP_HEADER"))
 	if err != nil {
-		log.Fatalf("operator HTTP authority rejected --listen %q: %v", *addr, err)
+		log.Fatal(err)
 	}
-	operatorAuthorizer, err := operatorauth.New(operatorauth.Config{
-		Destination: destination, CapabilityPrefix: *operatorCapabilityPrefix,
-	})
+	if len(ipResolver.Proxies) > 0 {
+		log.Printf("client IP: trusted proxies %v; header %s", ipResolver.Proxies, ipResolver.Header)
+	}
+	var cloud []cloudBoundaryConfig
+	var operatorAuthority string
+	var operatorAuthorizer operatorRequestAuthorizer
+	if mode == authModeTailscale {
+		destination, err := operatorDestinationFromListen(*addr)
+		if err != nil {
+			log.Fatalf("invalid operator auth configuration: rejected --listen %q: %v", *addr, err)
+		}
+		operatorAuthority, err = operatorAuthorityFromListen(*addr)
+		if err != nil {
+			log.Fatalf("operator HTTP authority rejected --listen %q: %v", *addr, err)
+		}
+		operatorAuthorizer, err = operatorauth.New(operatorauth.Config{
+			Destination: destination, CapabilityPrefix: *operatorCapabilityPrefix,
+		})
+		if err != nil {
+			log.Fatalf("invalid operator auth configuration: %v; please set CLAWCTL_OPERATOR_CAPABILITY_PREFIX", err)
+		}
+	} else {
+		var config cloudBoundaryConfig
+		config, err = cloudConfiguration(mode, *addr)
+		if err == nil {
+			cloud = append(cloud, config)
+			operatorAuthority = config.public.Authority()
+		}
+	}
 	if err != nil {
-		log.Fatalf("invalid operator auth configuration: %v; please set CLAWCTL_OPERATOR_CAPABILITY_PREFIX", err)
+		log.Fatalf("invalid operator endpoint configuration: %v", err)
 	}
-	operatorBase, why := publicBase(*addr)
+	if mode != authModeTailscale {
+		operatorAuthorizer, err = configuredOperatorAuthorizer(mode, *addr, *operatorCapabilityPrefix)
+		if err != nil {
+			log.Fatalf("invalid operator auth configuration: %v; please set CLAWCTL_OPERATOR_CAPABILITY_PREFIX", err)
+		}
+	}
+	operatorBase, why := publicBase(*addr, string(mode))
 	if why != "" {
 		log.Fatalf("invalid operator console address configuration: %s", why)
 	}
@@ -597,7 +642,19 @@ func serve(argv []string) {
 		log.Fatalf("failed to load agent bootstrap bundles: %v", err)
 	}
 
-	handler, err := newHubHTTPHandler(h, ui, operatorAuthorizer, operatorAuthority)
+	if mode != authModeTailscale {
+		operatorAuthorizer, err = withSessionAuthorizer(h.store, mode, cloud[0].public.Scheme() == "https", *operatorCapabilityPrefix, operatorAuthorizer)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	if len(cloud) > 0 {
+		if err := initializeSetupCode(st, &cloud[0], log.Printf); err != nil {
+			log.Fatalf("first-run setup unavailable: %v", err)
+		}
+	}
+	h.clientIP = ipResolver
+	handler, err := newHubHTTPHandler(h, ui, operatorAuthorizer, operatorAuthority, cloud...)
 	if err != nil {
 		log.Fatalf("operator route policy incomplete: %v", err)
 	}
@@ -950,19 +1007,27 @@ func (h *hub) maybeSendReport(now time.Time) {
 	h.deliver("daily", body, now)
 }
 
-// publicBase returns the one authority supported by the direct-tailnet
-// operator topology. Reports, browser forms and generated agent enrollment
-// commands must all name the same literal listener; accepting a second public
-// hostname here would produce links that the Host-pinning boundary rejects.
-//
-// ⚠ 回傳的第二個值是「為什麼沒有」。它不是錯誤 —— 沒有連結是完全可以
-// 接受的狀態，但**沒有理由地沒有連結**不行：那會變成一個沒有人發現
-// 它壞掉的功能。
-//
-// CLAWCTL_PUBLIC_URL is retained only as a compatibility assertion: when set,
-// it must equal the derived HTTP URL. Supporting TLS termination or a named
-// origin later requires an explicit trusted-authority allowlist first.
-func publicBase(listen string) (base, why string) {
+// publicBase returns the configured public origin in cloud modes. In Tailscale
+// mode it derives the literal listener origin and treats PUBLIC_URL, when set,
+// as a compatibility assertion that must match it. The optional mode lets the
+// serve flag override the environment without changing process-global state.
+func publicBase(listen string, configuredMode ...string) (base, why string) {
+	rawMode := os.Getenv("CLAWCTL_AUTH_MODE")
+	if len(configuredMode) > 0 {
+		rawMode = configuredMode[0]
+	}
+	mode, modeErr := parseAuthMode(rawMode)
+	if modeErr != nil {
+		return "", modeErr.Error()
+	}
+	if mode != authModeTailscale {
+		config, err := cloudConfiguration(mode, listen)
+		if err != nil {
+			return "", err.Error()
+		}
+		return config.public.BaseURL(), ""
+	}
+
 	host, port, err := net.SplitHostPort(listen)
 	if err != nil {
 		return "", fmt.Sprintf("cannot parse listen address %q", listen)

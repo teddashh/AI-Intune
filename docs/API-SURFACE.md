@@ -3,9 +3,25 @@
 > 這是控制面 parity 的帳本，不是行銷功能表。只要正常操作仍只有 CLI，
 > 就留在「缺口」欄；高風險不是把入口藏起來，而是補 RBAC、preview、確認、
 > 冪等與 audit。共同成功語意見 [CONTROL-PLANE-CONTRACT.md](CONTROL-PLANE-CONTRACT.md)。
-> 逐一對照 221 個 HTTP operations（18 non-operator＋203 operator；107 條 operator JSON）、
+> 逐一對照 227 個 HTTP operations（23 non-operator＋204 operator；107 條 operator JSON）、
 > native Store、UI／CLI 與 Intune-style submenu 的完整清單，
 > 見 [FEATURE-INVENTORY.md](FEATURE-INVENTORY.md)。
+
+## Public local-account routes (Autopilot)
+
+These five operations are included in the 227-operation tally above (23 non-operator + 204 operator). The Tailscale inventory/contract excludes these five and totals 222. Account routes return 404 in `tailscale` mode. In `local` / `both`, they pin Host to `CLAWCTL_PUBLIC_URL`, use locked security headers and Go CrossOriginProtection, and do not require an existing operator session.
+
+| Method | Route | Authority / behavior |
+|---|---|---|
+| `GET`, `POST` | `/setup` | First account only; POST requires setup code, username and password. Returns 404 after an admin exists. |
+| `GET`, `POST` | `/login` | Form and password authentication; creates local session. Login/setup POSTs share TCP-peer limit 10/minute, burst 5. |
+| `POST` | `/logout` | Revokes the presented session, clears cookie, redirects to login. |
+
+| Method | Operator download route | Authority / behavior |
+|---|---|---|
+| `POST` | `/machines/{id}/keyed-installer` | Admin, locked browser security profile and CSRF checks; form `token` + Linux `arch` (`amd64` / `arm64`); returns no-store archive embedding Hub URL and pending one-time token without redeeming it. Already included in the 204 operator tally. |
+
+In local mode operator routes use a local admin session, including `/metrics`; in `both`, sessions precede eligible WhoIs fallback. Forwarded identity headers and machine/verifier bearers never authorize operators. The Tailscale-specific explanations below describe the advanced mode. See [Autopilot](AUTOPILOT.md) for setup, expiry, lockout and recovery.
 
 ## 1. 四個 plane 不混權限
 
@@ -492,3 +508,9 @@ AWX/AAP 接入時，runtime 用官方 REST API；inventory、template、credenti
 - **同一個業務操作在每個平面要求同一個 capability。** route manifest 目前只記「這條 route 要什麼權限」，不記「這條 route 是哪一個業務操作」，所以跨平面的權限一致性沒辦法整份機械檢查；每個工作流程要自己用一條掃 manifest 的規則釘住（例：`TestSettingWritesCostAdminOnEveryPlane`、`TestComplianceWritesCostAdminOnEveryPlane`）。抄程式碼寫成的 per-route 測試擋不住這件事——`5afb64b` 的 JSON 開成 operate、`729db66` 的 Web 開成 admin，兩邊的 per-route 測試都過；
 - executor evidence 與另一 failure domain 的 verifier evidence 分開標 role/來源，不把兩個 client 當兩雙眼睛；
 - unknown、資料來源壞掉與「真的為零」在 API 和畫面上是不同狀態。
+
+`POST /machines/{id}/keyed-installer` is an Admin-only browser endpoint with the
+locked security profile. It accepts `token` and Linux `arch` (`amd64` or `arm64`)
+in a form body and returns a non-cacheable bootstrap archive containing the Hub
+URL and a one-time enrollment token, without redeeming it. Invalid, used, expired,
+revoked, or mismatched tickets return the same generic 404 response.

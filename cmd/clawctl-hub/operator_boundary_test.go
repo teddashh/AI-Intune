@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/clientip"
 	"github.com/teddashh/AI-Intune/internal/model"
 	"github.com/teddashh/AI-Intune/internal/operator"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
@@ -111,6 +112,7 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 	h := &hub{store: st}
 	nonOperatorMux := http.NewServeMux()
 	nonOperatorRegistered := h.machineAndPublicRoutes(nonOperatorMux)
+	nonOperatorRegistered = append(nonOperatorRegistered, registerAccountRoutes(nonOperatorMux, st, ui, testOperatorAuthority, clientip.Resolver{})...)
 	operatorMux := http.NewServeMux()
 	operatorRegistered := h.operatorRoutes(operatorMux)
 	operatorRegistered = append(operatorRegistered, ui.Routes(operatorMux)...)
@@ -119,16 +121,16 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		operatorRegistered, operatorRoutePolicies); err != nil {
 		t.Fatal(err)
 	}
-	if len(nonOperatorRegistered) != 18 || len(nonOperatorRoutePolicies) != 18 {
-		t.Fatalf("non-operator registered=%d policies=%d, want 18/18",
+	if len(nonOperatorRegistered) != 23 || len(nonOperatorRoutePolicies) != 23 {
+		t.Fatalf("non-operator registered=%d policies=%d, want 23/23",
 			len(nonOperatorRegistered), len(nonOperatorRoutePolicies))
 	}
-	if len(operatorRegistered) != 203 || len(operatorRoutePolicies) != 203 {
-		t.Fatalf("operator registered=%d policies=%d, want 203/203",
+	if len(operatorRegistered) != 204 || len(operatorRoutePolicies) != 204 {
+		t.Fatalf("operator registered=%d policies=%d, want 204/204",
 			len(operatorRegistered), len(operatorRoutePolicies))
 	}
-	if len(nonOperatorRegistered)+len(operatorRegistered) != 221 {
-		t.Fatalf("all registered routes=%d, 預期 221", len(nonOperatorRegistered)+len(operatorRegistered))
+	if len(nonOperatorRegistered)+len(operatorRegistered) != 227 {
+		t.Fatalf("all registered routes=%d, 預期 227", len(nonOperatorRegistered)+len(operatorRegistered))
 	}
 	counts := map[operatorauth.Permission]int{}
 	representations := map[operatorRepresentation]int{}
@@ -138,14 +140,14 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		representations[policy.Representation]++
 		profiles[policy.SecurityProfile]++
 	}
-	if counts[operatorauth.View] != 83 || counts[operatorauth.Operate] != 24 || counts[operatorauth.Admin] != 96 {
-		t.Fatalf("permission counts=%v, want view=83 operate=24 admin=96", counts)
+	if counts[operatorauth.View] != 83 || counts[operatorauth.Operate] != 24 || counts[operatorauth.Admin] != 97 {
+		t.Fatalf("permission counts=%v, want view=83 operate=24 admin=97", counts)
 	}
-	if representations[operatorJSON] != 107 || representations[operatorHTML] != 95 || representations[operatorPlain] != 1 {
-		t.Fatalf("representation counts=%v, want JSON=107 HTML=95 plain=1", representations)
+	if representations[operatorJSON] != 107 || representations[operatorHTML] != 96 || representations[operatorPlain] != 1 {
+		t.Fatalf("representation counts=%v, want JSON=107 HTML=96 plain=1", representations)
 	}
-	if profiles[operatorSecurityLocked] != 202 || profiles[operatorSecurityTerminal] != 1 {
-		t.Fatalf("security profiles=%v, want locked=202 terminal=1", profiles)
+	if profiles[operatorSecurityLocked] != 203 || profiles[operatorSecurityTerminal] != 1 {
+		t.Fatalf("security profiles=%v, want locked=203 terminal=1", profiles)
 	}
 }
 
@@ -402,6 +404,7 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		{"POST /enrollments", "/enrollments", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /enrollments/preview", "/enrollments/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /machines/{id}/revoke-token/preview", "/machines/machine-1/revoke-token/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
+		{"POST /machines/{id}/keyed-installer", "/machines/machine-1/keyed-installer", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /machines/{id}/revoke-token", "/machines/machine-1/revoke-token", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /machines/{id}/channel", "/machines/machine-1/channel", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 		{"POST /machines/{id}/assigned-user", "/machines/machine-1/assigned-user", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},

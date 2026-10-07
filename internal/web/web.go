@@ -213,6 +213,7 @@ func (s *Server) Routes(mux *http.ServeMux) []string {
 		"GET /reports/profile.csv",
 		"POST /preferences/navigation-language",
 		"GET /machines/{id}/terminals/{session}",
+		"POST /machines/{id}/keyed-installer",
 	}
 	mux.HandleFunc(patterns[0], s.dashboard)
 	mux.HandleFunc(patterns[1], s.dashboard)
@@ -253,6 +254,7 @@ func (s *Server) Routes(mux *http.ServeMux) []string {
 	mux.HandleFunc(patterns[36], s.profileReportCSV)
 	mux.HandleFunc(patterns[37], s.setNavigationLanguage)
 	mux.HandleFunc(patterns[38], s.terminalDocument)
+	mux.HandleFunc(patterns[39], s.downloadKeyedInstaller)
 	// ⚠ 寫入路徑全部在 actions.go，而且全部是 POST。理由寫在那個檔案的開頭。
 	return append(patterns, s.actionRoutes(mux)...)
 }
@@ -551,9 +553,11 @@ type page struct {
 	// EnrollmentName is an optional convenience value from a machine-page CTA.
 	// It is never a confirmation value: the preview service still validates the
 	// submitted display name and the create step freezes its own digest/key.
-	EnrollmentName  string
-	AgentBundles    []agentBundleView
-	AgentInstallers []agentInstallerView
+	EnrollmentName     string
+	HTTPSInstaller     bool
+	TailscaleInstaller bool
+	AgentBundles       []agentBundleView
+	AgentInstallers    []agentInstallerView
 }
 
 type machinePageMachine struct {
@@ -676,15 +680,16 @@ func selectSubNavigationLocation(nav *subNavigation, section string) {
 }
 
 type accessView struct {
-	Known       bool
-	Login       string
-	Device      string
-	Subject     string
-	Permissions string
-	Attribution string
-	CanView     bool
-	CanOperate  bool
-	CanAdmin    bool
+	LocalSession bool
+	Known        bool
+	Login        string
+	Device       string
+	Subject      string
+	Permissions  string
+	Attribution  string
+	CanView      bool
+	CanOperate   bool
+	CanAdmin     bool
 }
 
 func accessFromRequest(r *http.Request) accessView {
@@ -696,7 +701,8 @@ func accessFromRequest(r *http.Request) accessView {
 		return accessView{}
 	}
 	return accessView{
-		Known: true, Login: principal.TailnetUserLogin, Device: principal.DeviceName,
+		LocalSession: principal.AuthMethod == operatorauth.AuthMethodLocalAccountSession,
+		Known:        true, Login: principal.TailnetUserLogin, Device: principal.DeviceName,
 		Subject: principal.StableSubject(), Permissions: principal.PermissionLabel(),
 		Attribution: principal.Attribution(), CanView: principal.Has(operatorauth.View),
 		CanOperate: principal.Has(operatorauth.Operate), CanAdmin: principal.Has(operatorauth.Admin),
@@ -1258,7 +1264,7 @@ func (s *Server) machine(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	assignedUser.UserLogin = assignedUserWebLabel(assignedUser.UserID, assignedUser.UserLogin)
-	directory := assignedUserDirectory(s.tailnet.Get(r.Context()))
+	directory := s.assignedUserDirectoryForRequest(r, s.tailnet.Get(r.Context()))
 	channelKey, err := operator.NewIdempotencyKey("web-machine-channel")
 	if err != nil {
 		s.fail(w, "產生 channel 表單 request key 失敗", err)
@@ -1514,6 +1520,8 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 	if s.agentBundles != nil {
 		data.AgentBundles = append([]agentBundleView(nil), s.agentBundles.views...)
 	}
+	data.HTTPSInstaller = strings.HasPrefix(s.hubBase, "https://")
+	data.TailscaleInstaller = strings.HasPrefix(s.hubBase, "http://100.")
 	data.AgentInstallers = agentInstallerCommands(s.agentBundles, s.hubBase)
 	if len(data.SubNav.Items) == 0 {
 		data.SubNav = subNavigationFor(data)

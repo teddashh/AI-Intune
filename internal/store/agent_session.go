@@ -683,6 +683,9 @@ func agentSessionAudit(audit AuditEntry, action AuditAction, machineID, sessionI
 	audit.AuthSubject = ""
 	if operatorUserID != "" {
 		audit.AuthSubject = "tailscale-user:" + operatorUserID
+		if audit.AuthMethod == "local-account-session" {
+			audit.AuthSubject = "local-user:" + strings.TrimPrefix(operatorUserID, "local:")
+		}
 	}
 	return audit
 }

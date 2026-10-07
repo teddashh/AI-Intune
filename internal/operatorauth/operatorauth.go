@@ -28,9 +28,10 @@ import (
 )
 
 const (
-	defaultResolveTimeout = 3 * time.Second
-	AuthMethodLocalAPI    = "tailscale-localapi-app-cap"
-	minimumDaemonVersion  = "1.100.0"
+	defaultResolveTimeout         = 3 * time.Second
+	AuthMethodLocalAccountSession = "local-account-session"
+	AuthMethodLocalAPI            = "tailscale-localapi-app-cap"
+	minimumDaemonVersion          = "1.100.0"
 )
 
 // Permission is one independently granted operator capability. These are not
@@ -227,6 +228,9 @@ type Principal struct {
 func (p Principal) StableSubject() string {
 	if p.TailnetUserID == "" {
 		return ""
+	}
+	if p.AuthMethod == AuthMethodLocalAccountSession {
+		return "local-user:" + strings.TrimPrefix(p.TailnetUserID, "local:")
 	}
 	return "tailscale-user:" + p.TailnetUserID
 }

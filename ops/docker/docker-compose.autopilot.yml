@@ -1,0 +1,97 @@
+# Standalone Autopilot pack; do not layer on docker-compose.yml.
+# See docs/AUTOPILOT.md. Only Caddy exposes host ports.
+name: clawctl-autopilot
+
+services:
+  hub-data-init:
+    build:
+      context: ../..
+      dockerfile: ops/docker/Dockerfile
+      target: hub-init
+      args:
+        CLAWCTL_VERSION: ${CLAWCTL_VERSION:-dev}
+    image: clawctl-hub-init:${CLAWCTL_VERSION:-local}
+    container_name: clawctl-hub-data-init
+    # Root only so this one-shot can chown the volume. It does not listen.
+    user: "0:0"
+    restart: "no"
+    volumes:
+      - clawctl-data:/var/lib/clawctl
+
+  hub:
+    build:
+      context: ../..
+      dockerfile: ops/docker/Dockerfile
+      target: hub
+      args:
+        CLAWCTL_VERSION: ${CLAWCTL_VERSION:-dev}
+    image: clawctl-hub:${CLAWCTL_VERSION:-local}
+    container_name: clawctl-hub
+    restart: unless-stopped
+    depends_on:
+      hub-data-init:
+        condition: service_completed_successfully
+    # Bridge networking; only Caddy publishes ports.
+    networks: [default]
+    # Pass secrets/config via: docker compose --env-file ops/docker/autopilot.env ...
+    # (do not commit autopilot.env). Values below are injected into the container.
+    environment:
+      CLAWCTL_TRUSTED_PROXIES: ${CLAWCTL_DOCKER_SUBNET:-172.31.87.0/24}
+      CLAWCTL_CLIENT_IP_HEADER: X-Forwarded-For
+      CLAWCTL_AUTH_MODE: local
+      CLAWCTL_LISTEN: 0.0.0.0:8787
+      CLAWCTL_PUBLIC_URL: https://${CLAWCTL_PUBLIC_HOST:?set CLAWCTL_PUBLIC_HOST}
+      # Null passes through only when set; an empty setup code is invalid.
+      CLAWCTL_SETUP_CODE:
+      CLAWCTL_DB: /var/lib/clawctl/clawctl.sqlite
+      CLAWCTL_REPORT_STAMP: /var/lib/clawctl/last-report.stamp
+      CLAWCTL_NOTIFY_CMD: ${CLAWCTL_NOTIFY_CMD:-}
+      CLAWCTL_REPORT_AT: ${CLAWCTL_REPORT_AT:-08:00}
+      CLAWCTL_REPORT_PING_URL: ${CLAWCTL_REPORT_PING_URL:-}
+      CLAWCTL_REPORT_PING_FAIL_URL: ${CLAWCTL_REPORT_PING_FAIL_URL:-}
+      # Optional object storage. Empty values keep local artifact files.
+      # See docs/DEPLOY-OSS.md. Do not commit autopilot.env.
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      R2_REGION: ${R2_REGION:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-}
+    volumes:
+      # hub-data-init chowns this volume to uid 65532 and mode 0700 before
+      # hub starts. Ledger parent and agent-bootstrap files must be that user.
+      - clawctl-data:/var/lib/clawctl
+    healthcheck:
+      disable: true
+
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    depends_on:
+      - hub
+    environment:
+      CLAWCTL_PUBLIC_HOST: ${CLAWCTL_PUBLIC_HOST:?set CLAWCTL_PUBLIC_HOST}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.autopilot:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${CLAWCTL_DOCKER_SUBNET:-172.31.87.0/24}
+
+volumes:
+  clawctl-data:
+  caddy_data:
+  caddy_config:

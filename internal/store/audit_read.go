@@ -38,6 +38,7 @@ var allAuditActions = [...]AuditAction{
 	AuditRetire,
 	AuditUnretire,
 	AuditEnrollToken,
+	AuditKeyedInstaller,
 	AuditRevokeToken,
 	AuditEnrollmentLimit,
 	AuditDeploymentCreate,
@@ -74,6 +75,7 @@ var allAuditActions = [...]AuditAction{
 	AuditMaintenanceContinue,
 	AuditMaintenanceAbandon,
 	AuditOperatorDenied,
+	AuditHubGuessing, AuditHubSetup, AuditHubLoginOK, AuditHubLoginFailed, AuditHubLockout, AuditHubLogout,
 }
 
 // AuditActions returns a copy so callers cannot mutate validation or cursor
