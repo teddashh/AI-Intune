@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/teddashh/AI-Intune/internal/clientip"
 	"github.com/teddashh/AI-Intune/internal/localauth"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/store"
@@ -40,7 +41,11 @@ func localAccountHandler(t *testing.T) (http.Handler, *store.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := newHubHTTPHandler(&hub{store: st}, ui, auth, config.public.Authority(), config)
+	resolver, err := clientip.Parse(os.Getenv("CLAWCTL_TRUSTED_PROXIES"), os.Getenv("CLAWCTL_CLIENT_IP_HEADER"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := newHubHTTPHandler(&hub{store: st, clientIP: resolver}, ui, auth, config.public.Authority(), config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +258,7 @@ func TestResetAdminPasswordCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 5 {
-		st.VerifyPassword("admin", "wrong")
+		st.VerifyPassword("admin", "wrong", "192.0.2.1")
 	}
 	// Use the existing database opened by the helper; recovery also works while
 	// a process has it open, with SQLite serializing the account/session update.
@@ -272,7 +277,7 @@ func TestResetAdminPasswordCommand(t *testing.T) {
 	if _, err = st.LookupSession(token); err == nil {
 		t.Fatal("session survived reset")
 	}
-	if _, err = st.VerifyPassword("admin", "replacement password"); err != nil {
+	if _, err = st.VerifyPassword("admin", "replacement password", "192.0.2.1"); err != nil {
 		t.Fatal("lockout not cleared", err)
 	}
 }
@@ -399,7 +404,7 @@ func TestBootstrapAdminCommand(t *testing.T) {
 	if err := runBootstrapAdmin(args, strings.NewReader("headless admin password\r\n")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.VerifyPassword("admin", "headless admin password"); err != nil {
+	if _, err := st.VerifyPassword("admin", "headless admin password", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := runBootstrapAdmin(args, strings.NewReader("another admin password")); !errors.Is(err, store.ErrAdminExists) {
@@ -407,5 +412,45 @@ func TestBootstrapAdminCommand(t *testing.T) {
 	}
 	if n, err := st.CountAccounts(); err != nil || n != 1 {
 		t.Fatal(n, err)
+	}
+}
+
+func TestLoginResolvedIPBuckets(t *testing.T) {
+	for _, trusted := range []bool{true, false} {
+		t.Run(fmt.Sprint(trusted), func(t *testing.T) {
+			proxies := ""
+			if trusted {
+				proxies = "10.0.0.0/8"
+			}
+			t.Setenv("CLAWCTL_TRUSTED_PROXIES", proxies)
+			h, st := localAccountHandler(t)
+			if _, err := st.CreateFirstAdmin("admin", "test admin password"); err != nil {
+				t.Fatal(err)
+			}
+			request := func(ip string) int {
+				r := httptest.NewRequest("POST", "https://hub.example.com/login", strings.NewReader("username=unknown&password=wrong"))
+				r.RemoteAddr = "10.0.0.1:1234"
+				r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				r.Header.Set("X-Forwarded-For", ip)
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, r)
+				return w.Code
+			}
+			for range 5 {
+				if code := request("192.0.2.1"); code != 401 {
+					t.Fatal(code)
+				}
+			}
+			if code := request("192.0.2.1"); code != 429 {
+				t.Fatal(code)
+			}
+			want := 429
+			if trusted {
+				want = 401
+			}
+			if code := request("192.0.2.2"); code != want {
+				t.Fatalf("got %d want %d", code, want)
+			}
+		})
 	}
 }

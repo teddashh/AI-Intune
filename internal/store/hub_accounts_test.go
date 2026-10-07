@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -60,25 +61,25 @@ func TestHubPasswordLockout(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 5; i++ {
-		if _, err = s.VerifyPassword("admin", "wrong"); !errors.Is(err, ErrAccountAuth) {
+		if _, err = s.VerifyPassword("admin", "wrong", "192.0.2.1"); !errors.Is(err, ErrAccountAuth) {
 			t.Fatal(err)
 		}
 	}
 	for _, user := range []string{"admin", "unknown"} {
-		if _, err = s.VerifyPassword(user, testAdminPassword); !errors.Is(err, ErrAccountAuth) {
+		if _, err = s.VerifyPassword(user, testAdminPassword, "192.0.2.1"); !errors.Is(err, ErrAccountAuth) {
 			t.Fatalf("%s: %v", user, err)
 		}
 	}
 	now = now.Add(15*time.Minute - time.Second)
-	if _, err = s.VerifyPassword("admin", testAdminPassword); err == nil {
+	if _, err = s.VerifyPassword("admin", testAdminPassword, "192.0.2.1"); err == nil {
 		t.Fatal("unlocked early")
 	}
 	now = now.Add(time.Second)
-	if _, err = s.VerifyPassword("admin", testAdminPassword); err != nil {
+	if _, err = s.VerifyPassword("admin", testAdminPassword, "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	var failed int
-	s.rdb.QueryRow(`SELECT failed_attempts FROM hub_accounts WHERE account_id=?`, a.AccountID).Scan(&failed)
+	s.rdb.QueryRow(`SELECT count(*) FROM hub_login_failures WHERE account_id=?`, a.AccountID).Scan(&failed)
 	if failed != 0 {
 		t.Fatal(failed)
 	}
@@ -179,5 +180,70 @@ func TestHubSessions(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestHubPerClientFailures(t *testing.T) {
+	fastAccountHashes(t)
+	s := newTestStore(t)
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	s.nowFn = func() time.Time { return now }
+	a, err := s.CreateFirstAdmin("admin", testAdminPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		s.VerifyPassword("admin", "wrong", "192.0.2.1")
+	}
+	if _, err = s.VerifyPassword("admin", testAdminPassword, "192.0.2.1"); !errors.Is(err, ErrAccountAuth) {
+		t.Fatal("locked IP accepted", err)
+	}
+	if _, err = s.VerifyPassword("admin", testAdminPassword, "192.0.2.2"); err != nil {
+		t.Fatal("other IP blocked", err)
+	}
+	s.VerifyPassword("unknown", "wrong", "192.0.2.3")
+	var n int
+	if err = s.rdb.QueryRow(`SELECT count(*) FROM hub_login_failures`).Scan(&n); err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	s.VerifyPassword("admin", "wrong", "192.0.2.2")
+	if _, err = s.VerifyPassword("admin", testAdminPassword, "192.0.2.2"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.rdb.QueryRow(`SELECT count(*) FROM hub_login_failures`).Scan(&n); err != nil || n != 1 {
+		t.Fatal("success must reset only its pair", n, err)
+	}
+	for i := 0; i < 50; i++ {
+		s.VerifyPassword("admin", "wrong", fmt.Sprintf("198.51.100.%d", i))
+	}
+	countSignals := func() int {
+		t.Helper()
+		var n int
+		if err := s.rdb.QueryRow(`SELECT count(*) FROM audit_log WHERE action=?`, AuditHubGuessing).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := countSignals(); n != 1 {
+		t.Fatal("signals", n)
+	}
+	now = now.Add(time.Hour)
+	for i := 0; i < 50; i++ {
+		s.VerifyPassword("admin", "wrong", fmt.Sprintf("203.0.113.%d", i))
+	}
+	if n := countSignals(); n != 2 {
+		t.Fatal("next hour signals", n)
+	}
+	if err = s.ResetAdminPassword("admin", "replacement password"); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.rdb.QueryRow(`SELECT count(*) FROM hub_login_failures WHERE account_id=?`, a.AccountID).Scan(&n); err != nil || n != 0 {
+		t.Fatal("reset", n, err)
+	}
+	s.VerifyPassword("admin", "wrong", "192.0.2.1")
+	now = now.Add(25 * time.Hour)
+	s.VerifyPassword("unknown", "wrong", "192.0.2.3")
+	if err = s.rdb.QueryRow(`SELECT count(*) FROM hub_login_failures`).Scan(&n); err != nil || n != 0 {
+		t.Fatal("prune", n, err)
 	}
 }

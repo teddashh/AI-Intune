@@ -25,6 +25,7 @@ import (
 
 	"github.com/teddashh/AI-Intune/internal/agentlink"
 	"github.com/teddashh/AI-Intune/internal/blobstore"
+	"github.com/teddashh/AI-Intune/internal/clientip"
 	"github.com/teddashh/AI-Intune/internal/expect"
 	"github.com/teddashh/AI-Intune/internal/ledgerlock"
 	"github.com/teddashh/AI-Intune/internal/objectref"
@@ -43,6 +44,7 @@ import (
 var version = "dev"
 
 type hub struct {
+	clientIP   clientip.Resolver
 	store      *store.Store
 	tailnet    *tailnet.Cache
 	agentLinks *agentlink.Registry
@@ -470,6 +472,13 @@ func serve(argv []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	ipResolver, err := clientip.Parse(os.Getenv("CLAWCTL_TRUSTED_PROXIES"), os.Getenv("CLAWCTL_CLIENT_IP_HEADER"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	if len(ipResolver.Proxies) > 0 {
+		log.Printf("client IP: trusted proxies %v; header %s", ipResolver.Proxies, ipResolver.Header)
+	}
 	var cloud []cloudBoundaryConfig
 	var operatorAuthority string
 	var operatorAuthorizer operatorRequestAuthorizer
@@ -644,6 +653,7 @@ func serve(argv []string) {
 			log.Fatalf("first-run setup unavailable: %v", err)
 		}
 	}
+	h.clientIP = ipResolver
 	handler, err := newHubHTTPHandler(h, ui, operatorAuthorizer, operatorAuthority, cloud...)
 	if err != nil {
 		log.Fatalf("operator route policy incomplete: %v", err)

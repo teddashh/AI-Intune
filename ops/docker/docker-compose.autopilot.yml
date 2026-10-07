@@ -36,6 +36,8 @@ services:
     # Pass secrets/config via: docker compose --env-file ops/docker/autopilot.env ...
     # (do not commit autopilot.env). Values below are injected into the container.
     environment:
+      CLAWCTL_TRUSTED_PROXIES: ${CLAWCTL_DOCKER_SUBNET:-172.31.87.0/24}
+      CLAWCTL_CLIENT_IP_HEADER: X-Forwarded-For
       CLAWCTL_AUTH_MODE: local
       CLAWCTL_LISTEN: 0.0.0.0:8787
       CLAWCTL_PUBLIC_URL: https://${CLAWCTL_PUBLIC_HOST:?set CLAWCTL_PUBLIC_HOST}
@@ -85,6 +87,9 @@ services:
 networks:
   default:
     driver: bridge
+    ipam:
+      config:
+        - subnet: ${CLAWCTL_DOCKER_SUBNET:-172.31.87.0/24}
 
 volumes:
   clawctl-data:

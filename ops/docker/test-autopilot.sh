@@ -21,5 +21,10 @@ for required in '"80:80"' '"443:443"' './Caddyfile.autopilot:/etc/caddy/Caddyfil
 done
 grep -Fq '{$CLAWCTL_PUBLIC_HOST}' "$HERE/Caddyfile.autopilot" || fail 'Caddy hostname missing'
 grep -q 'reverse_proxy hub:8787' "$HERE/Caddyfile.autopilot" || fail 'Caddy upstream missing'
-! grep -Eiq 'header_up|X-Forwarded|X-Real-IP' "$HERE/Caddyfile.autopilot" || fail 'unexpected identity header configuration'
+! grep -Eiq 'header_up|X-Forwarded|X-Real-IP' <(sed '/^[[:space:]]*#/d' "$HERE/Caddyfile.autopilot") || fail 'unexpected identity header configuration'
 echo 'ok - Autopilot standalone Docker+Caddy contract'
+
+subnet="$(sed -n 's/^        - subnet: //p' "$compose")"
+trusted="$(sed -n 's/^      CLAWCTL_TRUSTED_PROXIES: //p' "$compose")"
+[[ "$subnet" == '${CLAWCTL_DOCKER_SUBNET:-172.31.87.0/24}' && "$subnet" == "$trusted" ]] || fail 'subnet must equal trusted proxies'
+grep -q 'CLAWCTL_CLIENT_IP_HEADER: X-Forwarded-For' "$compose" || fail 'client IP header missing'

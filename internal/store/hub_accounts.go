@@ -121,7 +121,7 @@ func (s *Store) CreateFirstAdmin(username, password string, metadata ...AuditEnt
 	return a, tx.Commit()
 }
 
-func (s *Store) VerifyPassword(username, password string, metadata ...AuditEntry) (HubAccount, error) {
+func (s *Store) VerifyPassword(username, password, clientIP string, metadata ...AuditEntry) (HubAccount, error) {
 	var a HubAccount
 	err := s.rdb.QueryRow(`SELECT account_id,username,password_hash FROM hub_accounts WHERE username=?`, username).Scan(&a.AccountID, &a.Username, &a.passwordHash)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -145,18 +145,30 @@ func (s *Store) VerifyPassword(username, password string, metadata ...AuditEntry
 	}
 	defer tx.Rollback()
 	now := s.nowFn()
-	failed := 0
-	var locked, disabled sql.NullString
+	// Legacy hub_accounts.failed_attempts/locked_until remain for compatibility only.
+	if _, err = tx.Exec(`DELETE FROM hub_login_failures WHERE last_failed_at<?`, fmtTime(now.Add(-24*time.Hour))); err != nil {
+		return HubAccount{}, err
+	}
+	var disabled sql.NullString
 	var currentHash string
-	err = tx.QueryRow(`SELECT password_hash,failed_attempts,locked_until,disabled_at FROM hub_accounts WHERE account_id=?`, a.AccountID).Scan(&currentHash, &failed, &locked, &disabled)
+	err = tx.QueryRow(`SELECT password_hash,disabled_at FROM hub_accounts WHERE account_id=?`, a.AccountID).Scan(&currentHash, &disabled)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return HubAccount{}, err
 	}
+	blocked := disabled.Valid || err != nil || currentHash != a.passwordHash
+	failed := 0
+	var locked sql.NullString
+	if a.AccountID != "" {
+		e := tx.QueryRow(`SELECT failed_attempts,locked_until FROM hub_login_failures WHERE account_id=? AND client_ip=?`, a.AccountID, clientIP).Scan(&failed, &locked)
+		if e != nil && !errors.Is(e, sql.ErrNoRows) {
+			return HubAccount{}, e
+		}
+	}
 	until, _ := time.Parse(time.RFC3339, locked.String)
-	blocked := disabled.Valid || now.Before(until) || err != nil || currentHash != a.passwordHash
+	blocked = blocked || now.Before(until)
 	action := AuditAction(AuditHubLoginFailed)
 	if valid && !blocked {
-		_, err = tx.Exec(`UPDATE hub_accounts SET failed_attempts=0,locked_until=NULL WHERE account_id=?`, a.AccountID)
+		_, err = tx.Exec(`DELETE FROM hub_login_failures WHERE account_id=? AND client_ip=?`, a.AccountID, clientIP)
 		action = AuditHubLoginOK
 	} else if !blocked {
 		if locked.Valid {
@@ -168,7 +180,7 @@ func (s *Store) VerifyPassword(username, password string, metadata ...AuditEntry
 			lock = fmtTime(now.Add(15 * time.Minute))
 			action = AuditHubLockout
 		}
-		_, err = tx.Exec(`UPDATE hub_accounts SET failed_attempts=?,locked_until=? WHERE account_id=?`, failed, lock, a.AccountID)
+		_, err = tx.Exec(`INSERT INTO hub_login_failures(account_id,client_ip,failed_attempts,locked_until,last_failed_at) VALUES(?,?,?,?,?) ON CONFLICT(account_id,client_ip) DO UPDATE SET failed_attempts=excluded.failed_attempts,locked_until=excluded.locked_until,last_failed_at=excluded.last_failed_at`, a.AccountID, clientIP, failed, lock, fmtTime(now))
 	} else {
 		err = nil
 	}
@@ -181,6 +193,26 @@ func (s *Store) VerifyPassword(username, password string, metadata ...AuditEntry
 	if action == AuditHubLockout {
 		if err = s.recordAuditTx(tx, accountAudit(AuditHubLoginFailed, a, false, metadata...)); err != nil {
 			return HubAccount{}, err
+		}
+	}
+	if a.AccountID != "" && (!valid || blocked) {
+		var failures, signals int
+		since := fmtTime(now.Add(-time.Hour))
+		subject := "local-user:" + a.AccountID
+		if err = tx.QueryRow(`SELECT count(*) FROM audit_log WHERE auth_subject=? AND action=? AND at>?`, subject, AuditHubLoginFailed, since).Scan(&failures); err != nil {
+			return HubAccount{}, err
+		}
+		if failures >= 50 {
+			if err = tx.QueryRow(`SELECT count(*) FROM audit_log WHERE auth_subject=? AND action=? AND at>?`, subject, AuditHubGuessing, since).Scan(&signals); err != nil {
+				return HubAccount{}, err
+			}
+			if signals == 0 {
+				entry := accountAudit(AuditHubGuessing, a, false, metadata...)
+				entry.Detail = "hub login: distributed password guessing suspected"
+				if err = s.recordAuditTx(tx, entry); err != nil {
+					return HubAccount{}, err
+				}
+			}
 		}
 	}
 	if err = tx.Commit(); err != nil {
@@ -284,13 +316,16 @@ func (s *Store) ChangePassword(accountID, password, keepToken string) error {
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE hub_accounts SET password_hash=?,failed_attempts=0,locked_until=NULL WHERE account_id=?`, hash, accountID)
+	res, err := tx.Exec(`UPDATE hub_accounts SET password_hash=? WHERE account_id=?`, hash, accountID)
 	if err != nil {
 		return err
 	}
 	n, _ := res.RowsAffected()
 	if n != 1 {
 		return ErrAccountAuth
+	}
+	if _, err = tx.Exec(`DELETE FROM hub_login_failures WHERE account_id=?`, accountID); err != nil {
+		return err
 	}
 	if _, err = tx.Exec(`UPDATE hub_sessions SET revoked_at=? WHERE account_id=? AND session_hash<>? AND revoked_at IS NULL`, fmtTime(s.nowFn()), accountID, sessionHash(keepToken)); err != nil {
 		return err

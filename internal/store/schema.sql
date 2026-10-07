@@ -1527,3 +1527,15 @@ CREATE TABLE IF NOT EXISTS hub_sessions (
  user_agent TEXT
 );
 CREATE INDEX IF NOT EXISTS hub_sessions_account ON hub_sessions(account_id);
+
+-- Per-client lockout; account-wide legacy counters are no longer used.
+CREATE TABLE IF NOT EXISTS hub_login_failures (
+ account_id TEXT NOT NULL REFERENCES hub_accounts(account_id),
+ client_ip TEXT NOT NULL,
+ failed_attempts INTEGER NOT NULL,
+ locked_until TEXT,
+ last_failed_at TEXT NOT NULL,
+ PRIMARY KEY(account_id, client_ip)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hub_login_failures_age ON hub_login_failures(last_failed_at);
