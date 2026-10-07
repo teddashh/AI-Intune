@@ -43,18 +43,12 @@ func TestRouteTallyDocumentsMatchManifest(t *testing.T) {
 	tailscale.nonOperator -= len(accountRoutePatterns)
 	assertFeatureInventoryTally(t, tailscale)
 	assertControlPlaneTally(t, tailscale)
-	// OPERATOR-AUTH is frozen until Autopilot Pass 4. Preserve its exact
-	// pre-Autopilot baseline while the inventories above cover the new route.
-	legacyAuth := tailscale
 	policy, ok := operatorRoutePolicies["POST /machines/{id}/keyed-installer"]
 	if !ok || policy.Permission != operatorauth.Admin || policy.Representation != operatorHTML || policy.SecurityProfile != operatorSecurityLocked {
 		t.Fatal("keyed installer must remain an Admin-only locked HTML route")
 	}
-	legacyAuth.total--
-	legacyAuth.operator--
-	legacyAuth.admin--
-	legacyAuth.html--
-	assertOperatorAuthTally(t, legacyAuth)
+	// The Tailscale contract excludes the five public local-account operations.
+	assertOperatorAuthTally(t, tailscale)
 }
 
 func routeTallyFromPolicies(t *testing.T) routeTally {

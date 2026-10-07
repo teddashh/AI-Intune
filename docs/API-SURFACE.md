@@ -7,6 +7,22 @@
 > native Store、UI／CLI 與 Intune-style submenu 的完整清單，
 > 見 [FEATURE-INVENTORY.md](FEATURE-INVENTORY.md)。
 
+## Public local-account routes (Autopilot)
+
+These five operations are included in the 227-operation tally above (23 non-operator + 204 operator). The Tailscale inventory/contract excludes these five and totals 222. Account routes return 404 in `tailscale` mode. In `local` / `both`, they pin Host to `CLAWCTL_PUBLIC_URL`, use locked security headers and Go CrossOriginProtection, and do not require an existing operator session.
+
+| Method | Route | Authority / behavior |
+|---|---|---|
+| `GET`, `POST` | `/setup` | First account only; POST requires setup code, username and password. Returns 404 after an admin exists. |
+| `GET`, `POST` | `/login` | Form and password authentication; creates local session. Login/setup POSTs share TCP-peer limit 10/minute, burst 5. |
+| `POST` | `/logout` | Revokes the presented session, clears cookie, redirects to login. |
+
+| Method | Operator download route | Authority / behavior |
+|---|---|---|
+| `POST` | `/machines/{id}/keyed-installer` | Admin, locked browser security profile and CSRF checks; form `token` + Linux `arch` (`amd64` / `arm64`); returns no-store archive embedding Hub URL and pending one-time token without redeeming it. Already included in the 204 operator tally. |
+
+In local mode operator routes use a local admin session, including `/metrics`; in `both`, sessions precede eligible WhoIs fallback. Forwarded identity headers and machine/verifier bearers never authorize operators. The Tailscale-specific explanations below describe the advanced mode. See [Autopilot](AUTOPILOT.md) for setup, expiry, lockout and recovery.
+
 ## 1. 四個 plane 不混權限
 
 | Plane | 呼叫者 | 目前邊界 | 用途 |

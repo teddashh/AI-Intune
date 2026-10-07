@@ -1,13 +1,9 @@
 # clawctl-hub on any Linux + Docker host (not Oracle-specific).
 #
-# HARD CONSTRAINT (do not "fix" this with 0.0.0.0 / 127.0.0.1):
-#   clawctl-hub --listen MUST be a canonical literal Tailscale node IP:port.
-#   operatorDestinationFromListen / ParseListen reject wildcard, loopback,
-#   LAN/public IPs, and hostnames. Operator identity is Tailscale LocalAPI
-#   WhoIsForIP on Request.RemoteAddr — Hub does NOT trust X-Forwarded-*.
-#
-# Therefore this compose file uses network_mode: host so the container can
-# bind the host's Tailscale IP and reach /var/run/tailscale/tailscaled.sock.
+# Advanced: Tailscale-only pack. For local admin + public HTTPS use the
+# standalone docker-compose.autopilot.yml (see docs/AUTOPILOT.md).
+# This pack binds a literal Tailscale IP with host networking and mounts
+# LocalAPI for WhoIsForIP. Hub ignores forwarded identity headers.
 #
 # Quick start (on a small VPS that already joined your free Tailscale tailnet):
 #   1. cp ops/docker/hub.env.example ops/docker/hub.env

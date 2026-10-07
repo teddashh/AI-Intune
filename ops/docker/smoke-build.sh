@@ -12,6 +12,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 cd "$ROOT"
 
+bash "$HERE/test-autopilot.sh"
+
 VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo dev)"
 echo "==> clawctl OSS smoke-build (version=$VERSION)"
 echo "    root=$ROOT"

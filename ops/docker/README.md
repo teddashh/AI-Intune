@@ -1,5 +1,9 @@
 # clawctl-hub Docker 部署 / Docker deploy
 
+For the recommended local-admin + public HTTPS path, use the standalone [Autopilot Docker+Caddy pack](../../docs/AUTOPILOT.md). The existing instructions below describe the advanced Tailscale pack.
+
+建議先參閱 [Autopilot（英文）](../../docs/AUTOPILOT.md)；以下保留進階 Tailscale 路徑。
+
 > **Any small Linux VPS / Docker host works** — not Oracle Cloud specific.  
 > **Do not host the Hub on a build/CI machine** (that is a build environment, not a fleet console).
 

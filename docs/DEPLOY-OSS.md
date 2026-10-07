@@ -1,11 +1,16 @@
 # Open-source deploy guide — clawctl-hub (OSS / any cloud)
 
-Status: **Milestone 4 — Hub-enforced canary hold**. The primary way to run Hub is
+## Autopilot (no Tailscale)
+
+The recommended OSS path is [Autopilot](AUTOPILOT.md): local admin, public HTTPS, and a keyed Linux installer. Use the standalone [docker-compose.autopilot.yml](../ops/docker/docker-compose.autopilot.yml) with Caddy; do not layer it over the Tailscale file. The existing deployment content below describes the **advanced Tailscale path**. Shared storage/backup and notification guidance still applies; use the Autopilot project's volume names.
+
+本機管理員＋公開 HTTPS 的建議路徑請見 [Autopilot（英文）](AUTOPILOT.md)；以下保留進階 Tailscale 部署內容。
+
+Status: **Milestone 4 — Hub-enforced canary hold**. For this advanced path, run Hub on
 **any Linux host with Docker** (`ops/docker`, `docker compose`). A systemd install
 (`ops/install-hub.sh`) is the alternative when the host has no Docker.
 [Fly.io](DEPLOY-FLY.md) is the documented hosted example: one always-on machine,
-Tailscale, and no public HTTP service. This guide does **not** change the
-operator auth model.
+Tailscale, and no public HTTP service. The sections below retain the Tailscale operator auth model; Autopilot above provides the local-account alternative.
 
 Related: [OPERATOR-AUTH.md](OPERATOR-AUTH.md), [PRODUCT.md](PRODUCT.md),
 [`ops/docker/README.md`](../ops/docker/README.md), [`ops/install-hub.sh`](../ops/install-hub.sh).
@@ -18,7 +23,7 @@ clawctl-hub is a **long-lived control plane**:
 
 - Process-lifetime SQLite writer lock and upgrade/maintenance fences
 - In-process job scheduling, artifact fetch workers, restore drills
-- Tailscale **LocalAPI** `WhoIsForIP` on every operator request (needs `tailscaled` on the same host)
+- In Tailscale mode, **LocalAPI** `WhoIsForIP` on every operator request (needs `tailscaled` on the same host)
 - systemd-oriented notify/watchdog on bare metal; Docker uses `restart:` instead
 
 Serverless request handlers (Vercel, Workers) cannot hold that writer lock,
@@ -30,7 +35,7 @@ The **site/** static pages (if any) can live on Pages/Vercel; the Hub cannot.
 
 ---
 
-## 2. Recommended topology (any Linux VPS)
+## 2. Advanced: Tailscale topology (any Linux VPS)
 
 ```
                     Tailscale tailnet (free)
@@ -119,7 +124,7 @@ For a brand-new small Linux VM (e.g. Debian/Ubuntu):
 
 ---
 
-## 3. Operator auth (unchanged)
+## 3. Operator auth (Tailscale mode)
 
 Hub still requires:
 
@@ -163,12 +168,12 @@ Once the Hub container is running, open `http://<CLAWCTL_LISTEN>/` from an autho
 
 | Use | Supported today? |
 |---|---|
-| Operator browses `https://hub.example.com` | **No** — Host must equal pinned Tailscale authority; WhoIs needs tailnet `RemoteAddr` |
-| Agent check-in via public hostname → tunnel → `http://<CLAWCTL_LISTEN>` | **Experimental** — machine bearer routes do not pin Host; treat as optional |
+| Operator browses `https://hub.example.com` | **Yes in local mode** with `CLAWCTL_PUBLIC_URL=https://hub.example.com`, unchanged Host, and WebSocket support. In Tailscale-only mode, Host must equal pinned Tailscale authority and WhoIs needs tailnet `RemoteAddr`. |
+| Agent check-in via public hostname → tunnel → `http://<CLAWCTL_LISTEN>` | HTTPS enrollment/check-in is supported by Autopilot. This optional tunnel pack remains an advanced Tailscale configuration; automated Tunnel setup is not provided. |
 | Cloudflare Access as operator IdP | **Not implemented** — do not invent OIDC in front without Hub code changes |
 
 Tunnel origin must target the **same** address Hub listens on
-(`http://100.x.y.z:8787` when 8787 is the port in `CLAWCTL_LISTEN`), because Hub refuses to bind loopback. The origin port is the listen port, not a fixed port.
+(`http://100.x.y.z:8787` when 8787 is the port in `CLAWCTL_LISTEN`), because Tailscale mode refuses to bind loopback. Local mode can instead bind `127.0.0.1:8787` behind a same-host proxy. The origin port is the listen port, not a fixed port.
 
 Enable by adding `ops/docker/docker-compose.tunnel.yml` and setting
 `CLOUDFLARE_TUNNEL_TOKEN` in `hub.env` (see

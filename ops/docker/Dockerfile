@@ -1,7 +1,7 @@
 # clawctl-hub — portable static image (CGO_ENABLED=0).
 #
 # Hub is a long-lived Go + SQLite process. Do NOT rewrite it as Vercel/Workers.
-# At runtime the process MUST:
+# In the advanced Tailscale pack the process must:
 #   1. Bind a canonical literal Tailscale node IP:port (see CLAWCTL_LISTEN)
 #   2. Reach the host tailscaled LocalAPI socket for operator WhoIs
 #

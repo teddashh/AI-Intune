@@ -38,7 +38,7 @@ AI-Intune is an operating control plane, but it is not a complete Microsoft Intu
 
 The Hub registers independent verifiers in their own failure domain, accepts evidence from them on a separate credential plane, and reports that evidence as its own typed verdict on the job page. A sampleagent3 fleet-peer runner was deployed for OpenClaw verification; independent evidence is scoped to jobs it has actually checked, not every job. The pinned catalog path exists for Claude Code, Codex, Grok, Antigravity, and Linux BAT Server. A complete default profile is still missing. Ticket usage has one bounded contract across Web, CSV, the strict CLI, and `GET /v1/operator/tickets`. See the [feature inventory](docs/FEATURE-INVENTORY.md) for the exact delivery gaps. The first-principles review is a private working note and is not published here.
 
-Production installations are private tailnet services, not a public demo. The console is available at the Tailscale listener configured during Hub installation and requires the matching Tailscale capability grant.
+The recommended OSS deployment uses local admin accounts over public HTTPS (Autopilot). Advanced deployments can use a private Tailscale listener with capability grants; `both` mode supports local sessions plus direct-tailnet WhoIs under the documented listener constraints.
 
 ## Why it exists
 
@@ -101,7 +101,7 @@ The selected profile then supplies the application. An OpenClaw profile resolves
 - Exact Hub/Agent release binding and post-install Hub receipt
 - Machine retirement/reactivation and pending-token revocation
 - Fleet-wide enrollment limit that refuses new tickets once the register reaches it
-- Tailscale capability-based operator authentication
+- Local admin sessions or Tailscale capability-based operator authentication
 
 ### Device configuration
 
@@ -155,7 +155,7 @@ The selected profile then supplies the application. An OpenClaw profile resolves
 ┌──────────────────────── Operator plane ────────────────────────┐
 │ Web console                 Strict CLI / API                    │
 └───────────────────────────────┬─────────────────────────────────┘
-                                │ Tailscale identity + capability
+                                │ Local session / Tailscale capability
                                 ▼
 ┌────────────────────────── clawctl-hub ─────────────────────────┐
 │ inventory │ observations │ catalog │ profiles │ desired state │
@@ -181,6 +181,20 @@ read current state → preview exact impact → confirm typed target
 
 ## Quick start
 
+### Autopilot quick start (recommended)
+
+Follow [docs/AUTOPILOT.md](docs/AUTOPILOT.md) for the complete setup:
+
+1. Point DNS at your Linux host and open ports 80/443.
+2. Start the standalone Docker+Caddy Autopilot pack.
+3. Read the setup code from the Hub log and create your local admin.
+4. Register a machine and download its keyed Linux installer.
+5. Extract the package, run `./install-agent.sh`, and verify check-in on the machine page.
+
+### Advanced: Tailscale-only Hub
+
+The existing steps below use private mesh access and WhoIs grants. CLI examples also require that Tailscale operator path.
+
 ### 1. Before you start
 
 Before deploying, ensure you have:
@@ -197,7 +211,7 @@ Configure your tailnet policy (grants and tags) so your operator identity is rec
 Choose one of three deployment targets:
 
 - **Fly.io** (hosted example): Includes continuous SQLite backup to Cloudflare R2 via Litestream. See [docs/DEPLOY-FLY.md](docs/DEPLOY-FLY.md).
-- **Any Linux VM with Docker** (primary self-hosted path): See [docs/DEPLOY-OSS.md](docs/DEPLOY-OSS.md) and [`ops/docker/README.md`](ops/docker/README.md). Copy `ops/docker/hub.env.example` to `ops/docker/hub.env`, set `CLAWCTL_LISTEN` to this host's Tailscale IP and chosen port, set `CLAWCTL_OPERATOR_CAPABILITY_PREFIX`, and run:
+- **Any Linux VM with Docker** (advanced private mesh path): See [docs/DEPLOY-OSS.md](docs/DEPLOY-OSS.md) and [`ops/docker/README.md`](ops/docker/README.md). Copy `ops/docker/hub.env.example` to `ops/docker/hub.env`, set `CLAWCTL_LISTEN` to this host's Tailscale IP and chosen port, set `CLAWCTL_OPERATOR_CAPABILITY_PREFIX`, and run:
   ```bash
   docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env up -d --build
   ```
@@ -609,6 +623,8 @@ Hub 是控制 ledger，不是 AI 資料路徑。端點不開放 inbound 控制 p
 ```
 
 ## 快速開始
+
+建議先走本機管理員＋公開 HTTPS 的 [Autopilot 快速開始（英文）](docs/AUTOPILOT.md)；以下保留進階 Tailscale 路徑。
 
 ### 1. 準備工作（Before you start）
 

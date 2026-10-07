@@ -23,6 +23,8 @@ Hub 執行檔是 `build/clawctl-hub`。Linux 版 Agent 執行檔與 bootstrap bu
 
 ## 部署
 
+建議先走本機管理員＋公開 HTTPS 的 [Autopilot 快速開始（英文）](docs/AUTOPILOT.md)；Tailscale 為進階路徑。
+
 主要路徑是任何有 Docker 的 Linux 主機。見 [docs/DEPLOY-OSS.md](docs/DEPLOY-OSS.md)。把 `CLAWCTL_LISTEN` 設成該主機的 Tailscale IP 與你選的埠（`8787` 只是慣例範例，不是 Hub 預設）。Tailscale grant 的 `dst` 埠、`CLAWCTL_PUBLIC_URL`、agent 的 `--hub`、以及 tunnel origin 都必須使用同一個埠。
 
 ```sh
