@@ -49,6 +49,8 @@ doc = tomllib.loads((root / "fly.toml").read_text())
 if doc["env"].get("CLAWCTL_AUTH_MODE") != "local" or "http_service" not in doc:
     raise SystemExit("fly.toml must publish Autopilot http_service in local mode")
 advanced = tomllib.loads((root / "fly.tailscale.toml").read_text())
+if advanced["env"].get("CLAWCTL_AUTH_MODE") != "tailscale":
+    raise SystemExit("fly.tailscale.toml must explicitly select tailscale mode")
 if "http_service" in advanced or "services" in advanced:
     raise SystemExit("fly.tailscale.toml must not publish http_service or services")
 for key in ("mounts", "restart", "vm", "build"):

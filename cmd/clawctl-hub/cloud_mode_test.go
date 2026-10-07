@@ -96,6 +96,10 @@ func TestCloudRoutingWithoutTailscale(t *testing.T) {
 				{"hub.example.com:80", "hub.example.com", "/v1/operator/machines", operatorAuthorityDecisionCode, 421},
 				{"127.0.0.1:8787", "hub.example.com", "/v1/operator/machines", operatorAuthorityDecisionCode, 421},
 				{"hub.example.com", "", "/healthz", "", 200},
+				// Fly probes use the private machine authority, without a public Host.
+				{"172.19.0.2:8787", "", "/healthz", "", 200},
+				{"[fdaa:0:1::2]:8787", "", "/healthz", "", 200},
+				{"172.19.0.2:8787", "", "/v1/operator/machines", operatorAuthorityDecisionCode, 421},
 			} {
 				req := httptest.NewRequest("GET", tt.path, nil)
 				req.Host = tt.host

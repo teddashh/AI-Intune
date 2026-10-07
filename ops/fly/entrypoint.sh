@@ -48,7 +48,15 @@ reject_whitespace() {
   esac
 }
 
-export CLAWCTL_AUTH_MODE="${CLAWCTL_AUTH_MODE-local}"
+if [ "${CLAWCTL_AUTH_MODE+x}" != x ]; then
+  if { [ -f "$state_file" ] && [ -s "$state_file" ]; } || [ "${TS_AUTHKEY+x}" = x ]; then
+    CLAWCTL_AUTH_MODE=tailscale
+    echo "clawctl-fly: defaulting to tailscale because persisted Tailscale state or TS_AUTHKEY is present."
+  else
+    CLAWCTL_AUTH_MODE=local
+  fi
+fi
+export CLAWCTL_AUTH_MODE
 case $CLAWCTL_AUTH_MODE in
   local | tailscale) ;;
   both)
@@ -128,6 +136,10 @@ if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
 fi
 
 if [ "$CLAWCTL_AUTH_MODE" = local ]; then
+  if [ "${TS_AUTHKEY+x}" = x ]; then
+    echo "clawctl-fly: WARNING: TS_AUTHKEY is ignored in explicit local mode." >&2
+    unset TS_AUTHKEY
+  fi
   if [ "${CLAWCTL_PUBLIC_URL+x}" != x ] && [ -n "${FLY_APP_NAME:-}" ]; then
     reject_whitespace FLY_APP_NAME
     case $FLY_APP_NAME in

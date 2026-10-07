@@ -347,9 +347,18 @@ SH
   fail_boot 'https://' FLY_APP_NAME=''
   fail_boot 'unsupported on Fly' CLAWCTL_AUTH_MODE=both
   fail_boot 'must be tailscale, local, or both' CLAWCTL_AUTH_MODE=invalid
+  boot CLAWCTL_AUTH_MODE=local TS_AUTHKEY=stub-private-secret
+  grep -q 'TS_AUTHKEY is ignored' "$tmpdir/output"
+  ! grep -q tailscale "$tmpdir/calls"
+  ! grep -q 'stub-private-secret' "$tmpdir/output"
+  fail_boot 'must be tailscale, local, or both' CLAWCTL_AUTH_MODE=''
+  fail_boot 'TS_AUTHKEY is required' TS_AUTHKEY=''
   fail_boot 'TS_AUTHKEY is required' CLAWCTL_AUTH_MODE=tailscale
   fail_boot 'contains whitespace' CLAWCTL_AUTH_MODE=tailscale TS_AUTHKEY='stub-private-secret key'
   fail_boot '/dev/net/tun is missing' CLAWCTL_AUTH_MODE=tailscale TS_AUTHKEY=stub-private-secret
+  boot TS_AUTHKEY=stub-private-secret STUB_TUN=1
+  grep -q 'defaulting to tailscale' "$tmpdir/output"
+  grep -q '^hub:tailscale:100.64.0.7:8787:' "$tmpdir/calls"
   boot CLAWCTL_AUTH_MODE=tailscale TS_AUTHKEY=stub-private-secret STUB_TUN=1
   grep -q '^tailscaled$' "$tmpdir/calls"
   grep -q '^tailscale$' "$tmpdir/calls"
@@ -357,10 +366,24 @@ SH
   [ ! -e "$tmpdir/run/ts-authkey" ]
   ! grep -q 'stub-private-secret' "$tmpdir/output"
   printf 'persisted' > "$tmpdir/data/tailscale/tailscaled.state"
+  boot STUB_TUN=1
+  grep -q 'defaulting to tailscale' "$tmpdir/output"
+  grep -q '^hub:tailscale:100.64.0.7:8787:' "$tmpdir/calls"
+  boot CLAWCTL_AUTH_MODE=local TS_AUTHKEY=stub-private-secret
+  grep -q '^hub:local:' "$tmpdir/calls"
+  ! grep -q tailscale "$tmpdir/calls"
+  ! grep -q 'stub-private-secret' "$tmpdir/output"
   boot CLAWCTL_AUTH_MODE=tailscale STUB_TUN=1
   grep -q '^hub:tailscale:100.64.0.7:8787:' "$tmpdir/calls"
   fail_boot 'TS_HOSTNAME must' CLAWCTL_AUTH_MODE=tailscale STUB_TUN=1 TS_HOSTNAME='bad/name'
   fail_boot 'TS_TAGS must' CLAWCTL_AUTH_MODE=tailscale STUB_TUN=1 TS_TAGS=untagged
+  : > "$tmpdir/data/tailscale/tailscaled.state"
+  boot
+  grep -q '^hub:local:' "$tmpdir/calls"
+  ! grep -q tailscale "$tmpdir/calls"
+  rm -rf "$tmpdir/data/tailscale"
+  boot
+  [ ! -d "$tmpdir/data/tailscale" ]
   fail_boot 'CLAWCTL_PORT must' CLAWCTL_PORT=65536
   fail_boot 'contains whitespace' R2_SECRET_ACCESS_KEY='stub-private-secret key'
   fail_boot 'replication is incomplete' R2_SECRET_ACCESS_KEY=stub-private-secret
@@ -387,6 +410,7 @@ private = tomllib.loads(Path('ops/fly/fly.tailscale.toml').read_text())
 assert public['env']['CLAWCTL_AUTH_MODE'] == 'local'
 assert public['env']['CLAWCTL_PORT'] == '8787'
 assert 'CLAWCTL_OPERATOR_CAPABILITY_PREFIX' not in public['env']
+assert private['env']['CLAWCTL_AUTH_MODE'] == 'tailscale'
 assert 'http_service' not in private and 'services' not in private
 service = public['http_service']
 assert service['internal_port'] == 8787 and service['force_https'] is True

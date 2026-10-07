@@ -88,7 +88,7 @@ fly scale count 1 -a <your-app-name>
 fly logs -a <your-app-name>
 ```
 
-Read the generated first-run setup code from the Hub log; protect log access. If you supplied `CLAWCTL_SETUP_CODE`, use that value instead: it is not printed. Open **`https://<your-app-name>.fly.dev/setup`**, enter the code, and create your admin (username: 3–64 letters, digits, dots, underscores or hyphens; password: 12–256 bytes). Add the displayed TOTP secret to your authenticator, confirm a six-digit code, and save the one-time recovery codes. MFA is required by default. Setup closes after the first admin exists; subsequent sign-ins use `/login`.
+Read the generated first-run setup code from the Hub log; protect log access. Press Ctrl-C to stop following logs. If you supplied `CLAWCTL_SETUP_CODE`, use that value instead: it is not printed. Open **`https://<your-app-name>.fly.dev/setup`**, enter the code, and create your admin (username: 3–64 letters, digits, dots, underscores or hyphens; password: 12–256 bytes). Add the displayed TOTP secret to your authenticator, confirm a six-digit code, and save the one-time recovery codes. MFA is required by default. Setup closes after the first admin exists; subsequent sign-ins use `/login`.
 
 ### 5. Optional custom domain — choose before enrolling machines
 
@@ -128,7 +128,7 @@ Public mode defaults to `CLAWCTL_TRUSTED_PROXIES=172.16.0.0/12` (fly-proxy egres
 
 ## Advanced: Tailscale-only Hub on Fly
 
-This private pack preserves the existing Tailscale behavior: no public HTTP service; operators and agents reach the literal Tailscale IPv4. Use `ops/fly/fly.tailscale.toml`. Because the shared image now defaults to local auth, **stage `CLAWCTL_AUTH_MODE=tailscale` as a Fly secret** before deploying this pack. Do not add a public service to its config.
+This private pack preserves the existing Tailscale behavior: no public HTTP service; operators and agents reach the literal Tailscale IPv4. Use `ops/fly/fly.tailscale.toml`. Its `[env]` explicitly sets `CLAWCTL_AUTH_MODE = "tailscale"`. Do not add a public service to its config.
 
 ### What you need
 
@@ -180,7 +180,6 @@ Secrets should be passed via stdin to avoid leaking them in your shell history. 
     ```
     Edit it with a terminal editor, e.g. `nano ~/clawctl-fly/secrets.env`. Populate it with one `NAME=value` per line, no quotes, no spaces:
     ```env
-    CLAWCTL_AUTH_MODE=tailscale
     TS_AUTHKEY=tskey-auth-REPLACE-ME
     R2_ACCOUNT_ID=REPLACE-ME
     R2_ACCESS_KEY_ID=REPLACE-ME
@@ -256,11 +255,11 @@ This shape uses one `shared-cpu-1x` machine with 1 GB (`1024mb`) of RAM and a 3 
     ```sh
     fly logs -a <your-app-name>
     ```
-3.  Test your notifier (`notify-check` verifies the token and chat via Telegram `getMe`/`getChat` and sends no message). The entrypoint writes `/run/clawctl-notify/notify.env` and exports `CLAWCTL_NOTIFY_ENV` only for the Hub process; an ssh session does not have it. The command must be:
+3.  If Telegram is configured, test your notifier (`notify-check` verifies the token and chat via Telegram `getMe`/`getChat` and sends no message). The entrypoint writes `/run/clawctl-notify/notify.env` and exports `CLAWCTL_NOTIFY_ENV` only for the Hub process; an ssh session does not have it. The command must be:
     ```sh
     fly ssh console -a <your-app-name> -C "clawctl-hub notify-check --notify-env /run/clawctl-notify/notify.env"
     ```
-4.  Run the **Restore Drill** to verify Litestream replication (recommend doing this monthly). Fly exposes app secrets as environment variables to `fly ssh console` commands, so the drill can read the R2 settings:
+4.  If R2 is configured, run the **Restore Drill** to verify Litestream replication (recommend doing this monthly). Fly exposes app secrets as environment variables to `fly ssh console` commands, so the drill can read the R2 settings:
     ```sh
     fly ssh console -a <your-app-name> -C clawctl-restore-drill
     ```
@@ -296,6 +295,10 @@ Litestream and Hub both run as uid/gid 65532, so the database, the WAL, the shar
 SQLite settings Hub already uses (`internal/store` open): `journal_mode=WAL`, `foreign_keys=ON`, `busy_timeout=5000`, immediate transactions. The WAL autocheckpoint is SQLite's default (1000 pages). Litestream 0.5 needs WAL. `busy_timeout` of 5 seconds is how Hub waits if Litestream briefly holds a lock. `writer.lock` is a separate file. A restored database does not need the old lock file; Hub creates it. Do not copy `tailscale/` into the replica.
 
 On boot, if `clawctl.sqlite` is absent, the entrypoint runs `litestream restore -if-db-not-exists -if-replica-exists` as uid 65532. An existing database is not overwritten. Litestream then runs `replicate -exec` and supervises Hub. If Hub exits, Litestream exits and Fly restarts the machine (`restart` policy `always`). `SIGTERM` goes to Litestream (PID 1), which forwards it so Hub's shutdown can finish and Litestream can flush. `kill_timeout` is 30 seconds.
+
+## Upgrading an existing Tailscale Fly Hub
+
+Before deploying the new image, copy `CLAWCTL_AUTH_MODE = "tailscale"` into the `[env]` section of your existing out-of-tree `fly.toml`. Keep its private service configuration and volume. The entrypoint also auto-detects non-empty persisted Tailscale state or a set `TS_AUTHKEY` when the mode is unset, preserving older deployments. An explicit mode always wins; explicit local mode warns and discards `TS_AUTHKEY`.
 
 ## Upgrades
 
