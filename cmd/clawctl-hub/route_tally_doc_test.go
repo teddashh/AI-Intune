@@ -36,15 +36,25 @@ type routeTally struct {
 func TestRouteTallyDocumentsMatchManifest(t *testing.T) {
 	tally := routeTallyFromPolicies(t)
 	assertAPISurfaceTally(t, tally)
-	// These documents describe the unchanged Tailscale surface. Public account
-	// routes are separately tallied in API-SURFACE; documentation changes here
-	// are deliberately limited to that file for Autopilot Pass 2.
+	// The inventory and control-plane contract exclude public account routes,
+	// which API-SURFACE tallies separately.
 	tailscale := tally
 	tailscale.total -= len(accountRoutePatterns)
 	tailscale.nonOperator -= len(accountRoutePatterns)
 	assertFeatureInventoryTally(t, tailscale)
 	assertControlPlaneTally(t, tailscale)
-	assertOperatorAuthTally(t, tailscale)
+	// OPERATOR-AUTH is frozen until Autopilot Pass 4. Preserve its exact
+	// pre-Autopilot baseline while the inventories above cover the new route.
+	legacyAuth := tailscale
+	policy, ok := operatorRoutePolicies["POST /machines/{id}/keyed-installer"]
+	if !ok || policy.Permission != operatorauth.Admin || policy.Representation != operatorHTML || policy.SecurityProfile != operatorSecurityLocked {
+		t.Fatal("keyed installer must remain an Admin-only locked HTML route")
+	}
+	legacyAuth.total--
+	legacyAuth.operator--
+	legacyAuth.admin--
+	legacyAuth.html--
+	assertOperatorAuthTally(t, legacyAuth)
 }
 
 func routeTallyFromPolicies(t *testing.T) routeTally {

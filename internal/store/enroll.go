@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -88,4 +89,26 @@ SELECT display_name FROM enrollment_tokens
 		return "", fmt.Errorf("store: revoke: %w", err)
 	}
 	return displayName, nil
+}
+
+// PendingEnrollTicketMatches validates an unspent machine-bound secret without
+// redeeming it. Revocation deletes the pending row, so revoked tickets cannot match.
+func (s *Store) PendingEnrollTicketMatches(machineID, token string, now time.Time) (string, time.Time, error) {
+	var name, digest, expires string
+	err := s.rdb.QueryRow(`SELECT m.display_name, e.token_hash, e.expires_at
+ FROM enrollment_tokens e JOIN machine_registry m ON m.machine_id = e.used_by
+ WHERE e.used_by = ? AND e.used_at IS NULL AND m.retired_at IS NULL
+ ORDER BY e.created_at DESC LIMIT 1`, machineID).Scan(&name, &digest, &expires)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", time.Time{}, ErrEnrollToken
+	}
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("store: pending enrollment match: %w", err)
+	}
+	matches := subtle.ConstantTimeCompare([]byte(digest), []byte(hashToken(token)))
+	expiry := parseTime(expires)
+	if matches != 1 || expiry.IsZero() || !now.Before(expiry) {
+		return "", time.Time{}, ErrEnrollToken
+	}
+	return name, expiry, nil
 }

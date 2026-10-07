@@ -11,18 +11,31 @@
 <div class="panel">
   {{if $.AgentBundles}}
   <p style="margin-top:0"><b>下載 <span class="mono">{{.Name}}</span> 的 Agent 安裝包：</b></p>
+  {{if $.Access.CanAdmin}}
+  <p>This file contains a one-time enrollment secret valid until {{.ExpiresAt}}. Treat it like a password. It stops working once used or revoked.</p>
+  {{range $.AgentBundles}}{{if eq .OS "linux"}}
+  <form method="post" action="/machines/{{$.Token.MachineID}}/keyed-installer">
+    <input type="hidden" name="token" value="{{$.Token.Token}}">
+    <input type="hidden" name="arch" value="{{.Arch}}">
+    <button type="submit">Download keyed installer (linux/{{.Arch}})</button>
+  </form>
+  {{end}}{{end}}{{end}}
+  <p>Generic bootstrap packages:</p>
   <div class="command-bar">{{range $.AgentBundles}}
     <a class="button secondary" href="{{.URL}}">{{.OS}}/{{.Arch}} · {{bytes .SizeBytes}}</a>
   {{end}}</div>
   {{end}}
-  <p>把安裝包傳到 <b>{{.Name}}</b>，解壓後執行對應安裝程式，並貼上本頁 token：</p>
+  <p>Transfer the package to <b>{{.Name}}</b>, extract it, and run the installer. Keyed Linux packages include the Hub URL and enrollment token.</p>
   {{range $.AgentInstallers}}
   <p class="small dim">{{.OS}}</p>
   <pre class="copy">{{.Command}}</pre>
+  {{if .Alternative}}<p>Alternative for a generic package (save the token in a file with mode 0600):</p>
+  <pre class="copy">{{.Alternative}}</pre>{{end}}
   {{end}}
-  <p class="small dim">Linux 安裝程式會完成 Tailscale、linger、enroll、service 與 Hub 驗收。</p>
-  <p class="small dim">無互動安裝：<span class="mono">--token-file FILE</span>（檔案權限 0600）；Linux 另可加 <span class="mono">--tailscale-auth-key-file FILE</span>（同為 0600）。</p>
-  <p class="small dim">--hub 用 Tailscale 的 http://100.x:8787，操作員介面只開這個位址。實驗性的 Cloudflare Tunnel 只給 agent 報到：把 --hub 換成 https://&lt;hostname&gt;。不要用那個網址登入操作員介面。安裝程式會等到 Hub 收到 check-in。機器頁上的時間才算數；安裝程式自己印的成功那一行不算。</p>
+  <p class="small dim">The Linux installer configures linger, enrollment, the service, and verifies check-in with the Hub.</p>
+  {{if $.HTTPSInstaller}}<p class="small dim">HTTPS connects directly to the Hub. Tailscale is skipped automatically.</p>{{end}}
+  {{if $.TailscaleInstaller}}<p class="small dim">For an http://100.x Hub, Linux installs and connects Tailscale. For unattended setup, use --tailscale-auth-key-file FILE (mode 0600).</p>{{end}}
+  <p class="small dim">For unattended generic installation, use --token-file FILE (mode 0600). To move an already enrolled Linux machine, add --reenroll.</p>
 </div>
 {{else}}
 <h1>{{.Name}} 的 enroll 票</h1>

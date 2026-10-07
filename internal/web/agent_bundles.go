@@ -33,8 +33,9 @@ type agentBundleView struct {
 }
 
 type agentInstallerView struct {
-	OS      string
-	Command string
+	OS          string
+	Command     string
+	Alternative string
 }
 
 type agentBundleCatalog struct {
@@ -242,6 +243,10 @@ func agentInstallerCommands(catalog *agentBundleCatalog, hubBase string) []agent
 	out := []agentInstallerView{{
 		OS: "linux", Command: "./install-agent.sh --hub " + hub,
 	}}
+	if strings.HasPrefix(hub, "https://") {
+		out[0].Alternative = out[0].Command + " --token-file FILE"
+		out[0].Command = "./install-agent.sh"
+	}
 	if catalog == nil {
 		return out
 	}

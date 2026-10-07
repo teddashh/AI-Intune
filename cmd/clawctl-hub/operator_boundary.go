@@ -305,6 +305,7 @@ var operatorRoutePolicies = map[string]operatorRoutePolicy{
 	"POST /enrollments":                                                   {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /enrollments/preview":                                           {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /machines/{id}/revoke-token/preview":                            {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /machines/{id}/keyed-installer":                                 {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /machines/{id}/revoke-token":                                    {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /machines/{id}/channel":                                         {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /machines/{id}/assigned-user":                                   {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},

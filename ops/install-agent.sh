@@ -3,6 +3,8 @@
 set -Eeuo pipefail
 
 HUB=""
+HUB_EXPLICIT=0
+TOKEN_EXPLICIT=0
 TOKEN=""
 TOKEN_FILE=""
 TAILSCALE_KEY_FILE=""
@@ -10,22 +12,28 @@ BIN_SRC=""
 STEP="preflight"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 SECRET_FILES=()
+NO_TAILSCALE=0
+EMBEDDED_TOKEN=0
 REENROLL=0
 BACKUP_CONFIG=""
 
 usage() {
   cat <<'EOF'
-Usage: ./install-agent.sh --hub URL [options]
+Usage: ./install-agent.sh [--hub URL] [options]
 
   --hub URL
       http://<tailscale-ipv4>:<port>  (same address as the operator UI)
-      https://<hostname>[:port]       (experimental Cloudflare Tunnel; agent check-in only)
+      https://<hostname>[:port]       (public HTTPS Hub; Tailscale skipped)
+
+Keyed packages read hub-url and enroll-token beside this script when flags are absent.
+The embedded enroll-token is removed after successful enrollment.
 
 Options:
   --token TOKEN                    one-time enrollment token
   --token-file FILE                0600 file containing the enrollment token
   --tailscale-auth-key-file FILE   0600 file containing a Tailscale auth key
   --binary FILE                    clawctl-agent binary for this machine
+  --no-tailscale                   skip Tailscale install and connection
   --reenroll                       reenroll this machine to a new Hub (Linux only)
 EOF
 }
@@ -78,7 +86,7 @@ agent_hub_port() {
 }
 
 # http:// is the operator UI address: a literal Tailscale IPv4 and an explicit port.
-# https:// is an experimental Cloudflare Tunnel for agent check-in only.
+# https:// reaches the Hub directly without requiring Tailscale.
 accept_agent_hub_url() {
   local rest ip port host o1 o2 o3 o4 extra
   extra=""
@@ -143,17 +151,26 @@ accept_agent_hub_url() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --hub) [[ $# -ge 2 ]] || fail "--hub requires a value"; HUB="$2"; shift 2 ;;
-    --token) [[ $# -ge 2 ]] || fail "--token requires a value"; TOKEN="$2"; shift 2 ;;
-    --token-file) [[ $# -ge 2 ]] || fail "--token-file requires a value"; TOKEN_FILE="$2"; shift 2 ;;
+    --hub) [[ $# -ge 2 ]] || fail "--hub requires a value"; HUB="$2"; HUB_EXPLICIT=1; shift 2 ;;
+    --token) [[ $# -ge 2 ]] || fail "--token requires a value"; TOKEN="$2"; TOKEN_EXPLICIT=1; shift 2 ;;
+    --token-file) [[ $# -ge 2 ]] || fail "--token-file requires a value"; TOKEN_FILE="$2"; TOKEN_EXPLICIT=1; shift 2 ;;
     --tailscale-auth-key-file) [[ $# -ge 2 ]] || fail "--tailscale-auth-key-file requires a value"; TAILSCALE_KEY_FILE="$2"; shift 2 ;;
     --binary) [[ $# -ge 2 ]] || fail "--binary requires a value"; BIN_SRC="$2"; shift 2 ;;
+    --no-tailscale) NO_TAILSCALE=1; shift 1 ;;
     --reenroll) REENROLL=1; shift 1 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
+if [[ "$HUB_EXPLICIT" == "0" && -f "$SCRIPT_DIR/hub-url" ]]; then
+  HUB="$(cat -- "$SCRIPT_DIR/hub-url")"
+  HUB="${HUB%$'\r'}"
+fi
+if [[ "$TOKEN_EXPLICIT" == "0" && -f "$SCRIPT_DIR/enroll-token" ]]; then
+  TOKEN_FILE="$SCRIPT_DIR/enroll-token"
+  EMBEDDED_TOKEN=1
+fi
 [[ -n "$HUB" ]] || { usage >&2; exit 2; }
 accept_agent_hub_url
 # Ops test hook: validate --hub and stop. Not an operator feature.
@@ -204,7 +221,7 @@ private_secret_file() {
   local path=$1 mode
   [[ -f "$path" && ! -L "$path" ]] || fail "Secret file must be a regular file: $path"
   mode="$(stat -c '%a' "$path")"
-  [[ "$mode" == "600" || "$mode" == "400" ]] || fail "Secret file must have mode 0600 or 0400: $path"
+  [[ "$mode" == "600" || "$mode" == "400" ]] || fail "Secret file must have mode 0600 or 0400: $path; for an embedded token, run chmod 600 enroll-token"
 }
 
 new_secret_file() {
@@ -347,35 +364,42 @@ STEP="container runtime"
 install_container_runtime
 ensure_subordinate_ids
 
-STEP="Tailscale install"
-if ! command -v tailscale >/dev/null; then
-  install_download_client
-  TAILSCALE_INSTALLER="$(mktemp)"
-  SECRET_FILES+=("$TAILSCALE_INSTALLER")
-  curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
-    https://tailscale.com/install.sh --output "$TAILSCALE_INSTALLER"
-  sudo sh "$TAILSCALE_INSTALLER"
-fi
-sudo systemctl enable --now tailscaled.service
-
-STEP="Tailscale connect"
-if ! tailscale_connected; then
-  if [[ -n "$TAILSCALE_KEY_FILE" ]]; then
-    private_secret_file "$TAILSCALE_KEY_FILE"
-  elif [[ -t 0 ]]; then
-    read -r -s -p "Tailscale auth key: " TAILSCALE_KEY
-    echo
-    [[ -n "$TAILSCALE_KEY" ]] || fail "Tailscale auth key is required"
-    new_secret_file "$TAILSCALE_KEY" TAILSCALE_KEY_FILE
-    unset TAILSCALE_KEY
-  else
-    fail "Tailscale is not connected; use --tailscale-auth-key-file FILE"
+TAILSCALE_IP="skipped"
+if [[ "$HUB" == https://* ]]; then
+  echo "Tailscale: skipped (Hub reached over HTTPS)"
+elif [[ "$NO_TAILSCALE" == "1" ]]; then
+  echo "Tailscale: skipped (--no-tailscale)"
+else
+  STEP="Tailscale install"
+  if ! command -v tailscale >/dev/null; then
+    install_download_client
+    TAILSCALE_INSTALLER="$(mktemp)"
+    SECRET_FILES+=("$TAILSCALE_INSTALLER")
+    curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+      https://tailscale.com/install.sh --output "$TAILSCALE_INSTALLER"
+    sudo sh "$TAILSCALE_INSTALLER"
   fi
-  sudo tailscale up --auth-key="file:$TAILSCALE_KEY_FILE"
+  sudo systemctl enable --now tailscaled.service
+
+  STEP="Tailscale connect"
+  if ! tailscale_connected; then
+    if [[ -n "$TAILSCALE_KEY_FILE" ]]; then
+      private_secret_file "$TAILSCALE_KEY_FILE"
+    elif [[ -t 0 ]]; then
+      read -r -s -p "Tailscale auth key: " TAILSCALE_KEY
+      echo
+      [[ -n "$TAILSCALE_KEY" ]] || fail "Tailscale auth key is required"
+      new_secret_file "$TAILSCALE_KEY" TAILSCALE_KEY_FILE
+      unset TAILSCALE_KEY
+    else
+      fail "Tailscale is not connected; use --tailscale-auth-key-file FILE"
+    fi
+    sudo tailscale up --auth-key="file:$TAILSCALE_KEY_FILE"
+  fi
+  TAILSCALE_IP="$(sudo tailscale ip -4 | awk 'NF { print; exit }')"
+  [[ -n "$TAILSCALE_IP" ]] || fail "Tailscale did not assign an IPv4 address"
+  echo "Tailscale connected: $TAILSCALE_IP"
 fi
-TAILSCALE_IP="$(sudo tailscale ip -4 | awk 'NF { print; exit }')"
-[[ -n "$TAILSCALE_IP" ]] || fail "Tailscale did not assign an IPv4 address"
-echo "Tailscale connected: $TAILSCALE_IP"
 
 BIN_DIR="$HOME/.local/bin"
 CONFIG_HOME="$HOME/.config"
@@ -507,6 +531,10 @@ elif [[ ! -f "$CONFIG_FILE" || "$REENROLL" == "1" ]]; then
       fail "Enrollment failed: previous configuration restored; the agent binary is now the new Hub's version, so rerun the old Hub's install-agent.sh (without --reenroll) to put back its matching binary."
     fi
     fail "Enrollment failed"
+  fi
+  if [[ "$EMBEDDED_TOKEN" == "1" || "$TOKEN_FILE" == "$SCRIPT_DIR/enroll-token" ]]; then
+    rm -- "$SCRIPT_DIR/enroll-token"
+    echo "Embedded enroll-token removed after successful enrollment."
   fi
 fi
 [[ -f "$CONFIG_FILE" && ! -L "$CONFIG_FILE" ]] || fail "Agent enrollment did not create its config"

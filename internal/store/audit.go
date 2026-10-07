@@ -36,6 +36,7 @@ const (
 	AuditConnect                   AuditAction = "connect"
 	AuditRetire                    AuditAction = "retire"
 	AuditUnretire                  AuditAction = "unretire"
+	AuditKeyedInstaller            AuditAction = "keyed-installer-download"
 	AuditEnrollToken               AuditAction = "enroll-token"
 	AuditRevokeToken               AuditAction = "revoke-token"
 	AuditEnrollmentLimit           AuditAction = "enrollment-limit"
