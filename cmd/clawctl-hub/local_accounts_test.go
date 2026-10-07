@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/teddashh/AI-Intune/internal/clientip"
 	"github.com/teddashh/AI-Intune/internal/localauth"
@@ -233,6 +234,9 @@ func TestEnrollmentIPLimit(t *testing.T) {
 		if i < 30 && w.Code == 429 {
 			t.Fatal("early limit")
 		}
+		if i < 30 && w.Code != 400 {
+			t.Fatalf("enrollment request missed handler: %d", w.Code)
+		}
 		if i == 30 && w.Code != 429 {
 			t.Fatal("no limit", w.Code)
 		}
@@ -452,5 +456,79 @@ func TestLoginResolvedIPBuckets(t *testing.T) {
 				t.Fatalf("got %d want %d", code, want)
 			}
 		})
+	}
+}
+
+func TestIPLimiterKeysAndEviction(t *testing.T) {
+	l := newIPLimiter(10, 1)
+	if !l.allow("2001:db8:1:2::1") || l.allow("2001:db8:1:2::2") || !l.allow("2001:db8:1:3::1") {
+		t.Fatal("IPv6 /64 buckets")
+	}
+	if !l.allow("192.0.2.1") || l.allow("::ffff:192.0.2.1") {
+		t.Fatal("mapped IPv4 buckets")
+	}
+	l = newIPLimiter(10, 1)
+	now := time.Now()
+	for i := range 4096 {
+		l.buckets[fmt.Sprintf("source-%d", i)] = ipBucket{0, now}
+	}
+	l.buckets["source-0"] = ipBucket{0, now.Add(-time.Minute)}
+	if !l.allow("192.0.2.1") {
+		t.Fatal("full map denied new admin source")
+	}
+	if len(l.buckets) != 4096 {
+		t.Fatal(len(l.buckets))
+	}
+	if _, ok := l.buckets["source-0"]; ok {
+		t.Fatal("oldest bucket retained")
+	}
+	if l.allow("192.0.2.1") {
+		t.Fatal("new bucket not limited")
+	}
+	if !l.allow("source-0") {
+		t.Fatal("evicted source did not regain burst")
+	}
+}
+
+func TestEnrollmentResolvedIPv6Limiter(t *testing.T) {
+	resolver, _ := clientip.Parse("10.0.0.0/8", "")
+	h := &hub{clientIP: resolver}
+	mux := http.NewServeMux()
+	h.agentRoutes(mux)
+	for i := range 31 {
+		req := httptest.NewRequest("POST", "/v1/enrollments", strings.NewReader("{"))
+		req.RemoteAddr = "10.0.0.1:1"
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("2001:db8:1:2::%x", i+1))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if i < 30 && w.Code != 400 {
+			t.Fatalf("enrollment request missed handler: %d", w.Code)
+		}
+		if i == 30 && w.Code != 429 {
+			t.Fatalf("rotating IPv6 bypassed enrollment limiter: %d", w.Code)
+		}
+	}
+}
+
+func TestLoginIPv6Rotation(t *testing.T) {
+	t.Setenv("CLAWCTL_TRUSTED_PROXIES", "10.0.0.0/8")
+	h, st := localAccountHandler(t)
+	if _, err := st.CreateFirstAdmin("admin", "test admin password"); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 6 {
+		req := httptest.NewRequest("POST", "https://hub.example.com/login", strings.NewReader("username=unknown&password=wrong"))
+		req.RemoteAddr = "10.0.0.1:1"
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("2001:db8:1:2::%x", i+1))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		want := 401
+		if i == 5 {
+			want = 429
+		}
+		if w.Code != want {
+			t.Fatalf("attempt %d: %d want %d", i, w.Code, want)
+		}
 	}
 }

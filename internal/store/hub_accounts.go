@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/argon2"
+
+	"github.com/teddashh/AI-Intune/internal/clientip"
 )
 
 // Tests in this package lower these costs; production uses 64 MiB, three passes.
@@ -122,6 +124,7 @@ func (s *Store) CreateFirstAdmin(username, password string, metadata ...AuditEnt
 }
 
 func (s *Store) VerifyPassword(username, password, clientIP string, metadata ...AuditEntry) (HubAccount, error) {
+	clientIP = clientip.Key(clientIP)
 	var a HubAccount
 	err := s.rdb.QueryRow(`SELECT account_id,username,password_hash FROM hub_accounts WHERE username=?`, username).Scan(&a.AccountID, &a.Username, &a.passwordHash)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {

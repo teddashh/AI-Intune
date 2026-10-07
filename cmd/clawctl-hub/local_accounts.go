@@ -9,7 +9,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -232,8 +231,9 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 	return append([]string(nil), accountRoutePatterns...)
 }
 
-// Limits use resolved client IPs. Idle buckets are pruned,
+// Limits use clientip.Key on resolved client IPs. Idle buckets are pruned,
 // and the map has a hard cap so arbitrary source IPs cannot grow memory forever.
+// Eviction admits new clients; an evicted attacker only regains a fresh burst.
 type ipBucket struct {
 	tokens float64
 	at     time.Time
@@ -248,10 +248,7 @@ func newIPLimiter(perMinute, burst int) *ipLimiter {
 	return &ipLimiter{buckets: make(map[string]ipBucket), perSecond: float64(perMinute) / 60, burst: float64(burst)}
 }
 func (l *ipLimiter) allow(remote string) bool {
-	ip, _, err := net.SplitHostPort(remote)
-	if err != nil {
-		ip = remote
-	}
+	ip := clientip.Key(remote)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
@@ -264,7 +261,14 @@ func (l *ipLimiter) allow(remote string) bool {
 				}
 			}
 			if len(l.buckets) >= 4096 {
-				return false
+				var oldest string
+				var at time.Time
+				for k, v := range l.buckets {
+					if oldest == "" || v.at.Before(at) {
+						oldest, at = k, v.at
+					}
+				}
+				delete(l.buckets, oldest)
 			}
 		}
 		b = ipBucket{l.burst, now}

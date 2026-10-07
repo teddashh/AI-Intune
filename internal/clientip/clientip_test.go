@@ -2,6 +2,7 @@ package clientip
 
 import (
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -62,5 +63,50 @@ func TestEntryCap(t *testing.T) {
 	req.Header.Set(r.Header, v)
 	if r.Resolve(req) != "10.0.0.1" {
 		t.Fatal("exceeded cap")
+	}
+}
+
+func TestKey(t *testing.T) {
+	for _, tt := range []struct{ addr, want string }{
+		{"192.0.2.1", "192.0.2.1"}, {"::ffff:192.0.2.1", "192.0.2.1"},
+		{"2001:db8:1:2::1", "2001:db8:1:2::/64"}, {"2001:db8:1:2:ffff::abcd", "2001:db8:1:2::/64"},
+		{"2001:db8:1:3::1", "2001:db8:1:3::/64"},
+	} {
+		if got := Key(tt.addr); got != tt.want {
+			t.Errorf("Key(%q) = %q, want %q", tt.addr, got, tt.want)
+		}
+	}
+}
+
+func TestHeaderEdges(t *testing.T) {
+	for _, header := range []string{"X-Forwarded-For", "Fly-Client-IP"} {
+		for _, value := range []string{"", " ", "192.0.2.1:5678", "[2001:db8::1]:443", ",192.0.2.1", "192.0.2.1,", "192.0.2.1, ,10.0.0.2", "fe80::1%eth0"} {
+			// Leading entries before the first untrusted hop cannot influence XFF resolution.
+			want := "10.0.0.1"
+			if header == "X-Forwarded-For" && value == ",192.0.2.1" {
+				want = "192.0.2.1"
+			}
+			if header == "X-Forwarded-For" && value == "192.0.2.1, ,10.0.0.2" {
+				want = "10.0.0.2"
+			}
+			r, _ := Parse("10.0.0.0/8", header)
+			req := httptest.NewRequest("GET", "/", nil)
+			req.RemoteAddr = "10.0.0.1:1"
+			req.Header.Set(header, value)
+			if got := r.Resolve(req); got != want {
+				t.Errorf("%s %q: %s want %s", header, value, got, want)
+			}
+		}
+		r, _ := Parse("::ffff:10.0.0.0/104", header)
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "[::ffff:10.0.0.1]:1"
+		req.Header.Set(strings.ToLower(header), "  ::ffff:192.0.2.1  ")
+		if got := r.Resolve(req); got != "192.0.2.1" {
+			t.Fatal(got)
+		}
+		req.RemoteAddr = "192.0.2.2:1"
+		if got := r.Resolve(req); got != "192.0.2.2" {
+			t.Fatal("untrusted header", got)
+		}
 	}
 }

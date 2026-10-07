@@ -247,3 +247,43 @@ func TestHubPerClientFailures(t *testing.T) {
 		t.Fatal("prune", n, err)
 	}
 }
+
+func TestIPv6LoginKeysConcurrent(t *testing.T) {
+	fastAccountHashes(t)
+	s := newTestStore(t)
+	if _, err := s.CreateFirstAdmin("admin", testAdminPassword); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := range 5 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ip := fmt.Sprintf("2001:db8:1:2::%x", i+1)
+			if _, err := s.VerifyPassword("admin", "wrong", ip, AuditEntry{SourceAddr: ip}); !errors.Is(err, ErrAccountAuth) {
+				t.Errorf("failure: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	var rows, failed int
+	var key string
+	if err := s.DB().QueryRow(`SELECT count(*), client_ip, failed_attempts FROM hub_login_failures`).Scan(&rows, &key, &failed); err != nil || rows != 1 || failed != 5 || key != "2001:db8:1:2::/64" {
+		t.Fatalf("rows=%d key=%s failed=%d err=%v", rows, key, failed, err)
+	}
+	if _, err := s.VerifyPassword("admin", testAdminPassword, "2001:db8:1:2::ffff"); !errors.Is(err, ErrAccountAuth) {
+		t.Fatal("same /64 not locked", err)
+	}
+	if _, err := s.VerifyPassword("admin", testAdminPassword, "2001:db8:1:3::1"); err != nil {
+		t.Fatal("other /64 locked", err)
+	}
+	if _, err := s.VerifyPassword("unknown", "wrong", "2001:db8:1:4::1"); !errors.Is(err, ErrAccountAuth) {
+		t.Fatal(err)
+	}
+	if got := countRows(t, s, `SELECT count(*) FROM hub_login_failures`); got != 1 {
+		t.Fatal("unknown user created row", got)
+	}
+	if got := countRows(t, s, `SELECT count(*) FROM audit_log WHERE source_addr LIKE '2001:db8:1:2::%' AND source_addr NOT LIKE '%/64'`); got != 6 {
+		t.Fatal("full audit sources lost", got)
+	}
+}

@@ -99,3 +99,21 @@ func (r Resolver) Resolve(req *http.Request) string {
 	}
 	return peer.String()
 }
+
+// Key groups native IPv6 clients by /64 to bound address rotation within a subnet.
+// IPv4-mapped IPv6 addresses share the corresponding IPv4 key.
+// Audit sources should retain the full resolved address instead.
+func Key(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err == nil {
+		addr = host
+	}
+	a, err := parseIP(addr)
+	if err != nil {
+		return addr
+	}
+	if a.Is4() {
+		return a.String()
+	}
+	return netip.PrefixFrom(a, 64).Masked().String()
+}

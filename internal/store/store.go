@@ -603,6 +603,11 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("store: migrate: %w", err)
 	}
+	// auth_subject may be absent until addMissingColumns on legacy databases.
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_auth_action_at ON audit_log(auth_subject, action, at)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("store: migrate login audit index: %w", err)
+	}
 	if err := ensureJobEventProvenanceTrigger(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("store: migrate job event provenance trigger: %w", err)
