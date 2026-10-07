@@ -202,8 +202,9 @@ jobs:
           if [ "$PUBLISH" = "true" ]; then
             opts=(--yes)
           else
-            # Ephemeral key, local registry, no transparency log.
-            opts=(--yes --key cosign.key --tlog-upload=false --allow-insecure-registry --allow-http-registry)
+            # Ephemeral key, local registry, no transparency log. cosign v3
+            # accepts --tlog-upload=false only without a signing config.
+            opts=(--yes --key cosign.key --use-signing-config=false --tlog-upload=false --allow-insecure-registry --allow-http-registry)
           fi
           # --recursive signs the index and every manifest it lists.
           cosign sign "${opts[@]}" --recursive "$REPO@$INDEX"
