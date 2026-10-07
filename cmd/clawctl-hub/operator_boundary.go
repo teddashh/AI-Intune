@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -423,7 +422,7 @@ func newHubHTTPHandler(h *hub, ui *web.Server, authorizer operatorRequestAuthori
 
 	operatorMux := http.NewServeMux()
 	operatorRegistered := h.operatorRoutes(operatorMux)
-	operatorRegistered = append(operatorRegistered, registerSecurityRoutes(operatorMux, h.store, authority)...)
+	operatorRegistered = append(operatorRegistered, registerSecurityRoutes(operatorMux, h.store, authority, h.clientIP, cloud...)...)
 	operatorRegistered = append(operatorRegistered, ui.Routes(operatorMux)...)
 	operatorRegistered = append(operatorRegistered, registerOperatorTerminalSocket(operatorMux, h, authorizer, authority, cloud...))
 	if err := validateRouteManifests(nonOperatorRegistered, nonOperatorRoutePolicies,
@@ -649,7 +648,7 @@ func (b *operatorBoundary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if os.Getenv("CLAWCTL_REQUIRE_MFA") == "1" && principal.AuthMethod == operatorauth.AuthMethodLocalAccountSession && !strings.HasPrefix(r.URL.Path, "/account/security") {
+	if b.cloud != nil && b.cloud.requireMFA && principal.AuthMethod == operatorauth.AuthMethodLocalAccountSession && !isSecurityEnrollmentRoute(pattern) {
 		enabled, err := b.store.MFAEnabled(strings.TrimPrefix(principal.StableSubject(), "local-user:"))
 		if err != nil {
 			writeOperatorBoundaryError(w, policy.Representation, 503, "INTERNAL", "Authentication unavailable")
@@ -663,6 +662,9 @@ func (b *operatorBoundary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+	}
+	if b.cloud != nil && !b.cloud.requireMFA && principal.AuthMethod == operatorauth.AuthMethodLocalAccountSession {
+		authed = web.WithMFAEnforcementDisabled(authed)
 	}
 	b.csrfNext.ServeHTTP(w, authed)
 }
@@ -1159,4 +1161,13 @@ func (b *operatorBoundary) authMode() authMode {
 		return b.cloud.mode
 	}
 	return authModeTailscale
+}
+
+func isSecurityEnrollmentRoute(pattern string) bool {
+	switch pattern {
+	case "GET /account/security", "POST /account/security/totp/begin", "POST /account/security/totp/confirm":
+		return true
+	default:
+		return false
+	}
 }

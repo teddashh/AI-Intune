@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"github.com/teddashh/AI-Intune/internal/clientip"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/store"
 	"github.com/teddashh/AI-Intune/internal/totp"
@@ -74,7 +74,7 @@ func TestMFARecoveryLogin(t *testing.T) {
 	if w.Code != 303 {
 		t.Fatal(w.Code, w.Body.String())
 	}
-	if err = st.VerifySecondFactor(a.AccountID, codes[0]); err == nil {
+	if err = st.VerifySecondFactor(a.AccountID, "192.0.2.1", codes[0]); err == nil {
 		t.Fatal("recovery reused")
 	}
 }
@@ -98,6 +98,7 @@ func TestPendingLoginExpiryAndBinding(t *testing.T) {
 	}
 }
 func TestAccountSecurityEnableDisablePassword(t *testing.T) {
+	t.Setenv("CLAWCTL_REQUIRE_MFA", "0")
 	h, st := localAccountHandler(t)
 	a, err := st.CreateFirstAdmin("admin", "a long test password")
 	if err != nil {
@@ -193,7 +194,7 @@ func TestRequireMFA(t *testing.T) {
 func TestSecurityTailscale404(t *testing.T) {
 	st := boundaryStore(t)
 	mux := http.NewServeMux()
-	registerSecurityRoutes(mux, st, "host")
+	registerSecurityRoutes(mux, st, "host", clientip.Resolver{})
 	for _, pattern := range securityPatterns {
 		method, path, _ := strings.Cut(pattern, " ")
 		r := httptest.NewRequest(method, path, nil)
@@ -218,7 +219,6 @@ func TestMFABadCodesLockoutAcrossPendingLogins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Different peers avoid hitting the IP limiter first; the account counter is shared.
 	request := func(peer, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "https://hub.example.com"+path, strings.NewReader(body))
 		r.RemoteAddr = peer
@@ -230,31 +230,39 @@ func TestMFABadCodesLockoutAcrossPendingLogins(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w
 	}
-	for i := range 5 {
-		peer := fmt.Sprintf("192.0.2.%d:1234", i+1)
-		w := request(peer, "/login", "username=admin&password=a+long+test+password", nil)
-		if w.Code != 200 {
-			t.Fatal(w.Code, w.Body.String())
+	peer := "192.0.2.1:1234"
+	password := "username=admin&password=a+long+test+password"
+	first := request(peer, "/login", password, nil)
+	second := request(peer, "/login", password, nil)
+	if first.Code != 200 || second.Code != 200 {
+		t.Fatal(first.Code, second.Code)
+	}
+	// Seed three failures to exercise the persisted lockout without exhausting
+	// the separate five-request HTTP burst before the fifth bad factor.
+	for range 3 {
+		if err = st.VerifySecondFactor(a.AccountID, "192.0.2.1", "bad"); err == nil {
+			t.Fatal("bad code accepted")
 		}
-		pending := w.Result().Cookies()[0]
-		w = request(peer, "/login/mfa", "code=bad", pending)
-		if w.Code != 401 {
+	}
+	for _, pending := range []*http.Cookie{first.Result().Cookies()[0], second.Result().Cookies()[0]} {
+		if w := request(peer, "/login/mfa", "code=bad", pending); w.Code != 401 {
 			t.Fatal(w.Code)
 		}
-		if i == 4 {
-			w = request(peer, "/login/mfa", "code="+codes[0], pending)
-			if w.Code != 401 {
-				t.Fatal("locked recovery accepted", w.Code)
-			}
-		}
 	}
-	w := request("192.0.2.99:1234", "/login", "username=admin&password=a+long+test+password", nil)
+	w := request(peer, "/login/mfa", "code="+codes[0], second.Result().Cookies()[0])
+	if w.Code != 401 {
+		t.Fatal("locked recovery accepted", w.Code)
+	}
+	if _, err = st.VerifyPassword("admin", "a long test password", "192.0.2.1"); err == nil {
+		t.Fatal("password cleared MFA lockout")
+	}
+	w = request("192.0.2.99:1234", "/login", password, nil)
 	if w.Code != 200 {
-		t.Fatal("per-client password login did not reach second factor", w.Code)
+		t.Fatal("other IP blocked", w.Code)
 	}
 	w = request("192.0.2.99:1234", "/login/mfa", "code="+codes[0], w.Result().Cookies()[0])
-	if w.Code != 401 {
-		t.Fatal("password cleared second factor failures", w.Code)
+	if w.Code != 303 {
+		t.Fatal("other IP could not complete MFA", w.Code, w.Body.String())
 	}
 }
 func TestResetAdminPasswordDisableMFA(t *testing.T) {
@@ -290,11 +298,15 @@ func TestResetAdminPasswordDisableMFA(t *testing.T) {
 
 func TestPendingLoginIgnoresEphemeralPort(t *testing.T) {
 	p := newPendingLogins()
-	token, err := p.add(store.HubAccount{}, "192.0.2.1:1000", "/")
+	resolver := clientip.Resolver{}
+	r := httptest.NewRequest("POST", "https://hub.example.com/login", nil)
+	r.RemoteAddr = "192.0.2.1:1000"
+	token, err := p.add(store.HubAccount{}, resolver.Resolve(r), "/")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := p.get(token, "192.0.2.1:2000"); !ok {
+	r.RemoteAddr = "192.0.2.1:2000"
+	if _, ok := p.get(token, resolver.Resolve(r)); !ok {
 		t.Fatal("ephemeral port broke pending login")
 	}
 }

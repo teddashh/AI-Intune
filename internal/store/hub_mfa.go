@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/teddashh/AI-Intune/internal/clientip"
 	"github.com/teddashh/AI-Intune/internal/totp"
 )
 
@@ -28,16 +29,27 @@ func (s *Store) BeginTOTPEnrollment(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Do not replace an enabled factor without authenticating and disabling it.
-	res, err := s.execWrite(context.Background(), "begin_totp", `INSERT INTO hub_account_mfa(account_id,totp_secret,pending_secret) VALUES (?,'',?) ON CONFLICT(account_id) DO UPDATE SET pending_secret=excluded.pending_secret WHERE enabled_at IS NULL`, id, secret)
+	// Refreshes and concurrent setup visits keep the same pending secret.
+	tx, err := s.beginWrite(context.Background(), "begin_totp")
 	if err != nil {
 		return "", err
 	}
-	n, _ := res.RowsAffected()
+	defer tx.Rollback()
+	res, err := tx.Exec(`INSERT INTO hub_account_mfa(account_id,totp_secret,pending_secret) VALUES (?,'',?) ON CONFLICT(account_id) DO UPDATE SET pending_secret=COALESCE(hub_account_mfa.pending_secret,excluded.pending_secret) WHERE enabled_at IS NULL`, id, secret)
+	if err != nil {
+		return "", err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return "", err
+	}
 	if n != 1 {
 		return "", ErrAccountAuth
 	}
-	return secret, nil
+	if err = tx.QueryRow(`SELECT pending_secret FROM hub_account_mfa WHERE account_id=?`, id).Scan(&secret); err != nil {
+		return "", err
+	}
+	return secret, tx.Commit()
 }
 func (s *Store) ConfirmTOTP(id, code string, metadata ...AuditEntry) ([]string, error) {
 	tx, err := s.beginWrite(context.Background(), "confirm_totp")
@@ -80,7 +92,8 @@ func (s *Store) ConfirmTOTP(id, code string, metadata ...AuditEntry) ([]string, 
 	}
 	return codes, tx.Commit()
 }
-func (s *Store) VerifySecondFactor(id, code string, metadata ...AuditEntry) error {
+func (s *Store) VerifySecondFactor(id, clientIP, code string, metadata ...AuditEntry) error {
+	clientIP = clientip.Key(clientIP)
 	tx, err := s.beginWrite(context.Background(), "verify_second_factor")
 	if err != nil {
 		return err
@@ -90,10 +103,17 @@ func (s *Store) VerifySecondFactor(id, code string, metadata ...AuditEntry) erro
 	a.AccountID = id
 	var failed int
 	var locked, disabled sql.NullString
-	if err = tx.QueryRow(`SELECT username,failed_attempts,locked_until,disabled_at FROM hub_accounts WHERE account_id=?`, id).Scan(&a.Username, &failed, &locked, &disabled); err != nil {
+	if err = tx.QueryRow(`SELECT username,disabled_at FROM hub_accounts WHERE account_id=?`, id).Scan(&a.Username, &disabled); err != nil {
 		return err
 	}
 	now := s.nowFn()
+	if _, err = tx.Exec(`DELETE FROM hub_login_failures WHERE last_failed_at<?`, fmtTime(now.Add(-24*time.Hour))); err != nil {
+		return err
+	}
+	err = tx.QueryRow(`SELECT failed_attempts,locked_until FROM hub_login_failures WHERE account_id=? AND client_ip=?`, id, clientIP).Scan(&failed, &locked)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
 	until, _ := time.Parse(time.RFC3339, locked.String)
 	blocked := disabled.Valid || now.Before(until)
 	var secret string
@@ -128,7 +148,7 @@ func (s *Store) VerifySecondFactor(id, code string, metadata ...AuditEntry) erro
 		return err
 	}
 	if valid {
-		_, err = tx.Exec(`UPDATE hub_accounts SET failed_attempts=0,locked_until=NULL WHERE account_id=?`, id)
+		_, err = tx.Exec(`DELETE FROM hub_login_failures WHERE account_id=? AND client_ip=?`, id, clientIP)
 	} else if !blocked {
 		if locked.Valid {
 			failed = 0
@@ -141,13 +161,18 @@ func (s *Store) VerifySecondFactor(id, code string, metadata ...AuditEntry) erro
 				return err
 			}
 		}
-		_, err = tx.Exec(`UPDATE hub_accounts SET failed_attempts=?,locked_until=? WHERE account_id=?`, failed, lock, id)
+		_, err = tx.Exec(`INSERT INTO hub_login_failures(account_id,client_ip,failed_attempts,locked_until,last_failed_at) VALUES(?,?,?,?,?) ON CONFLICT(account_id,client_ip) DO UPDATE SET failed_attempts=excluded.failed_attempts,locked_until=excluded.locked_until,last_failed_at=excluded.last_failed_at`, id, clientIP, failed, lock, fmtTime(now))
 	}
 	if err != nil {
 		return err
 	}
 	if !valid || action == AuditRecoveryCodeUsed {
 		if err = s.recordAuditTx(tx, accountAudit(action, a, valid, metadata...)); err != nil {
+			return err
+		}
+	}
+	if !valid {
+		if err = s.auditHubGuessingTx(tx, a, metadata...); err != nil {
 			return err
 		}
 	}

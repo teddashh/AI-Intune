@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/operatorendpoint"
@@ -30,6 +31,7 @@ func parseAuthMode(raw string) (authMode, error) {
 
 // cloudBoundaryConfig contains only startup-validated origins, never proxy headers.
 type cloudBoundaryConfig struct {
+	requireMFA       bool
 	setupCode        *setupCodeHash
 	mode             authMode
 	public           operatorendpoint.PublicURL
@@ -76,11 +78,38 @@ func cloudConfiguration(mode authMode, listen string) (cloudBoundaryConfig, erro
 	if public.Scheme() == "http" && !endpoint.Destination().IsLoopback() {
 		return cloudBoundaryConfig{}, fmt.Errorf("HTTP CLAWCTL_PUBLIC_URL requires a loopback CLAWCTL_LISTEN/--listen IP (127.0.0.0/8 or ::1); use HTTPS for non-loopback listeners")
 	}
-	config := cloudBoundaryConfig{public: public, mode: mode}
+	required, err := mfaEnforcement(mode, nil)
+	if err != nil {
+		return cloudBoundaryConfig{}, err
+	}
+	config := cloudBoundaryConfig{public: public, mode: mode, requireMFA: required}
 	if mode == authModeBoth {
 		if endpoint, err := operatorendpoint.ParseListen(listen); err == nil {
 			config.tailnetAuthority = endpoint.Authority()
 		}
 	}
 	return config, nil
+}
+
+const mfaDisabledWarning = "MFA enforcement disabled by CLAWCTL_REQUIRE_MFA=0; local admin accounts can sign in with a password only"
+
+func mfaEnforcement(mode authMode, printf func(string, ...any)) (bool, error) {
+	if mode == authModeTailscale {
+		return false, nil
+	}
+	raw, set := os.LookupEnv("CLAWCTL_REQUIRE_MFA")
+	if !set {
+		return true, nil
+	}
+	switch strings.ToLower(raw) {
+	case "1", "true", "on":
+		return true, nil
+	case "0", "false", "off":
+		if printf != nil {
+			printf("WARNING: %s", mfaDisabledWarning)
+		}
+		return false, nil
+	default:
+		return false, fmt.Errorf("CLAWCTL_REQUIRE_MFA must be 0/false/off or 1/true/on")
+	}
 }

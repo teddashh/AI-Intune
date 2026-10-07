@@ -13,9 +13,9 @@ These six operations are included in the 233-operation tally above (24 non-opera
 
 | Method | Route | Authority / behavior |
 |---|---|---|
-| `GET`, `POST` | `/setup` | First account only; POST requires setup code, username and password. Returns 404 after an admin exists. |
-| `GET`, `POST` | `/login` | Form and password authentication; creates a local session, or a five-minute source-bound pending login when MFA is enabled. Login/setup POSTs share TCP-peer limit 10/minute, burst 5. |
-| `POST` | `/login/mfa` | Requires pending login cookie plus authenticator or unused recovery code; same IP limiter and account lockout as password login. |
+| `GET`, `POST` | `/setup` | First account only; POST requires setup code, username and password, creates a session, and redirects to automatic TOTP enrollment. Returns 404 after an admin exists. |
+| `GET`, `POST` | `/login` | Form and password authentication; creates a local session, or a five-minute source-bound pending login when MFA is enabled. Login/setup POSTs share resolved client-key limit 10/minute, burst 5. |
+| `POST` | `/login/mfa` | Requires pending login cookie plus authenticator or unused recovery code; same resolved client-key limiter and per-(account, client key) lockout as password login. |
 | `POST` | `/logout` | Revokes the presented session, clears cookie, redirects to login. |
 
 | Method | Operator download route | Authority / behavior |
@@ -522,10 +522,10 @@ All five routes require a local session principal; Tailscale principals receive 
 
 | Method | Route | Behavior |
 |---|---|---|
-| GET | `/account/security` | MFA status and password-change form. |
+| GET | `/account/security` | MFA status and password-change form; starts required enrollment automatically. |
 | POST | `/account/security/totp/begin` | Pending secret and escaped otpauth URI; refuses replacement of enabled MFA. |
 | POST | `/account/security/totp/confirm` | Confirms code, enables MFA, shows ten recovery codes once. |
-| POST | `/account/security/totp/disable` | Requires current password plus valid second factor. |
+| POST | `/account/security/totp/disable` | Refused with HTTP 400 while MFA enforcement is on; otherwise requires current password plus valid second factor. |
 | POST | `/account/security/password` | Requires current password; changes password and revokes other sessions. |
 
-`CLAWCTL_REQUIRE_MFA=1` redirects local sessions without MFA from operator HTML routes to `/account/security`; other operator routes return 403 `MFA_ENROLLMENT_REQUIRED`. Default off. Account security remains accessible for enrollment.
+MFA enforcement defaults on in `local` / `both`; local sessions without MFA redirect from operator HTML routes to `/account/security`, and other operator routes return 403 `MFA_ENROLLMENT_REQUIRED`. Enrollment and logout remain accessible. Explicit `CLAWCTL_REQUIRE_MFA=0` / `false` / `off` opts out with startup and UI warnings; invalid values refuse startup. Tailscale principals are unaffected.

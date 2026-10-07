@@ -92,6 +92,7 @@ button:hover,.button:hover{background:#005a9e;color:#fff}
 .nav-separator{height:1px;background:var(--line-strong);margin:12px 20px}
 .sidebar-note{margin:18px 20px 0;padding-top:14px;border-top:1px solid var(--line-strong);color:var(--dim);font-size:12px}
 
+.mfa-warning{padding:12px 16px;border:1px solid #d29200;background:#fff4ce;color:var(--warning-text)}
 .workspace-shell{display:grid;grid-template-columns:minmax(0,1fr);min-width:0}
 .workspace-shell.with-workload-nav{grid-template-columns:var(--workload-width) minmax(0,1fr)}
 .workload-rail{
@@ -333,6 +334,7 @@ blockquote.summary .meta{display:block;color:var(--dim);font-size:12px;margin-bo
     {{end}}
     <main class="main-content" id="main-content" tabindex="-1" lang="{{.Locale.ContentTag}}">
       <div class="content-inner">
+        {{if .Access.MFAEnforcementDisabled}}<p class="mfa-warning" role="alert">WARNING: MFA enforcement disabled by CLAWCTL_REQUIRE_MFA=0; local admin accounts can sign in with a password only</p>{{end}}
         <nav class="breadcrumb" aria-label="{{.Locale.BreadcrumbAria}}" lang="{{.Locale.Tag}}">
           <a href="/">{{.Locale.BreadcrumbHome}}</a><span class="breadcrumb-separator" aria-hidden="true">›</span><span aria-current="page">{{.Locale.PageTitle}}</span>
         </nav>

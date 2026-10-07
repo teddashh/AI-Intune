@@ -43,6 +43,8 @@ services:
       CLAWCTL_PUBLIC_URL: https://${CLAWCTL_PUBLIC_HOST:?set CLAWCTL_PUBLIC_HOST}
       # Null passes through only when set; an empty setup code is invalid.
       CLAWCTL_SETUP_CODE:
+      # Null preserves the Hub default when unset; an explicit empty value is invalid.
+      CLAWCTL_REQUIRE_MFA:
       CLAWCTL_DB: /var/lib/clawctl/clawctl.sqlite
       CLAWCTL_REPORT_STAMP: /var/lib/clawctl/last-report.stamp
       CLAWCTL_NOTIFY_CMD: ${CLAWCTL_NOTIFY_CMD:-}

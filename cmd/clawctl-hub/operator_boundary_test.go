@@ -115,7 +115,7 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 	nonOperatorRegistered = append(nonOperatorRegistered, registerAccountRoutes(nonOperatorMux, st, ui, testOperatorAuthority, clientip.Resolver{})...)
 	operatorMux := http.NewServeMux()
 	operatorRegistered := h.operatorRoutes(operatorMux)
-	operatorRegistered = append(operatorRegistered, registerSecurityRoutes(operatorMux, st, testOperatorAuthority)...)
+	operatorRegistered = append(operatorRegistered, registerSecurityRoutes(operatorMux, st, testOperatorAuthority, clientip.Resolver{})...)
 	operatorRegistered = append(operatorRegistered, ui.Routes(operatorMux)...)
 	operatorRegistered = append(operatorRegistered, registerOperatorTerminalSocket(operatorMux, h, nil, testOperatorAuthority))
 	if err := validateRouteManifests(nonOperatorRegistered, nonOperatorRoutePolicies,
@@ -253,7 +253,7 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 	}
 	probeMux := http.NewServeMux()
 	h.operatorRoutes(probeMux)
-	registerSecurityRoutes(probeMux, st, testOperatorAuthority)
+	registerSecurityRoutes(probeMux, st, testOperatorAuthority, clientip.Resolver{})
 	ui.Routes(probeMux)
 	registerOperatorTerminalSocket(probeMux, h, authorizer, testOperatorAuthority)
 	tests := []struct {

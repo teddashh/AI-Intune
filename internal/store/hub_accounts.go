@@ -200,23 +200,8 @@ func (s *Store) VerifyPassword(username, password, clientIP string, metadata ...
 		}
 	}
 	if a.AccountID != "" && (!valid || blocked) {
-		var failures, signals int
-		since := fmtTime(now.Add(-time.Hour))
-		subject := "local-user:" + a.AccountID
-		if err = tx.QueryRow(`SELECT count(*) FROM audit_log WHERE auth_subject=? AND action=? AND at>?`, subject, AuditHubLoginFailed, since).Scan(&failures); err != nil {
+		if err = s.auditHubGuessingTx(tx, a, metadata...); err != nil {
 			return HubAccount{}, err
-		}
-		if failures >= 50 {
-			if err = tx.QueryRow(`SELECT count(*) FROM audit_log WHERE auth_subject=? AND action=? AND at>?`, subject, AuditHubGuessing, since).Scan(&signals); err != nil {
-				return HubAccount{}, err
-			}
-			if signals == 0 {
-				entry := accountAudit(AuditHubGuessing, a, false, metadata...)
-				entry.Detail = "hub login: distributed password guessing suspected"
-				if err = s.recordAuditTx(tx, entry); err != nil {
-					return HubAccount{}, err
-				}
-			}
 		}
 	}
 	if err = tx.Commit(); err != nil {
@@ -350,4 +335,27 @@ func (s *Store) LocalAccountLogin(accountID string) (string, error) {
 	var login string
 	err := s.rdb.QueryRow(`SELECT username FROM hub_accounts WHERE account_id=? AND disabled_at IS NULL`, accountID).Scan(&login)
 	return login, err
+}
+
+// Password and second-factor failures contribute to one rolling audit signal.
+// This observes distributed guessing without locking the account globally.
+func (s *Store) auditHubGuessingTx(tx *writeTx, a HubAccount, metadata ...AuditEntry) error {
+	var failures, signals int
+	since := fmtTime(s.nowFn().Add(-time.Hour))
+	subject := "local-user:" + a.AccountID
+	if err := tx.QueryRow(`SELECT count(*) FROM audit_log WHERE auth_subject=? AND action IN (?,?) AND at>?`, subject, AuditHubLoginFailed, AuditMFAFailed, since).Scan(&failures); err != nil {
+		return err
+	}
+	if failures < 50 {
+		return nil
+	}
+	if err := tx.QueryRow(`SELECT count(*) FROM audit_log WHERE auth_subject=? AND action=? AND at>?`, subject, AuditHubGuessing, since).Scan(&signals); err != nil {
+		return err
+	}
+	if signals != 0 {
+		return nil
+	}
+	entry := accountAudit(AuditHubGuessing, a, false, metadata...)
+	entry.Detail = "hub login: distributed password or second-factor guessing suspected"
+	return s.recordAuditTx(tx, entry)
 }

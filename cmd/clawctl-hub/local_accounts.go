@@ -198,14 +198,14 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 				http.Error(w, "Pending login required", 401)
 				return
 			}
-			login, ok := pending.get(c.Value, r.RemoteAddr)
+			login, ok := pending.get(c.Value, ip)
 			if !ok {
 				http.Error(w, "Pending login expired", 401)
 				return
 			}
 			account = login.account
 			next = login.next
-			err = st.VerifySecondFactor(account.AccountID, r.PostForm.Get("code"), metadata)
+			err = st.VerifySecondFactor(account.AccountID, ip, r.PostForm.Get("code"), metadata)
 			if err != nil {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(401)
@@ -244,7 +244,7 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 				return
 			}
 			if enabled {
-				token, e := pending.add(account, r.RemoteAddr, next)
+				token, e := pending.add(account, ip, next)
 				if e != nil {
 					http.Error(w, "Authentication unavailable", 503)
 					return
@@ -261,7 +261,16 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 		}
 		cookie(token, 7*24*60*60)
 		if setup {
-			next = "/"
+			next = "/account/security?enroll=1"
+		} else if boundary.cloud.requireMFA {
+			enabled, e := st.MFAEnabled(account.AccountID)
+			if e != nil {
+				http.Error(w, "Authentication unavailable", 503)
+				return
+			}
+			if !enabled {
+				next = "/account/security"
+			}
 		}
 		http.Redirect(w, r, next, 303)
 	})
