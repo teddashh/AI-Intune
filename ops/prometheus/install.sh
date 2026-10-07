@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # samplehub1 上一次把整條觀測鏈裝好：Prometheus → Alertmanager → Grafana。
 #
-#   sudo ./ops/prometheus/install.sh
+#   sudo CLAWCTL_FLEET_JSON=/path/to/fleet.json ./ops/prometheus/install.sh
+#
+# 第 1 段的站點值（fleet.json、prometheus.yml）由環境變數給，見 install-prometheus.sh。
 #
 # 這支不重寫那兩支既有的腳本，它就是照順序把它們跑一遍，再補上 Grafana。
 # 想單獨重跑某一段，那兩支還是可以自己執行。
@@ -31,7 +33,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 hr() { printf '\n\033[1m━━━━━━ %s ━━━━━━\033[0m\n' "$*"; }
 
 hr "第 1 段 / 共 3 段：Prometheus + node_exporter"
-"$HERE/install-samplehub1.sh"
+"$HERE/install-prometheus.sh"
 
 hr "第 2 段 / 共 3 段：Alertmanager（跑完約 5 分鐘後開始送 Telegram）"
 "$HERE/install-alertmanager.sh"

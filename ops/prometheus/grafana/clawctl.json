@@ -289,7 +289,7 @@
   {
    "type": "table",
    "title": "Agent 版本",
-   "description": "各機器最近回報的 Agent 版本。列數需與名冊一致；部署驗證：./ops/ansible/verify.sh",
+   "description": "各機器最近回報的 Agent 版本。列數需與名冊一致；部署驗證：count by (version, machine) (clawctl_agent_info)",
    "gridPos": {
     "h": 6,
     "w": 12,

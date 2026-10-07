@@ -117,7 +117,7 @@ groups:
       # ⚠⚠ 這兩條的存在理由跟其他規則不同：它們守的不是機器，是**部署這件事**。
       #     2026-09-03：部署腳本回報成功，三台上各多了一個不受 systemd 管的
       #     第二個 agent，跑了六個多小時，兩個都誠實地送心跳，每一盞燈都是綠的。
-      #     ops/ansible/verify.sh 是推完當下的一次性驗收；這兩條是往後每天問。
+      #     部署工具推完當下的驗收只問一次；這兩條是往後每天問。
 
       - alert: FleetIsOnMoreThanOneAgentVersion
         # count by (version) 得到「每個版本有幾台」，外面再 count 一次
@@ -133,7 +133,8 @@ groups:
             版本不一致代表某一台的推沒有落地。從版本字串上看不出哪一台有哪個修正 ——
             2026-09-03 全機隊都是 f83eadd-dirty，而修掉那個 CLI bug 的 commit 是
             08119ac，最後只能靠實際餵它一個認不得的參數才知道誰有。
-            對答案：./ops/ansible/verify.sh
+            對答案：在 Prometheus 查 count by (version, machine) (clawctl_agent_info)，
+            版本不同的那幾台就是沒落地的。
 
       - alert: MachineReportsButHasNoAgentVersion
         # ⚠⚠ 這一條抓的是「安靜地不存在」那一類，跟
@@ -156,7 +157,7 @@ groups:
           description: >-
             這台的 agent 舊到不送 agent_version 這個欄位（或送了空字串）。
             推到它身上的東西無法驗收 —— 不是「推失敗了」，是「問不出來」。
-            先推一次新的：./ops/ansible/run.sh agent.yml --limit {{ $labels.machine }}
+            先在 {{ $labels.machine }} 上重新安裝一次新版 agent（ops/install-agent.sh 或你的部署工具）。
 
       # ── 還原演練（PHASES.md D 表最後一列）─────────────────────
       #
