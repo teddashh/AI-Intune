@@ -181,42 +181,38 @@ read current state → preview exact impact → confirm typed target
 
 ## Quick start
 
-### 1. Build and test
+### 1. Before you start
 
-Use Linux with Go `1.27.1`, `systemd`, `sudo`, and a Tailscale tailnet.
+Before deploying, ensure you have:
+- A **Tailscale tailnet** you administer (free for personal use).
+- An **operator capability prefix** owned by your domain (e.g. `example.com/cap/clawctl`; see [Operator authentication quick start](docs/OPERATOR-AUTH.md#quick-start-english)).
+- Pick a **deploy target**: Fly.io (hosted), any Linux VM with Docker (self-hosted), or systemd without Docker.
 
-```bash
-git clone https://github.com/teddashh/AI-Intune.git
-cd AI-Intune
-make test vet
-make hub agent-bundles
-```
+### 2. Tailscale policy
 
-This produces the Hub plus self-contained Linux `amd64` and `arm64` Agent bootstrap archives in `build/`.
+Configure your tailnet policy (grants and tags) so your operator identity is recognized by the Hub. Follow the [Operator authentication quick start](docs/OPERATOR-AUTH.md#quick-start-english) to add the three required application capability grants (`-view`, `-operate`, `-admin`) pointing to the Hub's destination IP and port.
 
-### 2. Deploy
+### 3. Deploy the Hub
 
-The primary path is any Linux host with Docker. Copy `ops/docker/hub.env.example` to `ops/docker/hub.env`, set `CLAWCTL_LISTEN` to this host's Tailscale IP and the port you chose, then:
+Choose one of three deployment targets:
 
-```bash
-docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env up -d --build
-```
+- **Fly.io** (hosted example): Includes continuous SQLite backup to Cloudflare R2 via Litestream. See [docs/DEPLOY-FLY.md](docs/DEPLOY-FLY.md).
+- **Any Linux VM with Docker** (primary self-hosted path): See [docs/DEPLOY-OSS.md](docs/DEPLOY-OSS.md) and [`ops/docker/README.md`](ops/docker/README.md). Copy `ops/docker/hub.env.example` to `ops/docker/hub.env`, set `CLAWCTL_LISTEN` to this host's Tailscale IP and chosen port, set `CLAWCTL_OPERATOR_CAPABILITY_PREFIX`, and run:
+  ```bash
+  docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env up -d --build
+  ```
+- **systemd without Docker** (bare-metal alternative): Run `ops/install-hub.sh`:
+  ```bash
+  ./ops/install-hub.sh \
+    --listen 100.x.y.z:8787 \
+    --operator-capability-prefix example.com/cap/clawctl
+  ```
+  The installer publishes both Agent architectures under the exact running Hub version and starts `clawctl-hub.service` as a systemd user unit.
 
-`8787` in examples is the conventional example port, not a Hub default. The grant `dst` port, `CLAWCTL_PUBLIC_URL`, the agent `--hub` URL, and any tunnel origin must use that same port. Full steps: [docs/DEPLOY-OSS.md](docs/DEPLOY-OSS.md).
+> [!NOTE]
+> Docker and Fly build inside the container image: you do **not** need Go installed on the host to run them. Go `1.27.1` + `make` is only required when building from source, running the systemd install without Docker, or contributing to development (`make test vet`, `make hub agent-bundles`).
 
-systemd is the alternative when the host has no Docker (the install command below). Fly.io is the hosted example: [docs/DEPLOY-FLY.md](docs/DEPLOY-FLY.md). Cloudflare Containers is not implemented. It would need tsnet (userspace Tailscale inside the Hub process), Litestream, and a Durable Object keep-alive.
-
-### 3. Configure operator identity and install the Hub (systemd alternative)
-
-Add the Tailscale capability grant described in [Operator authentication](docs/OPERATOR-AUTH.md), then install as the non-root account that will run the Hub:
-
-```bash
-./ops/install-hub.sh \
-  --listen 100.x.y.z:8787 \
-  --operator-capability-prefix example.com/cap/clawctl
-```
-
-The installer publishes both Agent architectures under the exact running Hub version and starts `clawctl-hub.service` as a systemd user unit.
+`8787` in examples is the conventional example port, not a Hub default. The grant `dst` port, `CLAWCTL_PUBLIC_URL`, the agent `--hub` URL, and any tunnel origin must use that same port. Full steps: [docs/DEPLOY-OSS.md](docs/DEPLOY-OSS.md). Cloudflare Containers is not implemented (it would need tsnet, Litestream, and a Durable Object keep-alive).
 
 ### 4. Enroll an endpoint
 
@@ -237,7 +233,7 @@ The installer prompts for the one-time enrollment token. On an endpoint that has
   --tailscale-auth-key-file ./tailscale-auth-key
 ```
 
-Installation finishes after the new service has checked in and the Hub has confirmed the exact Agent version and active job channel.
+Installation finishes after the new service has checked in and the Hub has confirmed the exact Agent version and active job channel. If you are migrating existing machines from another Hub rather than enrolling fresh ones, see [docs/MOVE-AGENTS.md](docs/MOVE-AGENTS.md).
 
 An enrollment limit caps how many machines this Hub will take. It counts the machines on the register that have not been retired — the same denominator as **Reports → Enrollment** — so revoking a ticket or letting one expire does not make room; retirement does. At the limit, ticket creation is refused on every plane, and both the enrollment page and `enroll-token --preview` say so before you commit. Not setting a limit is not a limit of zero: a limit of zero is a real setting that stops every new machine. Set, change, or remove it under **Enrollment limit** on the same page, or from the CLI:
 
@@ -376,6 +372,10 @@ clawctl-hub machine data --machine MACHINE_ID --csv
 Open **Tenant administration → Data disclosure** to read what this Hub keeps about a machine at all: thirteen kinds of data covering every table that stores a machine identifier, each stating what it holds, whether the machine reported it or the Hub decided it, whether it contains free text, how long it stays under the retention policy in force, and what survives retirement. Open a machine's **Data** page for that same catalogue carrying this machine's own row counts, oldest and newest row, and the cutoff the current retention policy applies. Which tables hold machine data is answered by the schema itself, and which of them are pruned on a clock is answered by the code that does the deleting.
 
 Ticket completion counts are kept separate from verification success. A report is only offered as an export when it is whole inside its range; the cursor-paged reports are not, because such a file would carry one page while looking like the entire report. Every export shares one contract: byte order mark, UTC RFC 3339 timestamps, an empty cell for an absent value, and spreadsheet-formula protection on every cell.
+
+### 12. Moving to a new Hub
+
+To migrate enrolled endpoints to a different Hub instance or re-point their `--hub` configuration, follow [docs/MOVE-AGENTS.md](docs/MOVE-AGENTS.md).
 
 ## Current application scope
 
@@ -610,42 +610,37 @@ Hub 是控制 ledger，不是 AI 資料路徑。端點不開放 inbound 控制 p
 
 ## 快速開始
 
-### 1. 建立並測試
+### 1. 準備工作（Before you start）
 
-使用具備 Go `1.27.1`、`systemd`、`sudo` 與 Tailscale tailnet 的 Linux 環境。
+在部署之前，請先確認：
+- 一個你擁有管理權限的 **Tailscale tailnet**（個人使用免費）。
+- 屬於你網域的 **operator capability prefix**（例如 `example.com/cap/clawctl`；見 [Operator authentication 快速開始](docs/OPERATOR-AUTH.md#quick-start-english)）。
+- 選擇**部署目標**：Fly.io（託管）、任何有 Docker 的 Linux VM（自行架設），或不安裝 Docker 的 systemd。
 
-```bash
-git clone https://github.com/teddashh/AI-Intune.git
-cd AI-Intune
-make test vet
-make hub agent-bundles
-```
+### 2. Tailscale policy（grants 與 tags）
 
-完成後，`build/` 會包含 Hub，以及自含的 Linux `amd64`、`arm64` Agent bootstrap archives。
+設定 tailnet 政策（grants 與 tags），讓 Hub 能夠識別你的 operator 身分。依照 [Operator authentication 快速開始](docs/OPERATOR-AUTH.md#quick-start-english) 加入三種必要的 application capability grants（`-view`、`-operate`、`-admin`），並指向 Hub 的目標 IP 與連接埠。
 
-### 2. 部署
+### 3. 部署 Hub
 
-主要路徑是任何有 Docker 的 Linux 主機。把 `ops/docker/hub.env.example` 複製成 `ops/docker/hub.env`，將 `CLAWCTL_LISTEN` 設成這台機器的 Tailscale IP 與你選的埠，然後：
+提供三種部署選項：
 
-```bash
-docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env up -d --build
-```
+- **Fly.io**（託管範例）：包含透過 Litestream 連續備份 SQLite 至 Cloudflare R2。見 [docs/DEPLOY-FLY.md](docs/DEPLOY-FLY.md)。
+- **任何有 Docker 的 Linux VM**（主要自行架設路徑）：見 [docs/DEPLOY-OSS.md](docs/DEPLOY-OSS.md) 與 [`ops/docker/README.md`](ops/docker/README.md)。將 `ops/docker/hub.env.example` 複製為 `ops/docker/hub.env`，設定 `CLAWCTL_LISTEN` 與 `CLAWCTL_OPERATOR_CAPABILITY_PREFIX`，然後執行：
+  ```bash
+  docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env up -d --build
+  ```
+- **不安裝 Docker 的 systemd**（bare-metal 替代方案）：執行 `ops/install-hub.sh`：
+  ```bash
+  ./ops/install-hub.sh \
+    --listen 100.x.y.z:8787 \
+    --operator-capability-prefix example.com/cap/clawctl
+  ```
+  安裝器會將兩種 Agent 架構發布到精確的 Hub 版本之下，並以 systemd user unit 啟動 `clawctl-hub.service`。
 
-文件裡的 `8787` 只是慣例範例埠，不是 Hub 的預設埠。Tailscale grant 的 `dst` 埠、`CLAWCTL_PUBLIC_URL`、agent 的 `--hub`、以及 tunnel origin 都必須跟 `CLAWCTL_LISTEN` 使用同一個埠。完整步驟見 [docs/DEPLOY-OSS.md](docs/DEPLOY-OSS.md)。
+> Docker 與 Fly 會在映像檔內完成建置：主機上**不需要**安裝 Go。Go `1.27.1` + `make` 僅在從原始碼建置、systemd 安裝或日常開發時需要（`make test vet`、`make hub agent-bundles`）。
 
-沒有 Docker 時改走 systemd（下面的安裝指令）。Fly.io 是文件裡的託管範例：[docs/DEPLOY-FLY.md](docs/DEPLOY-FLY.md)。Cloudflare Containers 尚未實作；那條路需要 tsnet（Hub 行程內的 userspace Tailscale）、Litestream，以及 Durable Object keep-alive。
-
-### 3. 設定 operator 身分並安裝 Hub（systemd 替代）
-
-先依照 [Operator authentication](docs/OPERATOR-AUTH.md) 加入 Tailscale capability grant，再由實際執行 Hub 的 non-root account 安裝：
-
-```bash
-./ops/install-hub.sh \
-  --listen 100.x.y.z:8787 \
-  --operator-capability-prefix example.com/cap/clawctl
-```
-
-安裝器會將兩種 Agent 架構發布到精確的 Hub 版本之下，並以 systemd user unit 啟動 `clawctl-hub.service`。
+文件裡的 `8787` 只是慣例範例埠，不是 Hub 的預設埠。Tailscale grant 的 `dst` 埠、`CLAWCTL_PUBLIC_URL`、agent 的 `--hub`、以及 tunnel origin 都必須跟 `CLAWCTL_LISTEN` 使用同一個埠。完整步驟見 [docs/DEPLOY-OSS.md](docs/DEPLOY-OSS.md)。Cloudflare Containers 尚未實作。
 
 ### 4. 註冊端點
 
@@ -666,7 +661,7 @@ cd clawctl-agent-bootstrap-linux-amd64
   --tailscale-auth-key-file ./tailscale-auth-key
 ```
 
-新 service 完成 check-in，並由 Hub 確認精確 Agent 版本與已啟用 job channel 後，安裝才會結束。
+新 service 完成 check-in，並由 Hub 確認精確 Agent 版本與已啟用 job channel 後，安裝才會結束。若要將既有端點從其他 Hub 遷移至此，請參考 [docs/MOVE-AGENTS.md](docs/MOVE-AGENTS.md)。
 
 註冊上限限制這個 Hub 收得下幾台。它算的是名冊上沒有退役的台數，也就是 **報告 → 註冊** 的那個分母；撤票或讓票過期都不會空出名額，退役才會。到了上限，每一個介面都開不出新的票，註冊頁與 `enroll-token --preview` 在送出之前就先講。沒有設上限不是上限 0：上限 0 是一個真的可以設的值，意思是誰都不准再納管。要設定、調整或取消，到同一頁的 **註冊上限**，或走 CLI：
 
@@ -805,6 +800,10 @@ clawctl-hub machine data --machine MACHINE_ID --csv
 開啟 **租用戶管理 → 資料揭露**，讀這個 Hub 對一台機器到底留了什麼：十四類資料涵蓋每一張存著機器識別碼的表，各自交代留的是什麼、是機器自報還是 Hub 判定、含不含自由文字、在現行保留期下留多久、退役之後還剩什麼。開啟某一台的 **資料**，同一份目錄會帶上這台自己的列數、最舊與最新的一列，以及現行保留期算出來的清除界線。哪些表存著機器的資料由 schema 本身回答，其中哪些會被時間清則由真的在刪東西的那段程式回答。
 
 回合完成數與驗證成功分開呈現。只有在範圍裡完整的報告才給匯出：cursor 分頁的報告匯出的是當下那一頁，而那個檔案打開之後看起來跟整份報告一模一樣。每一份匯出共用同一套契約：BOM、UTC RFC 3339 時間、沒有值就留空格，以及每一格都擋試算表公式。
+
+### 12. 遷移至新 Hub（Moving to a new Hub）
+
+若需要將已納管端點遷移至不同的 Hub 實體或重新指定 `--hub` 設定，請參考 [docs/MOVE-AGENTS.md](docs/MOVE-AGENTS.md)。
 
 ## 目前的應用程式範圍
 

@@ -1,8 +1,77 @@
-# Operator 身分、權限與瀏覽器邊界
+# Operator identity, permissions, and browser boundary (Operator 身分、權限與瀏覽器邊界)
 
-> **狀態（2026-09-07 21:58Z）：已推 live。** Tailscale grant、samplehub1 env、
-> deterministic CLI discovery、writer fence 與 `88fb5ff` enroll-token slice 都已上線；本文件的 boundary
-> 現在就是正式 operator plane 契約。
+## Quick start (English)
+
+### Operator request checks
+On every operator request (web console or `/v1/operator/*` API), the Hub verifies:
+- **Authority / Host pinning**: The HTTP `Host` header must strictly match the literal Tailscale listener `IP:port` configured at startup (e.g. `100.64.200.2:8787` from `CLAWCTL_LISTEN`). Request headers like `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `Tailscale-*`, or `Authorization` are untrusted caller-controlled bytes and ignored for operator identity. This prevents DNS-rebinding attacks against authenticated browsers.
+- **LocalAPI WhoIs**: The Hub inspects the connection peer via Tailscale LocalAPI `WhoIsForIP` (`Request.RemoteAddr` against the listener IP). The caller must be a non-tagged node owned by an explicit Tailscale user profile with stable user and node IDs.
+- **Three capabilities**:
+  - `<prefix>-view`: Read-only access to the web console, Prometheus `/metrics`, and viewing machines, jobs, deployments, artifacts, reports, and audit logs.
+  - `<prefix>-operate`: Operational actions, including opening terminal sessions, terminal connect BATs, verifier dispatch/assignment, and deployment continue/retry.
+  - `<prefix>-admin`: Administrative mutations, including enrollment token creation/revocation, registration limits, channel assignments, machine lifecycle, policy publication, and retention pruning.
+- **No implied inheritance**: Capabilities are strictly non-hierarchical (`admin` does NOT imply `operate` or `view`). To grant full administrative access, a Tailscale grant must explicitly include all three capability keys.
+- **Daemon requirement**: The Hub host requires `tailscaled >= 1.100.0`. Earlier daemons may ignore destination scoping on capability lookups; the Hub fails closed if `tailscaled` is older.
+
+### Choosing the capability prefix
+The capability prefix format is strictly validated by `NamesForPrefix` as `<domain>/cap/<app>`:
+- Exactly three slash-separated components.
+- All lowercase, without whitespace.
+- The domain must have at least two labels (e.g. `example.com`), each matching `^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`.
+- `tailscale.com` and `tailscale.io` (and their subdomains) are reserved and rejected.
+- The `<app>` slug must match `^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`.
+
+Use a domain you control, e.g. `example.com/cap/clawctl`. If you do not have a custom domain, use your GitHub Pages domain: `<your-github-username>.github.io/cap/clawctl`.
+
+Set the exact same value in `CLAWCTL_OPERATOR_CAPABILITY_PREFIX` (or `--operator-capability-prefix`).
+
+### Tailnet policy configuration (HuJSON)
+Merge the following snippet into your Tailnet policy file in the Tailscale Admin console (**Access controls**). Merge into existing `tagOwners` and `grants` sections; do not overwrite or replace the entire file. Use the editor's built-in validation before saving.
+
+```hujson
+  "tagOwners": {
+    "tag:clawctl-hub":   ["autogroup:admin"],
+    "tag:clawctl-agent": ["autogroup:admin"]   // optional, if you tag managed machines
+  },
+  "grants": [
+    // 1. Operators: reach the Hub port AND get the three app capabilities.
+    { "src": ["you@example.com"], "dst": ["tag:clawctl-hub"], "ip": ["tcp:8787"],
+      "app": { "example.com/cap/clawctl-view": [{}], "example.com/cap/clawctl-operate": [{}],
+               "example.com/cap/clawctl-admin": [{}] } },
+    // 2. Managed machines (agents): reach the Hub port only, no capabilities.
+    { "src": ["tag:clawctl-agent"], "dst": ["tag:clawctl-hub"], "ip": ["tcp:8787"] }
+  ]
+```
+
+- **`dst`**: May be the tag (`tag:clawctl-hub`) if the Hub joined with a tagged auth key (such as Fly or Docker packs), or the Hub's literal Tailscale IP (e.g. `["100.64.200.2"]`) if running on a host joined interactively as a user (`tailscale up`).
+- **`src` for operators**: The operator grant's `src` user gets the capabilities on every device logged in as that user; to narrow it, list specific devices instead.
+- **`src` for agents**: May be `tag:clawctl-agent`, specific host IPs/names, or `autogroup:member`. If your tailnet policy still contains the default allow-all grant, grant 2 is already covered, but grant 1's `app` block is always required.
+- **Port**: The port in `tcp:8787` must equal the port configured in `CLAWCTL_LISTEN` (or `--listen`).
+- **Capabilities**: A view-only operator receives only `example.com/cap/clawctl-view`. Grant all three keys to full operators.
+
+### Tagged Hub hosts
+- `install-hub.sh`'s final homepage probe runs from the Hub host itself; on a tagged host it always fails with `HUMAN_PRINCIPAL_REQUIRED`. Use `install-hub.sh` on a host joined as a user, or use the Docker/Fly packs (which do not run that probe) and verify from your own device.
+- On any tagged Hub host (the Fly pack, or a VM joined with a tagged auth key), operator CLI commands that call the Hub API from that host (e.g. `clawctl-hub machines`, `clawctl-hub enroll-token`) are rejected the same way. Use the web console, or the CLI / `clawctl-operator` from your own tailnet device that is logged in as the grant `src` user. Local-only commands (`clawctl-hub notify-check`, the stopped-service `--db` break-glass path) are unaffected.
+
+### First-login verification
+Open `http://<tailscale-ip>:<port>/` in a web browser from a device on your tailnet, logged in to Tailscale as the user specified in the grant's `src` (`you@example.com`).
+
+- **Success**: The browser loads the clawctl operator console / dashboard with HTTP 200.
+- **Common failures**:
+  - **HTTP 403 Forbidden (`OPERATOR_CAPABILITY_REQUIRED`)**: The Tailscale user identity is missing the required capability (error detail: `Tailscale identity is missing <prefix>-view`). Verify that the `app` map in your Tailscale grant contains `<prefix>-view`.
+  - **HTTP 403 Forbidden (`HUMAN_PRINCIPAL_REQUIRED`)**: The request arrived from a tagged machine rather than a personal user node (error detail: `operator plane accepts only non-tagged devices with explicit Tailscale users`). Ensure your browser is running on an operator device logged into Tailscale with a human account.
+  - **HTTP 421 Misdirected Request (`OPERATOR_AUTHORITY_REQUIRED`)**: The request used a MagicDNS name (e.g. `http://hub-node.ts.net:8787/`) or another hostname instead of the literal listener address (error detail: `請使用 Hub 明示的 Tailscale IP 與 port`). You must browse to the exact literal `http://<tailscale-ip>:<port>/`.
+  - **HTTP 503 Service Unavailable (`AUTH_SOURCE_UNAVAILABLE`)**: Tailscale LocalAPI is unreachable, `tailscaled` is not in the `Running` state, or the installed `tailscaled` version is older than `1.100.0`. Check `journalctl -u tailscaled` and ensure LocalAPI socket access is available.
+  - **HTTP 503 Service Unavailable (`AUTH_CONFIGURATION_INVALID`)**: The Hub's configured destination IP does not match any Tailscale IP currently assigned to the host.
+
+The sections below (Traditional Chinese) are the full contract and the test-pinned route tallies.
+
+---
+
+> **Status / 狀態（2026-09-07 21:58Z）：Live / 已推 live。** Tailscale grant, Hub env,
+> deterministic CLI discovery, writer fence, and `88fb5ff` enroll-token slice are live; the boundary
+> in this document is the formal operator plane contract.
+> （Tailscale grant、Hub env、deterministic CLI discovery、writer fence 與 `88fb5ff` enroll-token slice 都已上線；本文件的 boundary 現在就是正式 operator plane 契約。）
 
 Jobs、Deployments、Artifacts、Updates 與 Machine Lifecycle routes 沿用這個已上線 boundary，但各 slice 的 live 版本與
 驗收證據的最新部署紀錄是私人工作筆記，不在這個公開倉庫；candidate contract 不冒充

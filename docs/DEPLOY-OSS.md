@@ -69,6 +69,54 @@ The **site/** static pages (if any) can live on Pages/Vercel; the Hub cannot.
 
 **Do not** run Hub on a machine it also manages as an enrolled agent if you can avoid it (see unit comments / PRODUCT).
 
+### Where to run it (cost and fit)
+
+| Platform | Fit | Estimated cost (check current provider pricing) |
+|---|---|---|
+| **Fly.io** | Hosted example: 1 always-on VM + persistent volume. Includes continuous SQLite backup to R2 via Litestream. See [DEPLOY-FLY.md](DEPLOY-FLY.md). | ~1 GB RAM machine + 3 GB volume, roughly $7/month at time of writing. |
+| **Small VPS with Docker** | Primary path: any standard Linux VPS (Hetzner, DigitalOcean, Linode, OVH, etc.) running Docker Compose. | 2 GB RAM class, e.g. ~$12/month. |
+| **GCP Compute Engine** | `e2-small` (2 GB RAM) works well with the Docker path. Free Tier `e2-micro` has only 1 GB RAM and is tight (risk of OOM during local build). | Note: external IPv4 is billed separately on GCP. |
+| **Not suitable** | **Cloud Run, Vercel, Cloudflare Workers, Cloudflare Containers** are not suitable: no kernel Tailscale for LocalAPI identity, no persistent SQLite writer lock. See [Why Vercel / Cloudflare Workers are the wrong place for Hub](#1-why-vercel--cloudflare-workers-are-the-wrong-place-for-hub). | N/A |
+
+### Fresh VM setup (Docker path)
+
+For a brand-new small Linux VM (e.g. Debian/Ubuntu):
+
+1. **Size and capacity**:
+   - **Sizing**: At least 1 GB RAM free for the Hub (a 2 GB RAM VM is recommended). Building the Docker image locally on a 1 GB VM can run out of memory (OOM). On a 1 GB VM, prefer running the prebuilt GHCR image via `ops/docker/docker-compose.ghcr.yml` from [docs/RELEASE.md](RELEASE.md) instead, if published.
+   - **Single-purpose**: Keep the VM single-purpose (Hub only; do not co-locate CI runners or heavy workloads).
+
+2. **Install Docker Engine** from Docker's official apt repository (do not use distro-packaged forks):
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y ca-certificates curl
+   sudo install -m 0755 -d /etc/apt/keyrings
+   sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+   sudo chmod a+r /etc/apt/keyrings/docker.asc
+   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+   sudo apt-get update
+   sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+   ```
+   *(Note: Debian hosts use `https://download.docker.com/linux/debian` in both URLs instead of `ubuntu`; see [Docker's official install documentation](https://docs.docker.com/engine/install/).)*
+
+3. **Install Tailscale** using the official install script:
+   ```bash
+   curl -fsSL https://tailscale.com/install.sh | sh
+   ```
+   Join your tailnet interactively:
+   ```bash
+   sudo tailscale up
+   ```
+   Or for automated provisioning, use a pre-authenticated tagged auth key stored in a mode-`0600` file:
+   ```bash
+   sudo tailscale up --auth-key=file:/path/to/authkey
+   ```
+
+4. **Hardening**:
+   - **Provider firewall**: Close public SSH (port 22) and all inbound ports at the cloud provider firewall. Tailscale coordinates outbound connections, so inbound public ports are unnecessary.
+   - **SSH access**: Use Tailscale SSH (`sudo tailscale up --ssh`) or bind sshd exclusively to the tailnet interface (`ListenAddress <tailscale-ip>`).
+   - **Security updates**: Enable unattended-upgrades (`sudo apt-get install -y unattended-upgrades && sudo dpkg-reconfigure --priority=low unattended-upgrades`).
+
 ---
 
 ## 3. Operator auth (unchanged)
@@ -104,6 +152,10 @@ instead of Docker for the Hub process.
 Join a free Tailscale tailnet: install Tailscale on the VPS and on your
 operator devices, then edit ACL grants as in [OPERATOR-AUTH.md](OPERATOR-AUTH.md) (replace the
 example `dst` IP with your VPS Tailscale IP).
+
+### First login
+
+Once the Hub container is running, open `http://<CLAWCTL_LISTEN>/` from an authorized operator machine on your tailnet. Verify that the top bar displays your user identity and capability grants. For policy configuration and verification, see the [Operator authentication quick start](OPERATOR-AUTH.md#quick-start-english).
 
 ---
 
@@ -177,6 +229,21 @@ inspection can see them. Hub does not read that path.
 Pass a new `CLAWCTL_VERSION` when the agent bytes must change. Reusing a
 version string leaves the already seeded release in place.
 
+#### The CLAWCTL_VERSION trap
+
+`CLAWCTL_VERSION` defaults to `dev`. The initializer (`hub-data-init`) only copies agent bundles into `/var/lib/clawctl/agent-bootstrap/<version>/` when that version directory does **not** already exist on the volume. It **never** replaces or refreshes bundles for an already-seeded version string.
+
+If you rebuild or update the Hub while keeping `CLAWCTL_VERSION=dev` (or any reused version string), the running Hub will continue serving the old, stale agent bundles from the volume.
+
+Env files are not shell-expanded, so `CLAWCTL_VERSION=$(git rev-parse --short HEAD)` inside `hub.env` is taken literally. Put the value printed by `git rev-parse --short HEAD` into `hub.env` (e.g. `CLAWCTL_VERSION=d217deb`), or `export CLAWCTL_VERSION="$(git rev-parse --short HEAD)"` in the shell before compose:
+```bash
+# In shell before compose:
+export CLAWCTL_VERSION="$(git rev-parse --short HEAD)"
+
+# Or in hub.env (literal example):
+CLAWCTL_VERSION=d217deb
+```
+
 ### Backup / restore (volume)
 
 ```bash
@@ -186,6 +253,11 @@ docker run --rm -v clawctl-data:/data -v "$PWD:/backup" busybox \
   tar czf /backup/clawctl-data-$(date -u +%Y%m%dT%H%M%SZ).tar.gz -C /data .
 docker compose -f ops/docker/docker-compose.yml --env-file ops/docker/hub.env start hub
 ```
+
+> [!NOTE]
+> The Docker deployment pack has **no continuous replication** (Litestream replication to R2 is currently only configured in the Fly image; see [DEPLOY-FLY.md](DEPLOY-FLY.md)).
+> For Docker, backups rely on the stop-and-tar commands shown above. Always copy the resulting `.tar.gz` archive **off-host** (e.g. to off-site cloud storage or a remote backup server).
+> Test each archive: extract it into a scratch directory on another machine and run `sqlite3 clawctl.sqlite 'PRAGMA integrity_check;'` (expect `ok`). The built-in `clawctl-hub restore-drill` checks only the standalone SQLite backups the Hub writes itself.
 
 Bare-metal installs still use the paths under `~/.local/share/clawctl/` and
 `ops/upgrade-hub.sh` snapshots. Restore = replace volume contents / SQLite file
@@ -219,6 +291,10 @@ Self-report is not proof: the machine page timestamp is the receipt.
 The Go agent also accepts a literal Tailscale IPv6 hub URL on `enroll`. The shell installers accept Tailscale IPv4 and https hostnames.
 
 Evidence excerpts stay in SQLite. Bulky evidence uses the same Hub-hashed blob path as artifacts (`object_blobs`, kind `evidence`) when object storage is configured.
+
+### Moving agents to a new Hub
+
+To migrate already-enrolled agents to a new Hub, re-point their `--hub` origin, or roll over machine credentials, see [docs/MOVE-AGENTS.md](MOVE-AGENTS.md).
 
 ---
 
@@ -316,7 +392,7 @@ Not implemented:
 
 ---
 
-## 10. Security checklist
+## 11. Security checklist
 
 - [ ] `hub.env` mode `0600`, not committed
 - [ ] `notify.env` mode `0600`, not committed; `CLAWCTL_NOTIFY_ENV` set (or legacy `CLAWCTL_NOTIFY_CMD`)
@@ -328,9 +404,9 @@ Not implemented:
 
 ---
 
-## 11. Hub install contract
+## 12. Hub install contract
 
-The longer install diary this contract used to live in is a private working note and is not published here. The section below is what the repository test locks to `ops/install-hub.sh` and `ops/clawctl-hub.service`.
+This section documents the systemd installation contract for running Hub without Docker. The longer install diary this contract used to live in is a private working note and is not published here. The section below is what the repository test locks to `ops/install-hub.sh` and `ops/clawctl-hub.service`.
 
 ### 2.2 Hub
 
