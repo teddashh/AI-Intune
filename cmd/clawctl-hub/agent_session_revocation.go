@@ -42,7 +42,7 @@ func sweepOpenAgentSessionsOnStartup(st agentSessionStartupStore, logf func(stri
 	if err != nil {
 		return err
 	}
-	logf("Hub 已重新啟動：%d 個先前仍開著的終端工作階段已關閉", closed)
+	logf("hub restarted: closed %d terminal sessions left open by the previous run", closed)
 	return nil
 }
 

@@ -10,6 +10,8 @@ BIN_SRC=""
 STEP="preflight"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 SECRET_FILES=()
+REENROLL=0
+BACKUP_CONFIG=""
 
 usage() {
   cat <<'EOF'
@@ -24,17 +26,24 @@ Options:
   --token-file FILE                0600 file containing the enrollment token
   --tailscale-auth-key-file FILE   0600 file containing a Tailscale auth key
   --binary FILE                    clawctl-agent binary for this machine
+  --reenroll                       reenroll this machine to a new Hub (Linux only)
 EOF
 }
 
 fail() {
   echo "$1" >&2
+  if [[ -n "$BACKUP_CONFIG" && -f "$BACKUP_CONFIG" ]]; then
+    echo "Previous configuration backed up at: $BACKUP_CONFIG (see docs/MOVE-AGENTS.md, Rollback)" >&2
+  fi
   exit 1
 }
 
 on_error() {
   local rc=$?
   echo "Install failed: $STEP" >&2
+  if [[ -n "$BACKUP_CONFIG" && -f "$BACKUP_CONFIG" ]]; then
+    echo "Previous configuration backed up at: $BACKUP_CONFIG (see docs/MOVE-AGENTS.md, Rollback)" >&2
+  fi
   exit "$rc"
 }
 
@@ -139,6 +148,7 @@ while [[ $# -gt 0 ]]; do
     --token-file) [[ $# -ge 2 ]] || fail "--token-file requires a value"; TOKEN_FILE="$2"; shift 2 ;;
     --tailscale-auth-key-file) [[ $# -ge 2 ]] || fail "--tailscale-auth-key-file requires a value"; TAILSCALE_KEY_FILE="$2"; shift 2 ;;
     --binary) [[ $# -ge 2 ]] || fail "--binary requires a value"; BIN_SRC="$2"; shift 2 ;;
+    --reenroll) REENROLL=1; shift 1 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -449,7 +459,18 @@ PODMAN_ROOTLESS="$(systemd-run --user --wait --pipe --quiet --collect --service-
 [[ "$PODMAN_ROOTLESS" == "true" ]] || fail "rootless podman is not ready"
 
 STEP="agent enrollment"
-if [[ ! -f "$CONFIG_FILE" ]]; then
+CURRENT_HUB=""
+if [[ -f "$CONFIG_FILE" ]]; then
+  CURRENT_HUB="$(grep '"hub_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$CONFIG_FILE" | head -n 1 | sed -e 's/.*"hub_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')"
+fi
+
+BACKUP_CONFIG=""
+
+if [[ -f "$CONFIG_FILE" && "$REENROLL" == "0" ]]; then
+  if [[ -n "$CURRENT_HUB" && "$CURRENT_HUB" != "$HUB" ]]; then
+    fail "Machine is enrolled to a different Hub ($CURRENT_HUB). Run with --reenroll to move it to the new Hub."
+  fi
+elif [[ ! -f "$CONFIG_FILE" || "$REENROLL" == "1" ]]; then
   if [[ -n "$TOKEN_FILE" ]]; then
     private_secret_file "$TOKEN_FILE"
   elif [[ -n "$TOKEN" ]]; then
@@ -464,7 +485,29 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
   else
     fail "Enrollment token is required; use --token-file FILE"
   fi
-  "$BIN_FILE" enroll --hub "$HUB" --token-file "$TOKEN_FILE"
+
+  WAS_ACTIVE=0
+
+  if [[ -f "$CONFIG_FILE" && "$REENROLL" == "1" ]]; then
+    if systemctl is-active --quiet clawctl-agent.service 2>/dev/null; then
+      WAS_ACTIVE=1
+      sudo systemctl stop clawctl-agent.service || true
+    fi
+    BACKUP_CONFIG="$CONFIG_DIR/agent.json.pre-reenroll-$(date -u +%Y%m%dT%H%M%SZ)"
+    mv "$CONFIG_FILE" "$BACKUP_CONFIG"
+    chmod 0600 "$BACKUP_CONFIG"
+  fi
+
+  if ! "$BIN_FILE" enroll --hub "$HUB" --token-file "$TOKEN_FILE"; then
+    if [[ -n "$BACKUP_CONFIG" && -f "$BACKUP_CONFIG" ]]; then
+      mv "$BACKUP_CONFIG" "$CONFIG_FILE"
+      if [[ "$WAS_ACTIVE" == "1" ]]; then
+        sudo systemctl start clawctl-agent.service || true
+      fi
+      fail "Enrollment failed: previous configuration restored; the agent binary is now the new Hub's version, so rerun the old Hub's install-agent.sh (without --reenroll) to put back its matching binary."
+    fi
+    fail "Enrollment failed"
+  fi
 fi
 [[ -f "$CONFIG_FILE" && ! -L "$CONFIG_FILE" ]] || fail "Agent enrollment did not create its config"
 [[ "$(stat -c '%a' "$CONFIG_FILE")" == "600" ]] || fail "Agent config mode is not 0600"
@@ -504,3 +547,10 @@ AGENT_COUNT="$(ps -eo comm= | awk '$1=="clawctl-agent" { n++ } END { print n+0 }
 [[ "$AGENT_COUNT" == "1" ]] || fail "Expected one clawctl-agent process; found $AGENT_COUNT"
 
 echo "Managed: agent=$AGENT_VERSION tailscale=$TAILSCALE_IP service=active jobs=enabled"
+if [[ -n "${BACKUP_CONFIG:-}" ]]; then
+  echo ""
+  echo "Re-enrollment successful. The old configuration was backed up to:"
+  echo "  $BACKUP_CONFIG"
+  echo "To roll back, restore that file to $CONFIG_FILE and rerun the old Hub's install-agent.sh without --reenroll (see docs/MOVE-AGENTS.md)."
+  echo "Please remember to retire this machine on the old Hub."
+fi
