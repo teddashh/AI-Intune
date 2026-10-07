@@ -39,7 +39,7 @@ const (
 	orphanStagingSweepTimeout = 2 * time.Minute
 )
 
-var errUnsupported = errors.New("executor 不支援這種工作單")
+var errUnsupported = errors.New("unsupported job for executor")
 
 type executor interface {
 	Run(ctx context.Context, job model.JobResponse) ([]model.JobVerificationRequest, error)
@@ -76,15 +76,15 @@ func (e kindExecutor) withKind(kind string, exec executor) kindExecutor {
 
 func (e kindExecutor) Run(ctx context.Context, job model.JobResponse) ([]model.JobVerificationRequest, error) {
 	if err := validateUniqueJSONFields(job.Spec); err != nil {
-		return nil, &rejectError{Code: deploy.PreconditionFailed, Detail: "工作單 spec 欄位不可重複：" + err.Error()}
+		return nil, &rejectError{Code: deploy.PreconditionFailed, Detail: "duplicate job spec field: " + err.Error()}
 	}
 	kind, _, err := model.ParseJobSpec(job.Spec)
 	if err != nil {
-		return nil, &rejectError{Code: deploy.PreconditionFailed, Detail: "工作單 spec 不是合法 JSON：" + err.Error()}
+		return nil, &rejectError{Code: deploy.PreconditionFailed, Detail: "job spec is not valid JSON: " + err.Error()}
 	}
 	selected, ok := e.executors[kind]
 	if !ok || selected == nil {
-		return nil, fmt.Errorf("%w：沒有 kind=%q 的 executor", errUnsupported, kind)
+		return nil, fmt.Errorf("%w: no executor for kind=%q", errUnsupported, kind)
 	}
 	return selected.Run(ctx, job)
 }
@@ -115,10 +115,10 @@ func (e noopExecutor) Run(_ context.Context, job model.JobResponse) ([]model.Job
 		Kind string `json:"kind"`
 	}
 	if err := json.Unmarshal(job.Spec, &spec); err != nil {
-		return nil, fmt.Errorf("%w：noop spec 不是合法 JSON：%v", errUnsupported, err)
+		return nil, fmt.Errorf("%w: noop spec is not valid JSON: %v", errUnsupported, err)
 	}
 	if spec.Kind != "noop" {
-		return nil, fmt.Errorf("%w：noop executor 不接受 kind=%q", errUnsupported, spec.Kind)
+		return nil, fmt.Errorf("%w: noop executor does not accept kind=%q", errUnsupported, spec.Kind)
 	}
 	now := time.Now
 	if e.now != nil {
@@ -145,20 +145,20 @@ func (e deviceSyncExecutor) Run(_ context.Context, job model.JobResponse) ([]mod
 	if job.ResourceKind != model.DeviceSyncResourceKind || job.ResourceID != model.DeviceSyncResourceID ||
 		job.Irreversible || job.ExecutionTimeout < model.DeviceSyncMinTimeoutSeconds ||
 		job.ExecutionTimeout > model.DeviceSyncMaxTimeoutSeconds {
-		return nil, fmt.Errorf("%w：device-sync 只接受固定 resource、可逆標記與 timeout", errUnsupported)
+		return nil, fmt.Errorf("%w: device-sync accepts only fixed resource, reversible marker, and timeout", errUnsupported)
 	}
 	var spec model.DeviceSyncSpec
 	decoder := json.NewDecoder(bytes.NewReader(job.Spec))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&spec); err != nil {
-		return nil, fmt.Errorf("%w：device-sync spec 不是合法 v1 文件：%v", errUnsupported, err)
+		return nil, fmt.Errorf("%w: device-sync spec is not a valid v1 document: %v", errUnsupported, err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("%w：device-sync spec 帶有第二份 JSON", errUnsupported)
+		return nil, fmt.Errorf("%w: device-sync spec contains trailing JSON", errUnsupported)
 	}
 	if spec.Kind != model.DeviceSyncJobKind || spec.SchemaVersion != model.DeviceSyncSpecSchemaVersion {
-		return nil, fmt.Errorf("%w：device-sync 只接受固定 v1 spec", errUnsupported)
+		return nil, fmt.Errorf("%w: device-sync accepts only fixed v1 spec", errUnsupported)
 	}
 	now := time.Now
 	if e.now != nil {
@@ -253,11 +253,11 @@ func finishOpenJournal(file *os.File) (*os.File, error) {
 	}
 	if !info.Mode().IsRegular() {
 		_ = file.Close()
-		return nil, errors.New("水位日誌不是一般檔案")
+		return nil, errors.New("watermark journal is not a regular file")
 	}
 	if info.Size() > maxJournalBytes {
 		_ = file.Close()
-		return nil, fmt.Errorf("水位日誌超過 %d bytes", maxJournalBytes)
+		return nil, fmt.Errorf("watermark journal exceeds %d bytes", maxJournalBytes)
 	}
 	return file, nil
 }
@@ -284,10 +284,10 @@ func validateUniqueJSONFields(raw []byte) error {
 				}
 				key, ok := keyToken.(string)
 				if !ok {
-					return errors.New("JSON object key 不是字串")
+					return errors.New("JSON object key is not a string")
 				}
 				if _, exists := seen[key]; exists {
-					return fmt.Errorf("重複的 JSON 欄位 %q", key)
+					return fmt.Errorf("duplicate JSON key %q", key)
 				}
 				seen[key] = struct{}{}
 				if err := walk(); err != nil {
@@ -299,7 +299,7 @@ func validateUniqueJSONFields(raw []byte) error {
 				return err
 			}
 			if closing != json.Delim('}') {
-				return errors.New("JSON object 沒有正確結束")
+				return errors.New("unterminated JSON object")
 			}
 		case '[':
 			for decoder.More() {
@@ -312,10 +312,10 @@ func validateUniqueJSONFields(raw []byte) error {
 				return err
 			}
 			if closing != json.Delim(']') {
-				return errors.New("JSON array 沒有正確結束")
+				return errors.New("unterminated JSON array")
 			}
 		default:
-			return errors.New("JSON 結構不合法")
+			return errors.New("invalid JSON structure")
 		}
 		return nil
 	}
@@ -324,7 +324,7 @@ func validateUniqueJSONFields(raw []byte) error {
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return errors.New("JSON 含有多餘內容")
+			return errors.New("JSON contains trailing content")
 		}
 		return err
 	}
@@ -359,84 +359,84 @@ func loadWatermarkJournal(path string) (watermarkJournal, error) {
 		return watermarkJournal{}, err
 	}
 	if len(b) > maxJournalBytes {
-		return watermarkJournal{}, fmt.Errorf("水位日誌超過 %d bytes", maxJournalBytes)
+		return watermarkJournal{}, fmt.Errorf("watermark journal exceeds %d bytes", maxJournalBytes)
 	}
 	if err := validateUniqueJSONFields(b); err != nil {
-		return watermarkJournal{}, fmt.Errorf("水位日誌不是唯一 JSON 結構：%w", err)
+		return watermarkJournal{}, fmt.Errorf("watermark journal is not a single JSON structure: %w", err)
 	}
 	var doc journalDocument
 	decoder := json.NewDecoder(bytes.NewReader(b))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&doc); err != nil {
-		return watermarkJournal{}, fmt.Errorf("水位日誌不是有效 JSON：%w", err)
+		return watermarkJournal{}, fmt.Errorf("watermark journal is not valid JSON: %w", err)
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return watermarkJournal{}, errors.New("水位日誌含有多餘 JSON")
+		return watermarkJournal{}, errors.New("watermark journal contains trailing JSON")
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(b, &fields); err != nil || fields == nil {
-		return watermarkJournal{}, errors.New("水位日誌頂層不是 JSON object")
+		return watermarkJournal{}, errors.New("watermark journal top level is not a JSON object")
 	}
 
 	switch doc.SchemaVersion {
 	case 0:
 		if !hasExactJournalFields(fields, "max_seen", "max_applied") ||
 			doc.Resources != nil || doc.MaxSeen == nil || doc.MaxApplied == nil {
-			return watermarkJournal{}, errors.New("舊版水位日誌結構不完整")
+			return watermarkJournal{}, errors.New("legacy watermark journal structure incomplete")
 		}
 		watermarks := deploy.Watermarks{MaxSeen: *doc.MaxSeen, MaxApplied: *doc.MaxApplied}
 		if !validJournalWatermarks(watermarks) {
-			return watermarkJournal{}, errors.New("舊版水位日誌數值不合法")
+			return watermarkJournal{}, errors.New("legacy watermark journal values invalid")
 		}
 		journal.set(legacyOpenClawScope, watermarks)
 		return journal, nil
 	case journalSchemaVersion:
 		if !hasExactJournalFields(fields, "schema_version", "resources") ||
 			doc.MaxSeen != nil || doc.MaxApplied != nil || doc.Resources == nil {
-			return watermarkJournal{}, errors.New("水位日誌 v2 結構不完整")
+			return watermarkJournal{}, errors.New("watermark journal v2 structure incomplete")
 		}
 		if len(doc.Resources) > maxJournalKinds {
-			return watermarkJournal{}, fmt.Errorf("水位日誌超過 %d 種 resource kind", maxJournalKinds)
+			return watermarkJournal{}, fmt.Errorf("watermark journal exceeds %d resource kinds", maxJournalKinds)
 		}
 		resourceCount := 0
 		for kind, resources := range doc.Resources {
 			if !validWatermarkIdentity(kind, 128) || len(resources) == 0 {
-				return watermarkJournal{}, errors.New("水位日誌含有不合法的 resource kind")
+				return watermarkJournal{}, errors.New("watermark journal contains invalid resource kind")
 			}
 			resourceCount += len(resources)
 			if resourceCount > maxJournalResources {
-				return watermarkJournal{}, fmt.Errorf("水位日誌超過 %d 個 resource", maxJournalResources)
+				return watermarkJournal{}, fmt.Errorf("watermark journal exceeds %d resources", maxJournalResources)
 			}
 			for id, stored := range resources {
 				scope := resourceScope{Kind: kind, ID: id}
 				watermarks := deploy.Watermarks{MaxSeen: stored.MaxSeen, MaxApplied: stored.MaxApplied}
 				if !validResourceScope(scope) || !validJournalWatermarks(watermarks) {
-					return watermarkJournal{}, errors.New("水位日誌含有不合法的 resource 水位")
+					return watermarkJournal{}, errors.New("watermark journal contains invalid resource watermarks")
 				}
 				journal.set(scope, watermarks)
 			}
 		}
 		return journal, nil
 	default:
-		return watermarkJournal{}, fmt.Errorf("不支援的水位日誌 schema_version %d", doc.SchemaVersion)
+		return watermarkJournal{}, fmt.Errorf("unsupported watermark journal schema_version %d", doc.SchemaVersion)
 	}
 }
 
 func saveWatermarkJournal(path string, journal watermarkJournal) error {
 	if len(journal.resources) > maxJournalResources {
-		return fmt.Errorf("水位日誌超過 %d 個 resource", maxJournalResources)
+		return fmt.Errorf("watermark journal exceeds %d resources", maxJournalResources)
 	}
 	kindSet := make(map[string]struct{})
 	scopes := make([]resourceScope, 0, len(journal.resources))
 	for scope, watermarks := range journal.resources {
 		if !validResourceScope(scope) || !validJournalWatermarks(watermarks) {
-			return errors.New("水位日誌含有不合法的 resource 水位")
+			return errors.New("watermark journal contains invalid resource watermarks")
 		}
 		kindSet[scope.Kind] = struct{}{}
 		scopes = append(scopes, scope)
 	}
 	if len(kindSet) > maxJournalKinds {
-		return fmt.Errorf("水位日誌超過 %d 種 resource kind", maxJournalKinds)
+		return fmt.Errorf("watermark journal exceeds %d resource kinds", maxJournalKinds)
 	}
 	sort.Slice(scopes, func(i, k int) bool {
 		if scopes[i].Kind == scopes[k].Kind {
@@ -551,7 +551,7 @@ type jobsRunner struct {
 
 func startJobs(ctx context.Context, cfg config, nudge chan<- struct{}) {
 	if !cfg.JobsEnabled {
-		log.Printf("工作單迴圈未啟用（jobs_enabled=false）")
+		log.Printf("job runner loop disabled (jobs_enabled=false)")
 		return
 	}
 	home, err := os.UserHomeDir()
@@ -594,7 +594,7 @@ func runJobs(ctx context.Context, opts jobsOptions) {
 	r, err := newJobsRunner(opts)
 	if err != nil {
 		// ⚠ 日誌讀壞時整條迴圈不准啟動；當成零水位會容許降版。
-		log.Printf("工作單迴圈未啟動：%v", err)
+		log.Printf("job runner loop not started: %v", err)
 		return
 	}
 	r.run(ctx)
@@ -628,7 +628,7 @@ func newJobsRunner(opts jobsOptions) (*jobsRunner, error) {
 	}
 	w, err := loadWatermarkJournal(opts.JournalPath)
 	if err != nil {
-		return nil, fmt.Errorf("讀取水位日誌 %s 失敗：%w", opts.JournalPath, err)
+		return nil, fmt.Errorf("failed to read watermark journal %s: %w", opts.JournalPath, err)
 	}
 	return &jobsRunner{
 		hubURL:       strings.TrimRight(opts.HubURL, "/"),
@@ -668,7 +668,7 @@ func (r *jobsRunner) run(ctx context.Context) {
 	for ctx.Err() == nil {
 		job, ok, err := r.next(ctx)
 		if err != nil {
-			log.Printf("拉工作單失敗：%v", err)
+			log.Printf("failed to fetch next job: %v", err)
 			var sleepErr error
 			if jobPollShouldBackOff(err) {
 				r.pollFailures++
@@ -736,11 +736,11 @@ func (r *jobsRunner) next(ctx context.Context) (model.JobResponse, bool, error) 
 		return job, false, nil
 	case http.StatusOK:
 		if job.JobID == "" {
-			return job, false, errors.New("Hub 的 200 工作單沒有 job_id")
+			return job, false, errors.New("Hub returned 200 job without job_id")
 		}
 		return job, true, nil
 	default:
-		return job, false, fmt.Errorf("GET /v1/jobs/next 回了未預期的 HTTP %d", status)
+		return job, false, fmt.Errorf("GET /v1/jobs/next returned unexpected HTTP %d", status)
 	}
 }
 
@@ -757,7 +757,7 @@ func (r *jobsRunner) claim(ctx context.Context, job model.JobResponse) (time.Dur
 			return 0, nil
 		}
 		if err := validateJobLeaseReceipt(response.JobLeaseResponse, "", r.now()); err != nil {
-			log.Printf("工作單 %s 認領回應不完整，放棄這一輪：%v", job.JobID, err)
+			log.Printf("job %s claim response incomplete, abandoning round: %v", job.JobID, err)
 			return 0, nil
 		}
 		lease := response.JobLeaseResponse
@@ -765,7 +765,7 @@ func (r *jobsRunner) claim(ctx context.Context, job model.JobResponse) (time.Dur
 	}
 	var httpErr *hubHTTPError
 	if !errors.As(err, &httpErr) {
-		log.Printf("認領工作單 %s 失敗：%v", job.JobID, err)
+		log.Printf("failed to claim job %s: %v", job.JobID, err)
 		return 0, nil
 	}
 	if httpErr.StatusCode == http.StatusNotFound {
@@ -784,20 +784,20 @@ func (r *jobsRunner) claim(ctx context.Context, job model.JobResponse) (time.Dur
 			return wait, nil
 		}
 	}
-	log.Printf("認領工作單 %s 失敗：%v", job.JobID, err)
+	log.Printf("failed to claim job %s: %v", job.JobID, err)
 	return 0, nil
 }
 
 func validateJobLeaseReceipt(receipt model.JobLeaseResponse, expectedToken string, now time.Time) error {
 	if receipt.LeaseToken == "" || receipt.LeaseToken != strings.TrimSpace(receipt.LeaseToken) ||
 		strings.ContainsAny(receipt.LeaseToken, "\r\n\t ") || len(receipt.LeaseToken) > 200 {
-		return errors.New("缺少或不合法的 lease_token")
+		return errors.New("missing or invalid lease_token")
 	}
 	if expectedToken != "" && receipt.LeaseToken != expectedToken {
-		return errors.New("lease_token 與目前租約不符")
+		return errors.New("lease_token does not match current lease")
 	}
 	if receipt.LeaseExpiresAt.IsZero() || !receipt.LeaseExpiresAt.After(now) {
-		return errors.New("lease_expires_at 缺失或已到期")
+		return errors.New("lease_expires_at missing or already expired")
 	}
 	return nil
 }
@@ -806,14 +806,14 @@ func (r *jobsRunner) process(ctx context.Context, job model.JobResponse, lease m
 	scope := resourceScope{Kind: job.ResourceKind, ID: job.ResourceID}
 	if !validResourceScope(scope) {
 		r.reject(ctx, job.JobID, lease.LeaseToken, 1, deploy.PreconditionFailed,
-			"工作單 resource identity 不合法")
+			"invalid job resource identity")
 		return
 	}
 	revision := deploy.Revision(job.Revision)
 	currentWatermarks := r.watermarks.get(scope)
 	admission, nextWatermarks := deploy.Admit(currentWatermarks, revision)
 	if !admission.Accepted {
-		detail := fmt.Sprintf("%s/%s 已見過 revision %d，這張是 %d",
+		detail := fmt.Sprintf("%s/%s has seen revision %d, got %d",
 			scope.Kind, scope.ID, currentWatermarks.MaxSeen, revision)
 		r.reject(ctx, job.JobID, lease.LeaseToken, 1, deploy.StaleRevision, detail)
 		return
@@ -824,7 +824,7 @@ func (r *jobsRunner) process(ctx context.Context, job model.JobResponse, lease m
 	r.watermarks.set(scope, nextWatermarks)
 	// ⚠ MaxSeen 必須先可靠落地才可執行；吞掉寫入錯誤會讓重啟後的 43→42 降版成功。
 	if err := saveWatermarkJournal(r.journalPath, r.watermarks); err != nil {
-		detail := fmt.Sprintf("水位日誌寫不進去：%v", err)
+		detail := fmt.Sprintf("cannot write watermark journal: %v", err)
 		r.reject(ctx, job.JobID, lease.LeaseToken, 1, deploy.PreconditionFailed, detail)
 		return
 	}
@@ -832,13 +832,13 @@ func (r *jobsRunner) process(ctx context.Context, job model.JobResponse, lease m
 	// ⚠ Hub 沒釘 digest 的單不准進 executor；否則產物可在 activation 前被掉包。
 	if job.ArtifactDigest == "" {
 		r.reject(ctx, job.JobID, lease.LeaseToken, 1, deploy.PreconditionFailed,
-			"Hub 沒有釘 artifact digest")
+			"Hub has no pinned artifact digest")
 		return
 	}
 	_, artifact, err := model.ParseJobSpec(job.Spec)
 	if err != nil {
 		r.reject(ctx, job.JobID, lease.LeaseToken, 1, deploy.PreconditionFailed,
-			"工作單 spec 不是合法 JSON："+err.Error())
+			"job spec is not valid JSON: "+err.Error())
 		return
 	}
 	if artifact != nil && artifact.SHA256 != "" {
@@ -846,7 +846,7 @@ func (r *jobsRunner) process(ctx context.Context, job model.JobResponse, lease m
 			// ⚠ 擋的是工作單 digest 與 spec 指向不同 artifact：若放行，下一刀的
 			// executor 可能驗 A 的 digest、卻依 spec 啟用 B 的 tarball。
 			r.reject(ctx, job.JobID, lease.LeaseToken, 1, deploy.PreconditionFailed,
-				"單上釘的 digest 跟 spec 宣告的 artifact 不一致")
+				"pinned job digest does not match spec artifact")
 			return
 		}
 	} else {
@@ -856,7 +856,7 @@ func (r *jobsRunner) process(ctx context.Context, job model.JobResponse, lease m
 			// ⚠ 擋的是無 artifact 工作單在 Hub 編碼後內容已變，卻仍沿用舊 digest；
 			// 這會讓 agent 對一份沒有被 Hub 釘住的 spec 動作。
 			r.reject(ctx, job.JobID, lease.LeaseToken, 1, deploy.PreconditionFailed,
-				"沒有 artifact 的單，digest 該是 spec 本身的 sha256，對不上")
+				"job without artifact must have digest matching spec sha256")
 			return
 		}
 	}
@@ -881,7 +881,7 @@ func (r *jobsRunner) process(ctx context.Context, job model.JobResponse, lease m
 		OccurredAt: r.now().UTC(),
 	}
 	if err := r.post(jobCtx, r.jobURL(job.JobID, "/events"), start, &model.JobEventResponse{}, http.StatusAccepted); err != nil {
-		log.Printf("工作單 %s start 事件送不出去，放棄這張單：%v", job.JobID, err)
+		log.Printf("job %s start event failed to send, abandoning job: %v", job.JobID, err)
 		return
 	}
 
@@ -893,7 +893,7 @@ func (r *jobsRunner) process(ctx context.Context, job model.JobResponse, lease m
 	verifications, runErr := r.executor.Run(execCtx, job)
 	cancelExec()
 	if jobCtx.Err() != nil {
-		log.Printf("工作單 %s 的租約續租失敗或迴圈停止，executor 已取消", job.JobID)
+		log.Printf("job %s lease renewal failed or loop stopped, executor canceled", job.JobID)
 		return
 	}
 	if errors.Is(runErr, errUnsupported) {
@@ -920,7 +920,7 @@ func (r *jobsRunner) process(ctx context.Context, job model.JobResponse, lease m
 			verifications[i].VerifiedAt = r.now().UTC()
 		}
 		if err := r.post(jobCtx, r.jobURL(job.JobID, "/verifications"), verifications[i], nil, http.StatusCreated); err != nil {
-			log.Printf("工作單 %s 第 %d 筆驗證送不出去，放棄這張單：%v", job.JobID, i+1, err)
+			log.Printf("job %s verification %d failed to send, abandoning job: %v", job.JobID, i+1, err)
 			return
 		}
 	}
@@ -934,7 +934,7 @@ func (r *jobsRunner) process(ctx context.Context, job model.JobResponse, lease m
 		OccurredAt: r.now().UTC(),
 	}
 	if err := r.post(jobCtx, r.jobURL(job.JobID, "/events"), finish, &model.JobEventResponse{}, http.StatusAccepted); err != nil {
-		log.Printf("工作單 %s finish 事件送不出去，放棄這張單：%v", job.JobID, err)
+		log.Printf("job %s finish event failed to send, abandoning job: %v", job.JobID, err)
 		return
 	}
 
@@ -946,14 +946,14 @@ func (r *jobsRunner) process(ctx context.Context, job model.JobResponse, lease m
 		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict {
 			switch httpErr.APIError.Code {
 			case model.ErrLeaseInvalid:
-				log.Printf("工作單 %s complete 時租約已失效；回到拉單", job.JobID)
+				log.Printf("job %s lease expired at complete; returning to poll", job.JobID)
 				return
 			case model.ErrNoVerification:
-				log.Printf("錯誤：工作單 %s complete 回 NO_VERIFICATION；agent 明明已送驗證", job.JobID)
+				log.Printf("error: job %s complete returned NO_VERIFICATION despite agent submitting verifications", job.JobID)
 				return
 			}
 		}
-		log.Printf("工作單 %s complete 失敗：%v", job.JobID, err)
+		log.Printf("job %s complete failed: %v", job.JobID, err)
 		return
 	}
 	// Hub 已確認這張單到終態；現在就排一輪觀測，不讓切換前的舊安裝事實
@@ -965,20 +965,20 @@ func (r *jobsRunner) process(ctx context.Context, job model.JobResponse, lease m
 		r.watermarks.set(scope, deploy.Applied(r.watermarks.get(scope), revision))
 		if err := saveWatermarkJournal(r.journalPath, r.watermarks); err != nil {
 			// ⚠ Hub 已成功後不能倒打一耙；保留記憶體 MaxApplied，讓下一次成功寫日誌時帶上。
-			log.Printf("錯誤：工作單 %s 已 succeeded，但 MaxApplied 水位寫不進日誌：%v", job.JobID, err)
+			log.Printf("error: job %s succeeded, but MaxApplied watermark could not be written to journal: %v", job.JobID, err)
 		}
 		if retain, ok := r.executor.(retainer); ok {
 			for _, line := range retain.AfterSucceeded(jobCtx, job) {
-				log.Printf("工作單 %s 保留期：%s", job.JobID, line)
+				log.Printf("job %s retention: %s", job.JobID, line)
 			}
 		}
 	case deploy.Failed, deploy.ManualIntervention:
-		log.Printf("工作單 %s 完成為 %s；MaxApplied 不前進", job.JobID, state.State)
+		log.Printf("job %s finished as %s; MaxApplied not advanced", job.JobID, state.State)
 	default:
 		if state.Replayed {
-			log.Printf("工作單 %s 已由 Hub 回放終態 %s", job.JobID, state.State)
+			log.Printf("job %s terminal state %s replayed by Hub", job.JobID, state.State)
 		} else {
-			log.Printf("工作單 %s complete 回了未預期狀態 %q", job.JobID, state.State)
+			log.Printf("job %s complete returned unexpected state %q", job.JobID, state.State)
 		}
 	}
 }
@@ -995,12 +995,12 @@ func (r *jobsRunner) renew(ctx context.Context, cancel context.CancelFunc, jobID
 			model.JobLeaseRequest{LeaseToken: lease.LeaseToken}, &response, http.StatusOK)
 		if err != nil {
 			// ⚠ 續租非 200 後 executor 必須停；舊 fencing token 可能已經屬於別人。
-			log.Printf("工作單 %s 續租失敗，取消 executor：%v", jobID, err)
+			log.Printf("job %s renewal failed, canceling executor: %v", jobID, err)
 			cancel()
 			return
 		}
 		if err := validateJobLeaseReceipt(response, lease.LeaseToken, r.now()); err != nil {
-			log.Printf("工作單 %s 續租回應不完整，取消 executor：%v", jobID, err)
+			log.Printf("job %s renewal response incomplete, canceling executor: %v", jobID, err)
 			cancel()
 			return
 		}
@@ -1030,7 +1030,7 @@ func (r *jobsRunner) reject(ctx context.Context, jobID, leaseToken string, seq i
 	}
 	var state model.JobStateResponse
 	if err := r.post(ctx, r.jobURL(jobID, "/reject"), req, &state, http.StatusOK); err != nil {
-		log.Printf("工作單 %s 拒單回報失敗：%v", jobID, err)
+		log.Printf("job %s rejection report failed: %v", jobID, err)
 		return
 	}
 	r.nudgeObservation()
@@ -1052,7 +1052,7 @@ func (r *jobsRunner) post(ctx context.Context, endpoint string, body, out any, w
 		lastErr = err
 		if err == nil && status != wantStatus {
 			lastErr = &hubHTTPError{StatusCode: status,
-				APIError: model.APIError{Code: "UNEXPECTED_STATUS", Message: fmt.Sprintf("預期 HTTP %d", wantStatus)}}
+				APIError: model.APIError{Code: "UNEXPECTED_STATUS", Message: fmt.Sprintf("want HTTP %d", wantStatus)}}
 		}
 		if lastErr == nil || !retryableJobPost(lastErr) {
 			return lastErr

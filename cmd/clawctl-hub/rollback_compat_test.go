@@ -24,7 +24,7 @@ func TestRunRollbackCompatibilityUsesReadOnlyCapabilityMode(t *testing.T) {
 		[]string{"--rollback-compatible", "--db", path}, &out); err != nil {
 		t.Fatalf("rollback capability command: %v", err)
 	}
-	if !strings.Contains(out.String(), "rollback-compatible") || !strings.Contains(out.String(), "ledger 已靜止") ||
+	if !strings.Contains(out.String(), "rollback-compatible") || !strings.Contains(out.String(), "ledger is quiescent") ||
 		!strings.Contains(out.String(), "0 active deployments") {
 		t.Fatalf("capability output=%q", out.String())
 	}
@@ -33,7 +33,7 @@ func TestRunRollbackCompatibilityUsesReadOnlyCapabilityMode(t *testing.T) {
 func TestRunRollbackCompatibilityRejectsUnexpectedArguments(t *testing.T) {
 	var out bytes.Buffer
 	err := runRollbackCompatibility([]string{"--rollback-compatible", "extra"}, &out)
-	if err == nil || !strings.Contains(err.Error(), "多餘參數") {
+	if err == nil || !strings.Contains(err.Error(), "unexpected arguments") {
 		t.Fatalf("unexpected argument err=%v", err)
 	}
 }

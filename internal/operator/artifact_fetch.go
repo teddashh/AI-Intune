@@ -324,7 +324,7 @@ func (s *Service) recordArtifactFetchFallback(request ArtifactFetchApplyRequest,
 		entry.Detail = store.OperatorIdempotencyReplayPrefix + "原判決：artifact fetch 未再次入列"
 	}
 	if auditErr := s.store.RecordAudit(entry); auditErr != nil {
-		log.Printf("operator artifact fetch audit 寫入失敗 subject=%s: %v", entry.Subject, auditErr)
+		log.Printf("operator artifact fetch audit write failed subject=%s: %v", entry.Subject, auditErr)
 	}
 }
 

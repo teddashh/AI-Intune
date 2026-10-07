@@ -201,7 +201,7 @@ func (s *Service) EnrollmentReport(evaluatedAt time.Time) (EnrollmentReport, err
 	summaries := machineSummariesFrom(overview, evaluatedAt)
 	if len(summaries) > MaxEnrollmentReportMachines {
 		return EnrollmentReport{}, fmt.Errorf(
-			"%w: 名冊上有 %d 列，超過這份報告一次讀得了的 %d 列",
+			"%w: registry has %d rows, exceeding the %d rows this report can read at once",
 			ErrInvalidEnrollmentReport, len(summaries), MaxEnrollmentReportMachines)
 	}
 	tickets, err := s.store.PendingEnrollmentTickets(evaluatedAt)
@@ -283,7 +283,7 @@ func enrollmentRowFor(summary MachineSummary, ticket store.PendingEnrollmentTick
 		// 報到過卻沒有兌換時刻：這條路在協定上走不到——報到要有 agent 憑證，
 		// 而憑證是兌換那一刻才發的。與其挑一個階段把它蓋過去，不如停下來。
 		return EnrollmentRow{}, fmt.Errorf(
-			"%w: %s 報到過但名冊沒有兌換時刻", ErrInvalidEnrollmentReport, summary.MachineID)
+			"%w: %s reported but registry has no redeemed time", ErrInvalidEnrollmentReport, summary.MachineID)
 	case ticket.Pending > 0 && !ticket.NewestExpired:
 		row.Stage = EnrollmentWaiting
 	case ticket.Pending > 0:

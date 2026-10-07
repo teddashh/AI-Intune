@@ -18,37 +18,37 @@ func runMachineNotesSubcommand(ctx context.Context, argv []string, out, errOut i
 	fs := flag.NewFlagSet("machine notes", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub machine notes --machine <id> --set <notes> [--preview | --reason REASON --confirm-name CURRENT] [--json] [--hub-url URL]")
-		fmt.Fprintln(errOut, "  更新 Hub 名冊中的人工備註；--set '' 清除備註，機器設定與 agent 不變。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub machine notes --machine <id> --set <notes> [--preview | --reason REASON --confirm-name CURRENT] [--json] [--hub-url URL]")
+		fmt.Fprintln(errOut, "  Update manual notes in Hub roster; --set '' clears notes, machine settings and agent remain unchanged.")
 		fs.PrintDefaults()
 	}
 	machine := fs.String("machine", "", "machine_id")
-	set := fs.String("set", "", "新的 notes；空字串表示清除")
-	previewOnly := fs.Bool("preview", false, "只顯示影響，不寫入")
-	reason := fs.String("reason", "", "更新備註理由")
-	confirm := fs.String("confirm-name", "", "目前的 display_name")
-	key := fs.String("idempotency-key", "", "重送原 request 使用的 key")
-	previewDigest := fs.String("preview-digest", "", "重送原 request 使用的 preview digest")
+	set := fs.String("set", "", "new notes; empty string clears")
+	previewOnly := fs.Bool("preview", false, "preview impact only without applying")
+	reason := fs.String("reason", "", "reason for updating notes")
+	confirm := fs.String("confirm-name", "", "current display_name")
+	key := fs.String("idempotency-key", "", "key used to replay original request")
+	previewDigest := fs.String("preview-digest", "", "preview digest used to replay original request")
 	flags := addSettingsTransportFlags(fs)
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("machine notes: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("machine notes: positional arguments not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	seen := map[string]bool{}
 	fs.Visit(func(item *flag.Flag) { seen[item.Name] = true })
 	if strings.TrimSpace(*machine) == "" || !seen["set"] {
-		return errors.New("machine notes: --machine 與 --set 必填；--set '' 表示清除")
+		return errors.New("machine notes: --machine and --set are required; --set '' clears notes")
 	}
 	if *previewOnly && (*reason != "" || *confirm != "" || *key != "" || *previewDigest != "") {
-		return errors.New("machine notes: --preview 不接受 apply 專用的 reason、confirm 或 replay 參數")
+		return errors.New("machine notes: --preview does not accept apply-only reason, confirm, or replay arguments")
 	}
 	if !*previewOnly && (strings.TrimSpace(*reason) == "" || strings.TrimSpace(*confirm) == "") {
-		return errors.New("machine notes: 套用時 --reason 與 --confirm-name 必填")
+		return errors.New("machine notes: --reason and --confirm-name are required when applying")
 	}
 	if (*key == "") != (*previewDigest == "") {
-		return errors.New("machine notes: --idempotency-key 與 --preview-digest 必須一起提供")
+		return errors.New("machine notes: --idempotency-key and --preview-digest must be provided together")
 	}
 	explicit := seen["hub-url"]
 	client, err := machinesHTTPClient(*flags.hubURL, explicit, deps)
@@ -60,7 +60,7 @@ func runMachineNotesSubcommand(ctx context.Context, argv []string, out, errOut i
 		preview, err = client.PreviewMachineNotes(ctx, *machine,
 			operatorclient.MachineNotesPreviewRequest{Notes: *set})
 		if err != nil {
-			return fmt.Errorf("建立名冊備註預覽失敗：%w", err)
+			return fmt.Errorf("failed to create roster notes preview: %w", err)
 		}
 	}
 	if *previewOnly {
@@ -69,12 +69,12 @@ func runMachineNotesSubcommand(ctx context.Context, argv []string, out, errOut i
 		}
 		current, desired := terminalSafe(preview.CurrentNotes), terminalSafe(preview.Notes)
 		if current == "" {
-			current = "（無備註）"
+			current = "(no notes)"
 		}
 		if desired == "" {
-			desired = "（清除備註）"
+			desired = "(clear notes)"
 		}
-		fmt.Fprintf(out, "%s：%s → %s\n只更新 Hub 名冊；機器設定與 agent 不變。\npreview digest %s\n",
+		fmt.Fprintf(out, "%s: %s → %s\nHub roster only updated; machine settings and agent remain unchanged.\npreview digest %s\n",
 			terminalSafe(preview.DisplayName), current, desired, preview.PreviewDigest)
 		return nil
 	}
@@ -83,27 +83,27 @@ func runMachineNotesSubcommand(ctx context.Context, argv []string, out, errOut i
 		digest = preview.PreviewDigest
 		requestKey, err = operator.NewIdempotencyKey("cli-machine-notes")
 		if err != nil {
-			return fmt.Errorf("建立名冊備註 request key 失敗：%w", err)
+			return fmt.Errorf("failed to create roster notes request key: %w", err)
 		}
 	}
 	result, err := client.PutMachineNotes(ctx, *machine, requestKey, operatorclient.MachineNotesRequest{
 		Notes: *set, ConfirmDisplayName: *confirm, PreviewDigest: digest, Reason: *reason,
 	})
 	if err != nil {
-		return fmt.Errorf("更新名冊備註失敗：%w", err)
+		return fmt.Errorf("failed to update roster notes: %w", err)
 	}
 	if *flags.json {
 		return writeSettingsJSON(out, result)
 	}
 	if result.NotesPresent {
-		fmt.Fprintf(out, "%s（machine %s）的名冊備註已更新；機器設定與 agent 不變。\n",
+		fmt.Fprintf(out, "%s (machine %s) roster notes updated; machine settings and agent remain unchanged.\n",
 			terminalSafe(result.DisplayName), terminalSafe(result.MachineID))
 	} else {
-		fmt.Fprintf(out, "%s（machine %s）的名冊備註已清除；機器設定與 agent 不變。\n",
+		fmt.Fprintf(out, "%s (machine %s) roster notes cleared; machine settings and agent remain unchanged.\n",
 			terminalSafe(result.DisplayName), terminalSafe(result.MachineID))
 	}
 	if result.Replayed {
-		fmt.Fprintln(out, "這是原 request 的成功回放；名冊沒有再次變更。")
+		fmt.Fprintln(out, "This is a successful replay of the original request; roster was not changed again.")
 	}
 	return nil
 }

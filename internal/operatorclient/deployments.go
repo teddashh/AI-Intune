@@ -60,7 +60,7 @@ func (c *Client) Deployments(ctx context.Context, request operator.DeploymentLis
 
 func (c *Client) Deployment(ctx context.Context, deploymentID string) (operator.DeploymentDetailResult, error) {
 	if err := validateDeploymentClientIdentifier("deployment_id", deploymentID, 256); err != nil {
-		return operator.DeploymentDetailResult{}, errors.New("operator client: deployment_id 不可為空、含控制字元、dot segment 或斜線")
+		return operator.DeploymentDetailResult{}, errors.New("operator client: deployment_id cannot be empty, contain control characters, dot segments, or slashes")
 	}
 	req, err := c.newOperatorRequest(ctx, http.MethodGet,
 		"/v1/operator/deployments/"+url.PathEscape(deploymentID), nil)

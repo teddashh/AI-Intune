@@ -32,7 +32,7 @@ func (h *hub) handleListOperatorTickets(w http.ResponseWriter, r *http.Request) 
 		case errors.Is(err, store.ErrTicketReadTooBroad):
 			writeErr(w, http.StatusUnprocessableEntity, "TICKET_READ_TOO_BROAD", "票證使用量查詢超過安全成本上限；請縮短天數")
 		default:
-			log.Printf("讀取 operator tickets 失敗: %v", err)
+			log.Printf("failed to read operator tickets: %v", err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取票證使用量失敗")
 		}
 		return

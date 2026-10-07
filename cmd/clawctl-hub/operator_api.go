@@ -311,7 +311,7 @@ func (h *hub) handleListOperatorJobs(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "工作單 filter 或 cursor 不合法")
 			return
 		}
-		log.Printf("讀取 operator job list 失敗: %v", err)
+		log.Printf("failed to read operator job list: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 job list 失敗")
 		return
 	}
@@ -334,7 +334,7 @@ func (h *hub) handleGetOperatorJob(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "job_id 不合法")
 			return
 		}
-		log.Printf("讀取 operator job detail 失敗 job=%q: %v", r.PathValue("id"), err)
+		log.Printf("failed to read operator job detail job=%q: %v", r.PathValue("id"), err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 job detail 失敗")
 		return
 	}
@@ -358,7 +358,7 @@ func (h *hub) handleGetOperatorJobEvidence(w http.ResponseWriter, r *http.Reques
 		case errors.Is(err, operator.ErrInvalidJobRead):
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "job_id 或 limit 不合法")
 		default:
-			log.Printf("讀取 operator job evidence 失敗 job=%q: %v", r.PathValue("id"), err)
+			log.Printf("failed to read operator job evidence job=%q: %v", r.PathValue("id"), err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 job evidence 失敗")
 		}
 		return
@@ -413,7 +413,7 @@ func (h *hub) handleGetOperatorMachineEvidence(w http.ResponseWriter, r *http.Re
 		case errors.Is(err, operator.ErrInvalidMachineRead):
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "machine_id 或 limit 不合法")
 		default:
-			log.Printf("讀取 operator machine evidence 失敗 machine=%q: %v", r.PathValue("id"), err)
+			log.Printf("failed to read operator machine evidence machine=%q: %v", r.PathValue("id"), err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 machine evidence 失敗")
 		}
 		return
@@ -551,7 +551,7 @@ func (h *hub) handleListOperatorMachines(w http.ResponseWriter, r *http.Request)
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "machine filter 或 cursor 不合法")
 			return
 		}
-		log.Printf("讀取 operator machine list 失敗: %v", err)
+		log.Printf("failed to read operator machine list: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 machine list 失敗")
 		return
 	}
@@ -686,7 +686,7 @@ func (h *hub) handleGetOperatorMachine(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusNotFound, store.OperatorCodeMachineNotFound, "找不到這台機器")
 			return
 		}
-		log.Printf("讀取 operator machine detail 失敗 machine=%q: %v", machineID, err)
+		log.Printf("failed to read operator machine detail machine=%q: %v", machineID, err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 machine detail 失敗")
 		return
 	}
@@ -699,7 +699,7 @@ func (h *hub) handleGetOperatorPendingEnrollToken(w http.ResponseWriter, r *http
 	if err != nil {
 		status, code, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator pending enrollment token read 失敗 machine=%s: %v", r.PathValue("id"), err)
+			log.Printf("operator pending enrollment token read failed machine=%s: %v", r.PathValue("id"), err)
 		}
 		writeErr(w, status, code, detail)
 		return
@@ -725,7 +725,7 @@ func (h *hub) handlePreviewOperatorEnrollTokenRevocation(w http.ResponseWriter, 
 	if err != nil {
 		status, code, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator enrollment token revocation preview 失敗 machine=%s: %v", r.PathValue("id"), err)
+			log.Printf("operator enrollment token revocation preview failed machine=%s: %v", r.PathValue("id"), err)
 		}
 		writeErr(w, status, code, detail)
 		return
@@ -756,7 +756,7 @@ func (h *hub) handleCreateOperatorEnrollTokenRevocation(w http.ResponseWriter, r
 	if err != nil {
 		status, code, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator enrollment token revocation 失敗 machine=%s: %v", r.PathValue("id"), err)
+			log.Printf("operator enrollment token revocation failed machine=%s: %v", r.PathValue("id"), err)
 		}
 		var rejection *store.OperatorRequestError
 		if errors.As(err, &rejection) && rejection.Replayed {
@@ -793,7 +793,7 @@ func (h *hub) handlePreviewOperatorEnrollToken(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		status, code, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator enrollment token preview 失敗: %v", err)
+			log.Printf("operator enrollment token preview failed: %v", err)
 		}
 		writeErr(w, status, code, detail)
 		return
@@ -826,7 +826,7 @@ func (h *hub) handleCreateOperatorEnrollToken(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		status, code, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator enrollment token create 失敗: %v", err)
+			log.Printf("operator enrollment token create failed: %v", err)
 		}
 		var rejection *store.OperatorRequestError
 		if errors.As(err, &rejection) && rejection.Replayed {
@@ -874,7 +874,7 @@ func (h *hub) handleGetOperatorMachineChannel(w http.ResponseWriter, r *http.Req
 			writeErr(w, http.StatusNotFound, store.OperatorCodeMachineNotFound, "找不到這台機器")
 			return
 		}
-		log.Printf("讀取 operator machine channel 失敗 machine=%s: %v", r.PathValue("id"), err)
+		log.Printf("failed to read operator machine channel machine=%s: %v", r.PathValue("id"), err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 machine channel 失敗")
 		return
 	}
@@ -910,7 +910,7 @@ func (h *hub) handlePutOperatorMachineChannel(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		status, code, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator machine channel 失敗 machine=%s: %v", r.PathValue("id"), err)
+			log.Printf("operator machine channel failed machine=%s: %v", r.PathValue("id"), err)
 		}
 		var rejection *store.OperatorRequestError
 		if errors.As(err, &rejection) && rejection.Replayed {
@@ -1001,7 +1001,7 @@ func (h *hub) recordOperatorTransportRejection(r *http.Request, actor operator.A
 		"；canonical request digest 無法取得"
 	operator.ApplyActor(&entry, actor)
 	if err := h.store.RecordAudit(entry); err != nil {
-		log.Printf("⚠ operator transport rejection audit 寫不進去 action=%s code=%s: %v",
+		log.Printf("⚠ failed to write operator transport rejection audit action=%s code=%s: %v",
 			entry.Action, code, err)
 	}
 }

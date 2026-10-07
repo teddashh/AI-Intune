@@ -16,15 +16,15 @@ const upgradeProtocolReady = "upgrade-protocol-ready:v1 stopped-check=true ledge
 func runUpgradeProtocolCheck(argv []string, out io.Writer) error {
 	fs := flag.NewFlagSet("upgrade-protocol-check", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	capability := fs.Bool("upgrade-protocol-check", false, "確認 binary 支援完整 upgrade handoff protocol")
+	capability := fs.Bool("upgrade-protocol-check", false, "verify binary supports full upgrade handoff protocol")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if !*capability {
-		return errors.New("缺少 --upgrade-protocol-check")
+		return errors.New("missing --upgrade-protocol-check")
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("多餘參數：%s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	fmt.Fprintln(out, upgradeProtocolReady)
 	return nil
@@ -33,21 +33,21 @@ func runUpgradeProtocolCheck(argv []string, out io.Writer) error {
 func runUpgradeLedgerPathCheck(argv []string, out io.Writer) error {
 	fs := flag.NewFlagSet("upgrade-ledger-path-check", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	capability := fs.Bool("upgrade-ledger-path-check", false, "確認 upgrade ledger 與 SQLite sidecar 是 canonical owned unaliased files")
-	dbPath := fs.String("db", defaultDB(), "SQLite 檔位置")
+	capability := fs.Bool("upgrade-ledger-path-check", false, "verify upgrade ledger and SQLite sidecars are canonical owned unaliased files")
+	dbPath := fs.String("db", defaultDB(), "path to SQLite database")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if !*capability {
-		return errors.New("缺少 --upgrade-ledger-path-check")
+		return errors.New("missing --upgrade-ledger-path-check")
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("多餘參數：%s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	if err := ledgerlock.ValidateUpgradeTarget(*dbPath); err != nil {
 		return err
 	}
-	fmt.Fprintln(out, "upgrade ledger path：canonical parent、main DB 與現有 SQLite sidecars identity 已驗證")
+	fmt.Fprintln(out, "upgrade ledger path: canonical parent, main DB, and existing SQLite sidecars identity verified")
 	return nil
 }
 
@@ -58,20 +58,20 @@ func runUpgradeLedgerPathCheck(argv []string, out io.Writer) error {
 func runUpgradeStoppedCheck(ctx context.Context, argv []string, out io.Writer) error {
 	fs := flag.NewFlagSet("upgrade-stopped-check", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	capability := fs.Bool("upgrade-stopped-check", false, "確認受控 Hub unit 契約與 recursive cgroup 已完全停止")
-	dbPath := fs.String("db", defaultDB(), "SQLite 檔位置")
+	capability := fs.Bool("upgrade-stopped-check", false, "verify managed Hub unit contract and recursive cgroup are fully stopped")
+	dbPath := fs.String("db", defaultDB(), "path to SQLite database")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if !*capability {
-		return errors.New("缺少 --upgrade-stopped-check")
+		return errors.New("missing --upgrade-stopped-check")
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("多餘參數：%s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	if err := verifyManagedHubStoppedWithChecks(ctx, *dbPath, queryManagedHubStatus, verifyManagedHubCgroupEmpty); err != nil {
 		return err
 	}
-	fmt.Fprintln(out, "upgrade stopped proof：exact loaded unit、MainPID=0、inactive/dead、recursive cgroup empty")
+	fmt.Fprintln(out, "upgrade stopped proof: exact loaded unit, MainPID=0, inactive/dead, recursive cgroup empty")
 	return nil
 }

@@ -309,7 +309,7 @@ func TestMachineChannelNeedsNameAndRejectsNeverObservedMachine(t *testing.T) {
 	rec := postForm(t, s, "/machines/"+id+"/channel", url.Values{
 		"channel": {"stable"}, "confirm": {"sampleagent1"}, "expected_revision": {"0"}, "idempotency_key": {"never-observed"},
 	})
-	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "從沒回報過") {
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "machine has never reported") {
 		t.Fatalf("未觀測機器指派 channel = %d：%s", rec.Code, rec.Body.String())
 	}
 	if m, _ := st.GetMachine(id); m.Channel != "" {

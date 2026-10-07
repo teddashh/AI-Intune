@@ -54,7 +54,7 @@ func (c *Client) MachineEvidence(ctx context.Context, machineID string, limit in
 	if err := validateJobReadIdentifier("machine_id", machineID, 256); err != nil || !utf8.ValidString(machineID) ||
 		strings.Contains(machineID, "/") || machineID == "." || machineID == ".." {
 		return operator.MachineEvidenceResult{}, errors.New(
-			"operator client: machine_id 不可為空、含控制字元、dot segment 或斜線")
+			"operator client: machine_id cannot be empty, contain control characters, dot segments, or slashes")
 	}
 	effectiveLimit := limit
 	if effectiveLimit == 0 {

@@ -144,7 +144,7 @@ func TestReadinessCanRequireFreshMatchingPlatformEvidence(t *testing.T) {
 	}
 	wrong := valid
 	wrong.IdentityOS, wrong.IdentityArch = "macOS 15.7", "arm64"
-	if got := readinessPending(wrong, "machine-1", "v1", since, true); !strings.Contains(got, "平台不符") {
+	if got := readinessPending(wrong, "machine-1", "v1", since, true); !strings.Contains(got, "platform does not match") {
 		t.Fatalf("wrong platform evidence pending=%q", got)
 	}
 }

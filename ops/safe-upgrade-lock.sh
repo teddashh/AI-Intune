@@ -25,13 +25,13 @@ acquire_safe_lock() {
 	mkdir -p -- "$parent" || return 1
 	if [[ ! -d "$parent" || -L "$parent" || ! -O "$parent" ]] ||
 		! real_parent="$(/usr/bin/realpath -e -- "$parent")" || [[ "$real_parent" != "$parent" ]]; then
-		echo "✗ $label parent 不是目前使用者持有的 canonical non-symlink directory：$parent" >&2
+		echo "✗ $label parent is not a canonical non-symlink directory owned by current user: $parent" >&2
 		return 1
 	fi
 	if ! IFS='|' read -r parent_mode parent_uid < <(
 		/usr/bin/stat -c '%f|%u' -- "$parent" 2>/dev/null
 	) || ! (( (16#$parent_mode & 16#f000) == 16#4000 )) || [[ "$parent_uid" != "$EUID" ]]; then
-		echo "✗ 無法確認 $label parent 的 type/owner：$parent" >&2
+		echo "✗ cannot verify type/owner of $label parent: $parent" >&2
 		return 1
 	fi
 	if (( (16#$parent_mode & 16#3f) != 0 )); then
@@ -43,7 +43,7 @@ acquire_safe_lock() {
 				/usr/bin/stat -c '%f|%u' -- "$parent" 2>/dev/null
 			) || (( (16#$parent_mode & 16#f000) != 16#4000 )) ||
 			(( (16#$parent_mode & 16#3f) != 0 )) || [[ "$parent_uid" != "$EUID" ]]; then
-			echo "✗ $label parent 無法安全收斂為 private directory：$parent" >&2
+			echo "✗ $label parent cannot be safely converged to a private directory: $parent" >&2
 			return 1
 		fi
 	fi
@@ -56,28 +56,28 @@ acquire_safe_lock() {
 	if ! IFS='|' read -r file_mode file_uid file_links file_inode < <(
 		/usr/bin/stat -c '%f|%u|%h|%d:%i' -- "$path" 2>/dev/null
 	); then
-		echo "✗ 無法 lstat $label；沒有開啟或修改目標：$path" >&2
+		echo "✗ cannot lstat $label; target not opened or modified: $path" >&2
 		return 1
 	fi
 	if ! (( (16#$file_mode & 16#f000) == 16#8000 )) ||
 		[[ "$file_uid" != "$EUID" || "$file_links" != 1 ]]; then
-		echo "✗ $label 必須是目前使用者持有、link count=1 的 regular file；拒絕 symlink/hardlink：$path" >&2
+		echo "✗ $label must be a regular file owned by current user with link count=1; rejecting symlink/hardlink: $path" >&2
 		return 1
 	fi
 
 	# <> opens without O_TRUNC. Compare the opened object with a second lstat of
 	# the path before chmod/flock, so a path swap cannot redirect either action.
 	if ! exec {lock_fd}<>"$path"; then
-		echo "✗ 無法以 no-truncate 模式開啟 $label：$path" >&2
+		echo "✗ cannot open $label in no-truncate mode: $path" >&2
 		return 1
 	fi
 	if ! safe_lock_path_matches_fd "$path" "$lock_fd"; then
-		echo "✗ $label path/fd identity 在開啟時改變；拒絕 chmod/flock：$path" >&2
+		echo "✗ $label path/fd identity changed during open; rejecting chmod/flock: $path" >&2
 		exec {lock_fd}>&-
 		return 1
 	fi
 	if ! chmod 0600 -- "/proc/self/fd/$lock_fd"; then
-		echo "✗ 無法把已驗證的 $label fd 設為 0600：$path" >&2
+		echo "✗ cannot set verified $label fd to 0600: $path" >&2
 		exec {lock_fd}>&-
 		return 1
 	fi
@@ -88,7 +88,7 @@ acquire_safe_lock() {
 	# A second identity check after flock closes the pathname-swap window: a
 	# second process must not be able to lock a replacement inode at this path.
 	if ! safe_lock_path_matches_fd "$path" "$lock_fd"; then
-		echo "✗ $label path/fd identity 在 flock 後改變；拒絕繼續：$path" >&2
+		echo "✗ $label path/fd identity changed after flock; refusing to continue: $path" >&2
 		exec {lock_fd}>&-
 		return 1
 	fi

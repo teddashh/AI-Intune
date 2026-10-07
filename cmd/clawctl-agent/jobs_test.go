@@ -301,7 +301,7 @@ func TestResourceWatermarksAreIndependentAndPersisted(t *testing.T) {
 		completeStep(nodeJob.JobID, string(deploy.Succeeded), false),
 		nextStep(oldOpenClaw), claimStep(oldOpenClaw.JobID),
 		rejectStep(oldOpenClaw.JobID, deploy.StaleRevision, 1,
-			"openclaw/openclaw 已見過 revision 43，這張是 42"), noJobStep(),
+			"openclaw/openclaw has seen revision 43, got 42"), noJobStep(),
 	}, path, nil)
 
 	journal := readWatermarkJournal(t, path)
@@ -323,7 +323,7 @@ func TestInvalidJobResourceIdentityRejectsBeforeJournalMutation(t *testing.T) {
 		return nil, nil
 	})
 	runScript(t, []hubStep{nextStep(job), claimStep(job.JobID),
-		rejectStep(job.JobID, deploy.PreconditionFailed, 1, "resource identity 不合法"), noJobStep()}, path, exec)
+		rejectStep(job.JobID, deploy.PreconditionFailed, 1, "invalid job resource identity"), noJobStep()}, path, exec)
 	if calls.Load() != 0 {
 		t.Fatalf("不合法 resource identity 呼叫了 executor %d 次", calls.Load())
 	}
@@ -450,7 +450,7 @@ func TestStaleRevisionRejectsWithoutCallingExecutor(t *testing.T) {
 	})
 	job := testJob("stale", 42, "noop", specDigest([]byte(`{"kind":"noop"}`)))
 	runScript(t, []hubStep{nextStep(job), claimStep(job.JobID),
-		rejectStep(job.JobID, deploy.StaleRevision, 1, "已見過 revision 43，這張是 42"), noJobStep()}, journal, exec)
+		rejectStep(job.JobID, deploy.StaleRevision, 1, "has seen revision 43, got 42"), noJobStep()}, journal, exec)
 	if calls.Load() != 0 {
 		t.Errorf("舊版仍呼叫 executor %d 次", calls.Load())
 	}
@@ -477,7 +477,7 @@ func TestMaxSeenMovesBeforeExecutionSo43FailureStillRejects42(t *testing.T) {
 		}),
 		eventStep(job43.JobID, "finish", 2), completeStep(job43.JobID, string(deploy.Failed), false),
 		nextStep(job42), claimStep(job42.JobID),
-		rejectStep(job42.JobID, deploy.StaleRevision, 1, "已見過 revision 43，這張是 42"), noJobStep(),
+		rejectStep(job42.JobID, deploy.StaleRevision, 1, "has seen revision 43, got 42"), noJobStep(),
 	}
 	runScript(t, steps, journal, exec)
 	if calls.Load() != 1 {
@@ -497,7 +497,7 @@ func TestMissingPinnedDigestIsPreconditionFailure(t *testing.T) {
 		return nil, nil
 	})
 	runScript(t, []hubStep{nextStep(job), claimStep(job.JobID),
-		rejectStep(job.JobID, deploy.PreconditionFailed, 1, "Hub 沒有釘 artifact digest"), noJobStep()}, journal, exec)
+		rejectStep(job.JobID, deploy.PreconditionFailed, 1, "Hub has no pinned artifact digest"), noJobStep()}, journal, exec)
 	if calls.Load() != 0 {
 		t.Errorf("沒釘 digest 還呼叫 executor %d 次", calls.Load())
 	}
@@ -513,7 +513,7 @@ func TestNoArtifactDigestMismatchIsPreconditionFailure(t *testing.T) {
 	})
 	runScript(t, []hubStep{nextStep(job), claimStep(job.JobID),
 		rejectStep(job.JobID, deploy.PreconditionFailed, 1,
-			"沒有 artifact 的單，digest 該是 spec 本身的 sha256，對不上"), noJobStep()}, journal, exec)
+			"job without artifact must have digest matching spec sha256"), noJobStep()}, journal, exec)
 	if calls.Load() != 0 {
 		t.Errorf("noop digest 對不上還呼叫 executor %d 次", calls.Load())
 	}
@@ -530,7 +530,7 @@ func TestArtifactDigestMismatchIsPreconditionFailure(t *testing.T) {
 	})
 	runScript(t, []hubStep{nextStep(job), claimStep(job.JobID),
 		rejectStep(job.JobID, deploy.PreconditionFailed, 1,
-			"單上釘的 digest 跟 spec 宣告的 artifact 不一致"), noJobStep()}, journal, exec)
+			"pinned job digest does not match spec artifact"), noJobStep()}, journal, exec)
 	if calls.Load() != 0 {
 		t.Errorf("artifact digest 對不上還呼叫 executor %d 次", calls.Load())
 	}
@@ -542,7 +542,7 @@ func TestJournalWriteFailureIsNeverSwallowed(t *testing.T) {
 	job := testJob("writefail", 9, "noop", specDigest([]byte(`{"kind":"noop"}`)))
 	var calls atomic.Int64
 	hub := &scriptedHub{t: t, steps: []hubStep{nextStep(job), claimStep(job.JobID),
-		rejectStep(job.JobID, deploy.PreconditionFailed, 1, "水位日誌寫不進去"), noJobStep()}}
+		rejectStep(job.JobID, deploy.PreconditionFailed, 1, "cannot write watermark journal"), noJobStep()}}
 	server := newHubServer(t, hub)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -597,7 +597,7 @@ func TestUnsupportedExecutorRejectsInsteadOfPostingFailedVerification(t *testing
 	job := testJob("unsupported", 10, "other", specDigest([]byte(`{"kind":"other"}`)))
 	runScript(t, []hubStep{
 		nextStep(job), claimStep(job.JobID), eventStep(job.JobID, "start", 1),
-		rejectStep(job.JobID, deploy.PreconditionFailed, 2, `沒有 kind="other" 的 executor`), noJobStep(),
+		rejectStep(job.JobID, deploy.PreconditionFailed, 2, `no executor for kind="other"`), noJobStep(),
 	}, journal, nil)
 }
 
@@ -811,9 +811,9 @@ func TestJournalWriteFailureStillAdvancesMaxSeenInMemory(t *testing.T) {
 	var calls atomic.Int64
 	hub := &scriptedHub{t: t, steps: []hubStep{
 		nextStep(job43), claimStep(job43.JobID),
-		rejectStep(job43.JobID, deploy.PreconditionFailed, 1, "水位日誌寫不進去"),
+		rejectStep(job43.JobID, deploy.PreconditionFailed, 1, "cannot write watermark journal"),
 		nextStep(job42), claimStep(job42.JobID),
-		rejectStep(job42.JobID, deploy.StaleRevision, 1, "已見過 revision 43，這張是 42"),
+		rejectStep(job42.JobID, deploy.StaleRevision, 1, "has seen revision 43, got 42"),
 		noJobStep(),
 	}}
 	server := newHubServer(t, hub)
@@ -903,7 +903,7 @@ func TestTerminalRejectNudgesObservationExactlyOnce(t *testing.T) {
 	nudge := make(chan struct{}, 4)
 	runScriptWithNudge(t, []hubStep{
 		nextStep(job), claimStep(job.JobID),
-		rejectStep(job.JobID, deploy.StaleRevision, 1, "已見過 revision 46，這張是 45"), noJobStep(),
+		rejectStep(job.JobID, deploy.StaleRevision, 1, "has seen revision 46, got 45"), noJobStep(),
 	}, journal, nil, nudge)
 	if got := len(nudge); got != 1 {
 		t.Errorf("rejected 後 nudge=%d；要恰好 1", got)

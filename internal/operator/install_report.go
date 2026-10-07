@@ -360,7 +360,7 @@ func (s *Service) InstallReport(evaluatedAt time.Time) (InstallReport, error) {
 	machines := installMachinesFrom(machineSummariesFrom(overview, evaluatedAt))
 	if len(machines) > MaxInstallReportMachines {
 		return InstallReport{}, fmt.Errorf(
-			"%w: 分母裡有 %d 台，超過這份報告一次讀得了的 %d 台",
+			"%w: denominator has %d machines, exceeding the %d machines this report can read at once",
 			ErrInvalidInstallReport, len(machines), MaxInstallReportMachines)
 	}
 	intents, err := s.store.FleetInstallIntents()
@@ -402,7 +402,7 @@ func (s *Service) InstallReport(evaluatedAt time.Time) (InstallReport, error) {
 	resources := installResourceKeys(resolved)
 	if len(resources) > MaxInstallReportResources {
 		return InstallReport{}, fmt.Errorf(
-			"%w: 機隊上有 %d 個被指派過的資源，超過這份報告一次讀得了的 %d 個",
+			"%w: fleet has %d assigned resources, exceeding the %d resources this report can read at once",
 			ErrInvalidInstallReport, len(resources), MaxInstallReportResources)
 	}
 

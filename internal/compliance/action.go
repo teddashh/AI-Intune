@@ -72,10 +72,10 @@ func ActionEffect(kind ActionKind) string {
 
 func (a Action) validate() error {
 	if _, ok := actionOrder[a.Kind]; !ok {
-		return fmt.Errorf("%w: 不認得動作 %q", ErrInvalid, string(a.Kind))
+		return fmt.Errorf("%w: unknown action %q", ErrInvalid, string(a.Kind))
 	}
 	if a.GraceSeconds < 0 || a.GraceSeconds > MaxGraceSeconds {
-		return fmt.Errorf("%w: grace_seconds 是 %d，可用範圍是 0–%d 秒",
+		return fmt.Errorf("%w: grace_seconds is %d, allowed range is 0-%d seconds",
 			ErrInvalid, a.GraceSeconds, MaxGraceSeconds)
 	}
 	return nil

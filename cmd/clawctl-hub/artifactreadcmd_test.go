@@ -315,7 +315,7 @@ func TestArtifactReadCLIRejectsAmbiguousAndInvalidArgumentsBeforeIO(t *testing.T
 	if err := runArtifactReadCommandWithDeps(t.Context(), []string{"list", "--help"}, &out, &help, deps); !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("help err=%v", err)
 	}
-	for _, want := range []string{"artifact list", "artifact show", "available_unverified", "list 驗證 metadata", "show 驗證 SHA-256", "--hub-url", "--db"} {
+	for _, want := range []string{"artifact list", "artifact show", "available_unverified", "list verifies metadata", "show verifies SHA-256", "--hub-url", "--db"} {
 		if !strings.Contains(help.String(), want) {
 			t.Fatalf("artifact help missing %q: %s", want, help.String())
 		}

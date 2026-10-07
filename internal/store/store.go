@@ -701,7 +701,7 @@ LIMIT 1`).Scan(&kind, &id, &revision, &count, &desiredIDs)
 	if err != nil {
 		return fmt.Errorf("store: scan desired state resource revision: %w", err)
 	}
-	return fmt.Errorf("%w: 資源 %s:%s 的 revision %d 有 %d 筆 desired state [%s]；這個 Hub 開不了這份帳本，要恢復服務請用舊 Hub",
+	return fmt.Errorf("%w: resource %s:%s revision %d has %d desired state entries [%s]; this Hub cannot open this ledger, use the previous Hub to restore service",
 		ErrDesiredResourceRevisionConflict, kind, id, revision, count, desiredIDs)
 }
 
@@ -783,7 +783,7 @@ func CheckRollbackCompatible(path string) error {
 		}
 	}
 	if activeDeployments != 0 || nonTerminalJobs != 0 || activeArtifactFetches != 0 {
-		return fmt.Errorf("%w：還有 %d 個 active deployments（running/paused）、%d 個非終態 jobs、%d 個 active artifact fetches（queued/running）；先讓 ledger 靜止再換版",
+		return fmt.Errorf("%w: %d active deployments (running/paused), %d non-terminal jobs, %d active artifact fetches (queued/running) remaining; quiesce the ledger before changing versions",
 			ErrRollbackNotQuiescent, activeDeployments, nonTerminalJobs, activeArtifactFetches)
 	}
 	return nil
@@ -1285,7 +1285,7 @@ WHERE machine_id = ?`,
 	if n, _ := res.RowsAffected(); n == 0 {
 		// 票綁的名冊列不見了（有人手動刪了資料）。這時候寧可讓報到失敗，
 		// 也不要無聲地生一個沒人宣告過的身分出來。
-		return "", "", fmt.Errorf("store: 這張票綁定的名冊列 %s 不存在", machineID)
+		return "", "", fmt.Errorf("store: registry row %s bound to this ticket does not exist", machineID)
 	}
 	if _, err := tx.Exec(
 		`UPDATE enrollment_tokens SET used_at = ?, used_by = ? WHERE token_hash = ? AND used_at IS NULL`,
@@ -3314,7 +3314,7 @@ func (s *Store) artifactFacts(machineID, displayName string, now time.Time) []st
 	if obs, err := s.latestBySubject(machineID, KindArtifact, now); err != nil {
 		// ⚠ 讀不到要出聲。安靜地當作「沒量到」會讓所有期望都變成
 		// 「還沒量到」的 advisory，而那看起來很像「才剛裝好」。
-		log.Printf("讀不到 %s 的產出物量測，這一輪無法判定期望：%v", displayName, err)
+		log.Printf("cannot read artifact measurements for %s, unable to determine expectations this round: %v", displayName, err)
 	} else {
 		for _, o := range obs {
 			artifactRows[o.Subject] = o
@@ -3333,7 +3333,7 @@ func (s *Store) artifactFacts(machineID, displayName string, now time.Time) []st
 	eventInvalid := map[string]bool{}
 	eventRows := map[string]observation{}
 	if obs, err := s.latestBySubject(machineID, KindEvents, now); err != nil {
-		log.Printf("讀不到 %s 的事件流量測，這一輪無法判定事件期望：%v", displayName, err)
+		log.Printf("cannot read event stream measurements for %s, unable to determine event expectations this round: %v", displayName, err)
 	} else {
 		for _, o := range obs {
 			eventRows[o.Subject] = o

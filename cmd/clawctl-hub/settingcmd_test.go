@@ -37,22 +37,22 @@ func TestSettingsCLIPublishesAssignsAndReadsTheBoard(t *testing.T) {
 	const reason = "PRIVATE_SETTING_CLI_REASON"
 
 	empty := runSettingsCLI(t, deps, "list")
-	if !strings.Contains(empty, "預設：check-in 120s、observation 600s") ||
-		!strings.Contains(empty, "尚未發佈任何設定原則") ||
+	if !strings.Contains(empty, "defaults: check-in 120s, observation 600s") ||
+		!strings.Contains(empty, "(no setting policies published yet)") ||
 		!strings.Contains(empty, "機器從未報到") {
 		t.Fatalf("空盤面=%q", empty)
 	}
 
 	preview := runSettingsCLI(t, deps, "publish", "--policy", "fast-fleet",
 		"--checkin", "60s", "--observation", "5m", "--preview")
-	if !strings.Contains(preview, "revision 0 → 1") || !strings.Contains(preview, "影響 0 台") ||
-		!strings.Contains(preview, "去掉 --preview") {
+	if !strings.Contains(preview, "revision 0 → 1") || !strings.Contains(preview, "affects 0 machines") ||
+		!strings.Contains(preview, "without --preview") {
 		t.Fatalf("發佈預覽=%q", preview)
 	}
 
 	published := runSettingsCLI(t, deps, "publish", "--policy", "fast-fleet",
 		"--checkin", "60s", "--observation", "5m", "--reason", reason)
-	if !strings.Contains(published, "fast-fleet revision 1 已發佈") ||
+	if !strings.Contains(published, "fast-fleet revision 1 published") ||
 		!strings.Contains(published, "settings assign --scope machine") ||
 		strings.Contains(published, reason) {
 		t.Fatalf("發佈輸出=%q", published)
@@ -61,20 +61,20 @@ func TestSettingsCLIPublishesAssignsAndReadsTheBoard(t *testing.T) {
 	// 同一組值再發一次不會產生新 revision。
 	same := runSettingsCLI(t, deps, "publish", "--policy", "fast-fleet",
 		"--checkin", "60s", "--observation", "5m", "--reason", reason)
-	if !strings.Contains(same, "仍是 revision 1") {
+	if !strings.Contains(same, "is still revision 1") {
 		t.Fatalf("重複發佈輸出=%q", same)
 	}
 
 	assignPreview := runSettingsCLI(t, deps, "assign", "--scope", "machine",
 		"--scope-id", f.machine.id, "--policy", "fast-fleet", "--revision", "1", "--preview")
-	if !strings.Contains(assignPreview, "尚未指派（跑預設值）") ||
-		!strings.Contains(assignPreview, "fast-fleet@1") || !strings.Contains(assignPreview, "影響 1 台") {
+	if !strings.Contains(assignPreview, "unassigned (running defaults)") ||
+		!strings.Contains(assignPreview, "fast-fleet@1") || !strings.Contains(assignPreview, "affects 1 machines") {
 		t.Fatalf("指派預覽=%q", assignPreview)
 	}
 
 	assigned := runSettingsCLI(t, deps, "assign", "--scope", "machine",
 		"--scope-id", f.machine.id, "--policy", "fast-fleet", "--revision", "1", "--reason", reason)
-	if !strings.Contains(assigned, "已指派 fast-fleet@1") ||
+	if !strings.Contains(assigned, "assigned fast-fleet@1") ||
 		!strings.Contains(assigned, "settings list") || strings.Contains(assigned, reason) {
 		t.Fatalf("指派輸出=%q", assigned)
 	}

@@ -66,7 +66,7 @@ func run(args []string, in io.Reader, out, errOut io.Writer) error {
 		return nil
 	case "call":
 		if len(rest) != 2 && len(rest) != 3 {
-			fmt.Fprintln(errOut, "usage: clawctl-operator call <tool> [json]")
+			fmt.Fprintln(errOut, "Usage: clawctl-operator call <tool> [json]")
 			return errUsage
 		}
 		var raw json.RawMessage

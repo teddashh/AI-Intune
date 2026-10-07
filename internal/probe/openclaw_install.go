@@ -75,9 +75,9 @@ func parseGatewayExecStart(raw string) (parsedExecStart, error) {
 	}
 	if len(candidates) == 0 {
 		if strings.TrimSpace(raw) == "" {
-			return parsedExecStart{}, errors.New("ExecStart 是空字串")
+			return parsedExecStart{}, errors.New("ExecStart is empty")
 		}
-		return parsedExecStart{}, fmt.Errorf("ExecStart 找不到 argv[] 原文：%s", raw)
+		return parsedExecStart{}, fmt.Errorf("ExecStart cannot find raw argv[]: %s", raw)
 	}
 
 	// 四台的 gateway unit 都是 Type=simple、一條 ExecStart（2026-09-06 實測）。
@@ -99,7 +99,7 @@ func parseGatewayExecStart(raw string) (parsedExecStart, error) {
 			return p, nil
 		}
 	}
-	return p, fmt.Errorf("ExecStart 不是 node …/dist/index.js 的形狀：%s", argv)
+	return p, fmt.Errorf("ExecStart is not shaped like node .../dist/index.js: %s", argv)
 }
 
 // discoverInstall 只讀 systemd、套件目錄、/proc 與檔案系統統計。
@@ -219,7 +219,7 @@ func readPackageVersion(path string) (string, error) {
 		return "", err
 	}
 	if len(b) > maxPackageJSON {
-		return "", fmt.Errorf("package.json 超過 %d bytes 上限", maxPackageJSON)
+		return "", fmt.Errorf("package.json exceeds %d bytes limit", maxPackageJSON)
 	}
 	var p struct {
 		Version string `json:"version"`
@@ -228,7 +228,7 @@ func readPackageVersion(path string) (string, error) {
 		return "", err
 	}
 	if strings.TrimSpace(p.Version) == "" {
-		return "", errors.New("version 欄位是空的")
+		return "", errors.New("version field is empty")
 	}
 	return strings.TrimSpace(p.Version), nil
 }

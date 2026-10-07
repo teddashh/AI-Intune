@@ -52,7 +52,7 @@ func artifactsDirFor(dbPath string) string {
 
 func cmdArtifact(argv []string) {
 	if len(argv) == 0 {
-		fmt.Fprintln(os.Stderr, "用法：clawctl-hub artifact fetch|list|show [參數]")
+		fmt.Fprintln(os.Stderr, "Usage: clawctl-hub artifact fetch|list|show [flags]")
 		os.Exit(2)
 	}
 	switch argv[0] {
@@ -64,7 +64,7 @@ func cmdArtifact(argv []string) {
 			log.Fatal(terminalSafe(err.Error()))
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "未知的子指令：artifact %s（有 fetch、list、show）\n", argv[0])
+		fmt.Fprintf(os.Stderr, "unknown subcommand: artifact %s (available: fetch, list, show)\n", argv[0])
 		os.Exit(2)
 	}
 }
@@ -83,55 +83,55 @@ func fetchArtifact(ctx context.Context, artifactsDir, target, registry string, m
 		return artifactSidecar{}, false, err
 	}
 	if maxBytes <= 0 || maxBytes == int64(^uint64(0)>>1) {
-		return artifactSidecar{}, false, fmt.Errorf("--max-bytes 要大於 0，拿到 %d", maxBytes)
+		return artifactSidecar{}, false, fmt.Errorf("--max-bytes must be greater than 0, got %d", maxBytes)
 	}
 	metadata, err := fetchNPMMetadata(ctx, registry, name, version)
 	if err != nil {
 		return artifactSidecar{}, false, err
 	}
 	if metadata.Version != version {
-		return artifactSidecar{}, false, fmt.Errorf("registry 回的 version 是 %q，不是要求的 %q", metadata.Version, version)
+		return artifactSidecar{}, false, fmt.Errorf("registry returned version %q, expected %q", metadata.Version, version)
 	}
 	if metadata.Name != "" && metadata.Name != name {
-		return artifactSidecar{}, false, fmt.Errorf("registry 回的套件名是 %q，不是要求的 %q", metadata.Name, name)
+		return artifactSidecar{}, false, fmt.Errorf("registry returned package name %q, expected %q", metadata.Name, name)
 	}
 	if metadata.Dist.Tarball == "" || metadata.Dist.Integrity == "" {
-		return artifactSidecar{}, false, errors.New("registry metadata 缺少 dist.tarball 或 dist.integrity")
+		return artifactSidecar{}, false, errors.New("registry metadata missing dist.tarball or dist.integrity")
 	}
 	expectedSHA512, err := decodeSHA512Integrity(metadata.Dist.Integrity)
 	if err != nil {
-		return artifactSidecar{}, false, fmt.Errorf("registry 的 dist.integrity 不合法：%w", err)
+		return artifactSidecar{}, false, fmt.Errorf("invalid registry dist.integrity: %w", err)
 	}
 
 	// 已收下的 sidecar 是 Hub 上一次親自量測的紀錄。metadata 的版本、URL 與
 	// sha512 宣告都沒變，而且對應 tarball 的大小也還在，就不再抓一次。
 	if cached, ok, err := findCachedArtifact(artifactsDir, name, version, metadata.Dist.Tarball,
 		metadata.Dist.Integrity); err != nil {
-		return artifactSidecar{}, false, fmt.Errorf("檢查既有 artifact：%w", err)
+		return artifactSidecar{}, false, fmt.Errorf("check existing artifact: %w", err)
 	} else if ok {
 		return cached, true, nil
 	}
 
 	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
-		return artifactSidecar{}, false, fmt.Errorf("建立 artifacts 目錄：%w", err)
+		return artifactSidecar{}, false, fmt.Errorf("create artifacts directory: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metadata.Dist.Tarball, nil)
 	if err != nil {
-		return artifactSidecar{}, false, fmt.Errorf("建立 tarball request：%w", err)
+		return artifactSidecar{}, false, fmt.Errorf("create tarball request: %w", err)
 	}
 	resp, err := artifactHTTPClient.Do(req)
 	if err != nil {
-		return artifactSidecar{}, false, fmt.Errorf("下載 tarball：%w", err)
+		return artifactSidecar{}, false, fmt.Errorf("download tarball: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
-		return artifactSidecar{}, false, fmt.Errorf("下載 tarball 回了 HTTP %d", resp.StatusCode)
+		return artifactSidecar{}, false, fmt.Errorf("download tarball returned HTTP %d", resp.StatusCode)
 	}
 
 	tmp, err := os.CreateTemp(artifactsDir, ".artifact-*.tmp")
 	if err != nil {
-		return artifactSidecar{}, false, fmt.Errorf("建立 artifact 暫存檔：%w", err)
+		return artifactSidecar{}, false, fmt.Errorf("create artifact temporary file: %w", err)
 	}
 	tmpPath := tmp.Name()
 	keepTmp := false
@@ -146,21 +146,21 @@ func fetchArtifact(ctx context.Context, artifactsDir, target, registry string, m
 	written, copyErr := io.Copy(io.MultiWriter(tmp, sha512Hash, sha256Hash),
 		io.LimitReader(resp.Body, maxBytes+1))
 	if copyErr != nil {
-		return artifactSidecar{}, false, fmt.Errorf("下載 tarball：%w", copyErr)
+		return artifactSidecar{}, false, fmt.Errorf("download tarball: %w", copyErr)
 	}
 	if written > maxBytes {
-		return artifactSidecar{}, false, fmt.Errorf("tarball 超過 --max-bytes=%d，已在 %d bytes 中止", maxBytes, written)
+		return artifactSidecar{}, false, fmt.Errorf("tarball exceeds --max-bytes=%d, aborted at %d bytes", maxBytes, written)
 	}
 	if subtle.ConstantTimeCompare(sha512Hash.Sum(nil), expectedSHA512) != 1 {
 		// ⚠ 擋的是 registry 宣告的 sha512 與實際下載位元組不同；留下檔案會讓
 		// 一個下載損壞或被動過的 tarball 冒充成 Hub 已量測並接受的 artifact。
-		return artifactSidecar{}, false, fmt.Errorf("sha512 對不上 registry 的 dist.integrity；拒收下載的 tarball")
+		return artifactSidecar{}, false, fmt.Errorf("sha512 does not match registry dist.integrity; rejecting downloaded tarball")
 	}
 	if err := tmp.Sync(); err != nil {
-		return artifactSidecar{}, false, fmt.Errorf("同步 artifact 暫存檔：%w", err)
+		return artifactSidecar{}, false, fmt.Errorf("sync artifact temporary file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return artifactSidecar{}, false, fmt.Errorf("關閉 artifact 暫存檔：%w", err)
+		return artifactSidecar{}, false, fmt.Errorf("close artifact temporary file: %w", err)
 	}
 	sha256Hex := hex.EncodeToString(sha256Hash.Sum(nil))
 	record := artifactSidecar{
@@ -173,22 +173,22 @@ func fetchArtifact(ctx context.Context, artifactsDir, target, registry string, m
 	newTarball := false
 	if info, statErr := os.Lstat(destination); statErr == nil {
 		if !info.Mode().IsRegular() {
-			return artifactSidecar{}, false, fmt.Errorf("artifact 目的地不是普通檔案：%s", destination)
+			return artifactSidecar{}, false, fmt.Errorf("artifact destination is not a regular file: %s", destination)
 		}
 		if !artifact.FileHasSHA256(destination, sha256Hex) {
 			// artifacts 是 Hub 自己的資料；同名檔若已經不再符合檔名所宣告的
 			// sha256，就用這次通過上游 sha512 的完整下載原子替換。
 			if err := os.Rename(tmpPath, destination); err != nil {
-				return artifactSidecar{}, false, fmt.Errorf("替換損壞的 artifact：%w", err)
+				return artifactSidecar{}, false, fmt.Errorf("replace corrupted artifact: %w", err)
 			}
 			keepTmp = true
 			newTarball = true
 		}
 	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return artifactSidecar{}, false, fmt.Errorf("檢查 artifact 目的地：%w", statErr)
+		return artifactSidecar{}, false, fmt.Errorf("check artifact destination: %w", statErr)
 	} else {
 		if err := os.Rename(tmpPath, destination); err != nil {
-			return artifactSidecar{}, false, fmt.Errorf("放入 artifact：%w", err)
+			return artifactSidecar{}, false, fmt.Errorf("place artifact: %w", err)
 		}
 		keepTmp = true
 		newTarball = true
@@ -205,7 +205,7 @@ func fetchArtifact(ctx context.Context, artifactsDir, target, registry string, m
 func parseArtifactTarget(target string) (string, string, error) {
 	name, version, ok := strings.Cut(target, "@")
 	if !ok || name != "openclaw" || version == "" || strings.Contains(version, "@") {
-		return "", "", fmt.Errorf("artifact 要寫成 openclaw@<version>，拿到 %q", target)
+		return "", "", fmt.Errorf("artifact must be formatted as openclaw@<version>, got %q", target)
 	}
 	return name, version, nil
 }
@@ -214,21 +214,21 @@ func fetchNPMMetadata(ctx context.Context, registry, name, version string) (npmV
 	endpoint := strings.TrimRight(registry, "/") + "/" + url.PathEscape(name) + "/" + url.PathEscape(version)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return npmVersionMetadata{}, fmt.Errorf("建立 registry request：%w", err)
+		return npmVersionMetadata{}, fmt.Errorf("create registry request: %w", err)
 	}
 	resp, err := artifactHTTPClient.Do(req)
 	if err != nil {
-		return npmVersionMetadata{}, fmt.Errorf("讀 registry metadata：%w", err)
+		return npmVersionMetadata{}, fmt.Errorf("read registry metadata: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
-		return npmVersionMetadata{}, fmt.Errorf("registry metadata 回了 HTTP %d", resp.StatusCode)
+		return npmVersionMetadata{}, fmt.Errorf("registry metadata returned HTTP %d", resp.StatusCode)
 	}
 	var metadata npmVersionMetadata
 	dec := json.NewDecoder(io.LimitReader(resp.Body, 4<<20))
 	if err := dec.Decode(&metadata); err != nil {
-		return npmVersionMetadata{}, fmt.Errorf("解析 registry metadata：%w", err)
+		return npmVersionMetadata{}, fmt.Errorf("parse registry metadata: %w", err)
 	}
 	return metadata, nil
 }
@@ -236,14 +236,14 @@ func fetchNPMMetadata(ctx context.Context, registry, name, version string) (npmV
 func decodeSHA512Integrity(integrity string) ([]byte, error) {
 	encoded, ok := strings.CutPrefix(integrity, "sha512-")
 	if !ok || encoded == "" {
-		return nil, errors.New("只接受 sha512-<base64>")
+		return nil, errors.New("only sha512-<base64> is supported")
 	}
 	b, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		b, err = base64.RawStdEncoding.DecodeString(encoded)
 	}
 	if err != nil || len(b) != sha512.Size {
-		return nil, errors.New("sha512 base64 解碼後不是 64 bytes")
+		return nil, errors.New("sha512 base64 decoded size is not 64 bytes")
 	}
 	return b, nil
 }
@@ -252,12 +252,12 @@ func writeArtifactSidecar(dir string, record artifactSidecar) error {
 	// 不做 HTML 轉義：sidecar 是人會 cat 來看的檔，engines 的 ">=22.19.0" 要是原文。
 	b, err := marshalCompactNoEscape(record)
 	if err != nil {
-		return fmt.Errorf("編碼 artifact sidecar：%w", err)
+		return fmt.Errorf("encode artifact sidecar: %w", err)
 	}
 	b = append(b, '\n')
 	tmp, err := os.CreateTemp(dir, ".sidecar-*.tmp")
 	if err != nil {
-		return fmt.Errorf("建立 sidecar 暫存檔：%w", err)
+		return fmt.Errorf("create sidecar temporary file: %w", err)
 	}
 	tmpPath := tmp.Name()
 	keep := false
@@ -268,16 +268,16 @@ func writeArtifactSidecar(dir string, record artifactSidecar) error {
 		}
 	}()
 	if _, err := tmp.Write(b); err != nil {
-		return fmt.Errorf("寫入 artifact sidecar：%w", err)
+		return fmt.Errorf("write artifact sidecar: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
-		return fmt.Errorf("同步 artifact sidecar：%w", err)
+		return fmt.Errorf("sync artifact sidecar: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("關閉 artifact sidecar：%w", err)
+		return fmt.Errorf("close artifact sidecar: %w", err)
 	}
 	if err := os.Rename(tmpPath, filepath.Join(dir, record.SHA256+".json")); err != nil {
-		return fmt.Errorf("放入 artifact sidecar：%w", err)
+		return fmt.Errorf("place artifact sidecar: %w", err)
 	}
 	keep = true
 	return nil
@@ -350,6 +350,6 @@ func (h *hub) handleGetArtifact(w http.ResponseWriter, r *http.Request, machineI
 		return
 	}
 	if _, err := io.Copy(w, f); err != nil {
-		log.Printf("串流 artifact %s 失敗：%v", digest, err)
+		log.Printf("streaming artifact %s failed: %v", digest, err)
 	}
 }

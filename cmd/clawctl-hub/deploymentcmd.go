@@ -24,8 +24,8 @@ import (
 
 func cmdDeployment(argv []string) {
 	if len(argv) == 0 {
-		fmt.Fprintln(os.Stderr, "用法：clawctl-hub deployment preview|create|list|show|continue|retry|abandon")
-		log.Fatal("deployment: 必須指定 subcommand")
+		fmt.Fprintln(os.Stderr, "Usage: clawctl-hub deployment preview|create|list|show|continue|retry|abandon")
+		log.Fatal("deployment: must specify subcommand")
 	}
 	switch argv[0] {
 	case "preview", "list", "show":
@@ -37,7 +37,7 @@ func cmdDeployment(argv []string) {
 			log.Fatal(terminalSafe(err.Error()))
 		}
 	default:
-		log.Fatalf("未知的 deployment 子指令 %q", argv[0])
+		log.Fatalf("unknown deployment subcommand %q", argv[0])
 	}
 }
 
@@ -64,7 +64,7 @@ func runDeploymentReadCommandWithDeps(ctx context.Context, argv []string, out, e
 	deps machineCommandDeps,
 ) error {
 	if len(argv) == 0 {
-		return errors.New("deployment read: 必須指定 list、show 或 preview")
+		return errors.New("deployment read: must specify list, show, or preview")
 	}
 	switch argv[0] {
 	case "list":
@@ -74,14 +74,14 @@ func runDeploymentReadCommandWithDeps(ctx context.Context, argv []string, out, e
 	case "preview":
 		return runDeploymentPreviewCommand(ctx, argv[1:], out, errOut, deps)
 	default:
-		return fmt.Errorf("deployment read: 不認得 subcommand %q", argv[0])
+		return fmt.Errorf("deployment read: unrecognized subcommand %q", argv[0])
 	}
 }
 
 func addDeploymentReadTransportFlags(fs *flag.FlagSet) (hubURL, dbPath *string, jsonOutput *bool) {
-	hubURL = fs.String("hub-url", "", "HTTP operator API base URL（省略時自動發現）")
-	dbPath = fs.String("db", "", "stopped-service direct DB break-glass 的既有 SQLite 檔位置")
-	jsonOutput = fs.Bool("json", false, "輸出 stable operator JSON DTO")
+	hubURL = fs.String("hub-url", "", "HTTP operator API base URL (discovered automatically when omitted)")
+	dbPath = fs.String("db", "", "path to existing SQLite file for stopped-service direct DB break-glass")
+	jsonOutput = fs.Bool("json", false, "output stable operator JSON DTO")
 	return hubURL, dbPath, jsonOutput
 }
 
@@ -89,13 +89,13 @@ func deploymentReadTransportFromFlags(fs *flag.FlagSet, hubURL, dbPath string, j
 	seen := make(map[string]bool)
 	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
 	if seen["hub-url"] && seen["db"] {
-		return deploymentReadTransport{}, errors.New("deployment read: --hub-url（HTTP mode）與 --db（direct mode）不可同時明示")
+		return deploymentReadTransport{}, errors.New("deployment read: --hub-url (HTTP mode) and --db (direct mode) cannot both be specified")
 	}
 	if seen["hub-url"] && (strings.TrimSpace(hubURL) == "" || hubURL != strings.TrimSpace(hubURL)) {
-		return deploymentReadTransport{}, errors.New("deployment read: --hub-url 不可為空或含首尾空白")
+		return deploymentReadTransport{}, errors.New("deployment read: --hub-url cannot be empty or contain leading/trailing whitespace")
 	}
 	if seen["db"] && (strings.TrimSpace(dbPath) == "" || dbPath != strings.TrimSpace(dbPath)) {
-		return deploymentReadTransport{}, errors.New("deployment read: --db 不可為空或含首尾空白")
+		return deploymentReadTransport{}, errors.New("deployment read: --db cannot be empty or contain leading/trailing whitespace")
 	}
 	return deploymentReadTransport{hubURL: hubURL, dbPath: dbPath, json: jsonOutput, explicit: seen}, nil
 }
@@ -106,17 +106,17 @@ func runDeploymentListCommand(ctx context.Context, argv []string, out, errOut io
 	fs := flag.NewFlagSet("deployment list", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub deployment list [filters] [--json] [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "  正常模式走 HTTP operator API；--db 僅供 Hub 完全停止時的 fenced break-glass。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub deployment list [filters] [--json] [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "  Normal mode uses HTTP operator API; --db is only for fenced break-glass when Hub is completely stopped.")
 		fs.PrintDefaults()
 	}
 	hubURL, dbPath, jsonOutput := addDeploymentReadTransportFlags(fs)
-	channel := fs.String("channel", "", "只看 canary 或 stable")
-	stuck := fs.String("stuck", "", "只看 stuck（true）或 non-stuck（false）deployment")
-	limit := fs.Int("limit", operator.DefaultDeploymentReadLimit, "每頁最多幾張（1..100）")
-	cursor := fs.String("cursor", "", "上一頁回傳的 opaque next cursor")
+	channel := fs.String("channel", "", "filter to canary or stable")
+	stuck := fs.String("stuck", "", "filter to stuck (true) or non-stuck (false) deployments")
+	limit := fs.Int("limit", operator.DefaultDeploymentReadLimit, "maximum deployments per page (1..100)")
+	cursor := fs.String("cursor", "", "opaque next cursor returned by previous page")
 	var stateValues repeatedDeploymentStates
-	fs.Var(&stateValues, "state", "只看 running、paused 或 finished；可重複")
+	fs.Var(&stateValues, "state", "filter to running, paused, or finished; can be repeated")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
@@ -125,15 +125,15 @@ func runDeploymentListCommand(ctx context.Context, argv []string, out, errOut io
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("deployment list: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("deployment list: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	if transport.explicit["channel"] {
 		if *channel != "canary" && *channel != "stable" {
-			return errors.New("deployment list: --channel 只接受 canary 或 stable")
+			return errors.New("deployment list: --channel only accepts canary or stable")
 		}
 	}
 	if *limit < 1 || *limit > operator.MaxDeploymentReadLimit {
-		return fmt.Errorf("deployment list: --limit 必須介於 1 與 %d", operator.MaxDeploymentReadLimit)
+		return fmt.Errorf("deployment list: --limit must be between 1 and %d", operator.MaxDeploymentReadLimit)
 	}
 	if transport.explicit["cursor"] {
 		if err := validateDeploymentReadCLIValue("cursor", *cursor, 2048); err != nil {
@@ -144,7 +144,7 @@ func runDeploymentListCommand(ctx context.Context, argv []string, out, errOut io
 	seenStates := make(map[string]bool, len(stateValues))
 	for _, state := range stateValues {
 		if (state != store.DeploymentRunning && state != store.DeploymentPaused && state != store.DeploymentFinished) || seenStates[state] {
-			return fmt.Errorf("deployment list: --state %q 不是 canonical state 或重複", state)
+			return fmt.Errorf("deployment list: --state %q is not a canonical state or is duplicated", state)
 		}
 		seenStates[state] = true
 		request.States = append(request.States, state)
@@ -157,7 +157,7 @@ func runDeploymentListCommand(ctx context.Context, argv []string, out, errOut io
 		case "false":
 			value = false
 		default:
-			return errors.New("deployment list: --stuck 只接受 true 或 false")
+			return errors.New("deployment list: --stuck only accepts true or false")
 		}
 		request.Stuck = &value
 	}
@@ -170,7 +170,7 @@ func runDeploymentListCommand(ctx context.Context, argv []string, out, errOut io
 	}
 	result, err := client.Deployments(ctx, request)
 	if err != nil {
-		return fmt.Errorf("讀取 deployment list 失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read deployment list (HTTP operator API): %w", err)
 	}
 	return writeDeploymentList(out, result, transport.json, "HTTP operator API")
 }
@@ -181,8 +181,8 @@ func runDeploymentShowCommand(ctx context.Context, argv []string, out, errOut io
 	fs := flag.NewFlagSet("deployment show", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub deployment show [--json] [--hub-url URL | --db PATH] <deployment-id>")
-		fmt.Fprintln(errOut, "  正常模式走 HTTP operator API；--db 僅供 Hub 完全停止時的 fenced break-glass。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub deployment show [--json] [--hub-url URL | --db PATH] <deployment-id>")
+		fmt.Fprintln(errOut, "  Normal mode uses HTTP operator API; --db is only for fenced break-glass when Hub is completely stopped.")
 		fs.PrintDefaults()
 	}
 	hubURL, dbPath, jsonOutput := addDeploymentReadTransportFlags(fs)
@@ -199,15 +199,15 @@ func runDeploymentShowCommand(ctx context.Context, argv []string, out, errOut io
 	}
 	if id == "" {
 		if fs.NArg() != 1 {
-			return errors.New("deployment show: 必須提供且只提供一個 deployment-id")
+			return errors.New("deployment show: exactly one deployment-id must be provided")
 		}
 		id = fs.Arg(0)
 	} else if fs.NArg() != 0 {
-		return errors.New("deployment show: 只接受一個 deployment-id")
+		return errors.New("deployment show: only one deployment-id is accepted")
 	}
 	if err := validateDeploymentReadCLIValue("deployment-id", id, 256); err != nil ||
 		strings.Contains(id, "/") || id == "." || id == ".." {
-		return errors.New("deployment show: deployment-id 不可含首尾空白、控制字元、dot segment 或斜線，且長度不可超過 256 bytes")
+		return errors.New("deployment show: deployment-id cannot contain leading/trailing whitespace, control characters, dot segments, or slashes, and length cannot exceed 256 bytes")
 	}
 	if transport.explicit["db"] {
 		return runDeploymentShowDirect(ctx, id, transport, out, deps)
@@ -218,7 +218,7 @@ func runDeploymentShowCommand(ctx context.Context, argv []string, out, errOut io
 	}
 	result, err := client.Deployment(ctx, id)
 	if err != nil {
-		return fmt.Errorf("讀取 deployment detail 失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read deployment detail (HTTP operator API): %w", err)
 	}
 	return writeDeploymentDetail(out, result, transport.json, "HTTP operator API")
 }
@@ -229,17 +229,17 @@ func runDeploymentPreviewCommand(ctx context.Context, argv []string, out, errOut
 	fs := flag.NewFlagSet("deployment preview", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub deployment preview --channel canary|stable --version VERSION [--artifact SHA256] [--batch N] [--timeout SECONDS] [--irreversible] [--json] [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "  正常模式走 HTTP operator API；--db 僅供 Hub 完全停止時的 fenced break-glass。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub deployment preview --channel canary|stable --version VERSION [--artifact SHA256] [--batch N] [--timeout SECONDS] [--irreversible] [--json] [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "  Normal mode uses HTTP operator API; --db is only for fenced break-glass when Hub is completely stopped.")
 		fs.PrintDefaults()
 	}
 	hubURL, dbPath, jsonOutput := addDeploymentReadTransportFlags(fs)
-	channel := fs.String("channel", "", "canary 或 stable")
-	version := fs.String("version", "", "OpenClaw 版本")
-	artifactSHA := fs.String("artifact", "", "指定 artifact SHA-256（64 個小寫 hex）")
-	batch := fs.Int("batch", operator.DefaultDeploymentBatchSize, "後續每批台數（1 到 5）。第一批永遠是 1 台；省略或 1 代表後面也是 1 台")
-	timeout := fs.Int("timeout", operator.DefaultDeploymentTimeout, "執行逾時（秒）")
-	irreversible := fs.Bool("irreversible", false, "失敗不可逆")
+	channel := fs.String("channel", "", "canary or stable")
+	version := fs.String("version", "", "OpenClaw version")
+	artifactSHA := fs.String("artifact", "", "artifact SHA-256 (64 lowercase hex)")
+	batch := fs.Int("batch", operator.DefaultDeploymentBatchSize, "machine count per subsequent batch (1 to 5); first batch is always 1 machine; omitted or 1 means subsequent batches are also 1 machine")
+	timeout := fs.Int("timeout", operator.DefaultDeploymentTimeout, "execution timeout (seconds)")
+	irreversible := fs.Bool("irreversible", false, "failure is irreversible")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
@@ -248,25 +248,25 @@ func runDeploymentPreviewCommand(ctx context.Context, argv []string, out, errOut
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("deployment preview: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("deployment preview: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	if !transport.explicit["channel"] || (*channel != "canary" && *channel != "stable") {
-		return errors.New("deployment preview: --channel 必填且只接受 canary 或 stable")
+		return errors.New("deployment preview: --channel is required and only accepts canary or stable")
 	}
 	if !transport.explicit["version"] {
-		return errors.New("deployment preview: --version 必填")
+		return errors.New("deployment preview: --version is required")
 	}
 	if err := validateDeploymentReadCLIValue("version", *version, 128); err != nil {
 		return err
 	}
 	if transport.explicit["artifact"] && !artifact.ValidSHA256Hex(*artifactSHA) {
-		return errors.New("deployment preview: --artifact 必須是 64 個小寫 hex")
+		return errors.New("deployment preview: --artifact must be 64 lowercase hex characters")
 	}
 	if *batch < 1 || *batch > store.MaxDeploymentBatchSize {
-		return fmt.Errorf("deployment preview: --batch 必須介於 1 與 %d", store.MaxDeploymentBatchSize)
+		return fmt.Errorf("deployment preview: --batch must be between 1 and %d", store.MaxDeploymentBatchSize)
 	}
 	if *timeout < 1 || *timeout > 86400 {
-		return errors.New("deployment preview: --timeout 必須介於 1 與 86400 秒")
+		return errors.New("deployment preview: --timeout must be between 1 and 86400 seconds")
 	}
 	request := operator.DeploymentCreatePreviewRequest{
 		Channel: *channel, Version: *version, ArtifactSHA256: *artifactSHA,
@@ -281,18 +281,18 @@ func runDeploymentPreviewCommand(ctx context.Context, argv []string, out, errOut
 	}
 	result, err := client.PreviewDeploymentCreate(ctx, request)
 	if err != nil {
-		return fmt.Errorf("建立 deployment preview 失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to create deployment preview (HTTP operator API): %w", err)
 	}
 	return writeDeploymentPreview(out, result, transport.json, "HTTP operator API")
 }
 
 func validateDeploymentReadCLIValue(name, value string, maxBytes int) error {
 	if value == "" || value != strings.TrimSpace(value) || len(value) > maxBytes {
-		return fmt.Errorf("deployment read: --%s 不可為空、過長或含首尾空白", name)
+		return fmt.Errorf("deployment read: --%s cannot be empty, too long, or contain leading/trailing whitespace", name)
 	}
 	for _, char := range value {
 		if unicode.IsControl(char) || unicode.Is(unicode.Cf, char) {
-			return fmt.Errorf("deployment read: --%s 不可含控制或隱形格式字元", name)
+			return fmt.Errorf("deployment read: --%s cannot contain control or formatting characters", name)
 		}
 	}
 	return nil
@@ -308,27 +308,27 @@ func deploymentHTTPClientResolved(explicitURL string, explicit bool,
 ) (*operatorclient.Client, string, error) {
 	if explicit {
 		if deps.newOperatorClient == nil {
-			return nil, "", errors.New("deployment read: operator HTTP client 未初始化")
+			return nil, "", errors.New("deployment read: operator HTTP client not initialized")
 		}
 		client, err := deps.newOperatorClient(explicitURL)
 		if err != nil {
-			return nil, "", fmt.Errorf("deployment read: 建立 HTTP operator client 失敗：%w", err)
+			return nil, "", fmt.Errorf("deployment read: failed to create HTTP operator client: %w", err)
 		}
 		return client, normalizedDeploymentRecoveryHubURL(explicitURL), nil
 	}
 	if deps.discoverHubURL == nil {
-		return nil, "", errors.New("deployment read: Hub discovery 未初始化")
+		return nil, "", errors.New("deployment read: Hub discovery not initialized")
 	}
 	discovered, err := deps.discoverHubURL()
 	if err != nil {
-		return nil, "", fmt.Errorf("deployment read: 無法發現 Hub：%w", err)
+		return nil, "", fmt.Errorf("deployment read: failed to discover Hub: %w", err)
 	}
 	if deps.newOperatorClient == nil {
-		return nil, "", errors.New("deployment read: operator HTTP client 未初始化")
+		return nil, "", errors.New("deployment read: operator HTTP client not initialized")
 	}
 	client, err := deps.newOperatorClient(discovered)
 	if err != nil {
-		return nil, "", fmt.Errorf("deployment read: 建立 discovered HTTP operator client 失敗：%w", err)
+		return nil, "", fmt.Errorf("deployment read: failed to create discovered HTTP operator client: %w", err)
 	}
 	return client, normalizedDeploymentRecoveryHubURL(discovered), nil
 }
@@ -350,7 +350,7 @@ func withDirectDeploymentService(ctx context.Context, command, dbPath string, de
 	return withDirectOperatorStore(ctx, command, dbPath, deps, func(st *store.Store) error {
 		loadExpectations(st)
 		if _, err := st.CurrentWorkloadPolicyToken("operator-deployment-read-policy-proof"); err != nil {
-			return fmt.Errorf("%s: shell CLAWCTL_EXPECTATIONS 與 Hub 最後發布的 workload policy 不一致；拒絕 direct DB 判決：%w", command, err)
+			return fmt.Errorf("%s: shell CLAWCTL_EXPECTATIONS does not match last published workload policy on Hub; refusing direct DB verdict: %w", command, err)
 		}
 		return run(operator.NewWithArtifacts(st, artifactsDirFor(dbPath)), time.Now().UTC())
 	})
@@ -362,7 +362,7 @@ func runDeploymentListDirect(ctx context.Context, request operator.DeploymentLis
 	return withDirectDeploymentService(ctx, "deployment list", transport.dbPath, deps, func(service *operator.Service, now time.Time) error {
 		result, err := service.ListDeployments(request, now)
 		if err != nil {
-			return fmt.Errorf("讀取 deployment list 失敗（direct DB operator service）：%w", err)
+			return fmt.Errorf("failed to read deployment list (direct DB operator service): %w", err)
 		}
 		return writeDeploymentList(out, result, transport.json, "direct DB operator service")
 	})
@@ -374,7 +374,7 @@ func runDeploymentShowDirect(ctx context.Context, deploymentID string, transport
 	return withDirectDeploymentService(ctx, "deployment show", transport.dbPath, deps, func(service *operator.Service, now time.Time) error {
 		result, err := service.DeploymentDetail(deploymentID, now)
 		if err != nil {
-			return fmt.Errorf("讀取 deployment detail 失敗（direct DB operator service）：%w", err)
+			return fmt.Errorf("failed to read deployment detail (direct DB operator service): %w", err)
 		}
 		return writeDeploymentDetail(out, result, transport.json, "direct DB operator service")
 	})
@@ -386,7 +386,7 @@ func runDeploymentPreviewDirect(ctx context.Context, request operator.Deployment
 	return withDirectDeploymentService(ctx, "deployment preview", transport.dbPath, deps, func(service *operator.Service, now time.Time) error {
 		result, err := service.PreviewDeploymentCreateContext(ctx, request, now)
 		if err != nil {
-			return fmt.Errorf("建立 deployment preview 失敗（direct DB operator service）：%w", err)
+			return fmt.Errorf("failed to create deployment preview (direct DB operator service): %w", err)
 		}
 		return writeDeploymentPreview(out, result, transport.json, "direct DB operator service")
 	})
@@ -396,12 +396,12 @@ func writeDeploymentList(out io.Writer, result operator.DeploymentListResult, js
 	if jsonOutput {
 		return writeDeploymentJSON(out, result)
 	}
-	if _, err := fmt.Fprintf(out, "%s；%s consistency；Hub 評估時間 %s；符合 %d 張。\n",
+	if _, err := fmt.Fprintf(out, "%s; %s consistency; Hub evaluation time %s; %d matched.\n",
 		source, result.Consistency, result.EvaluatedAt.Format(time.RFC3339Nano), result.Total); err != nil {
 		return err
 	}
 	if len(result.Items) == 0 {
-		_, err := fmt.Fprintln(out, "沒有符合 filter 的 deployment。")
+		_, err := fmt.Fprintln(out, "No deployments matched the filter.")
 		return err
 	}
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
@@ -439,7 +439,7 @@ func writeDeploymentDetail(out io.Writer, result operator.DeploymentDetailResult
 	if item.Material.Version != nil {
 		version = *item.Material.Version
 	}
-	if _, err := fmt.Fprintf(out, "Stuck（%d 台；terminal %d / silent %d）\n",
+	if _, err := fmt.Fprintf(out, "Stuck (%d machines; terminal %d / silent %d)\n",
 		item.Stuck, item.TerminalStuck, item.SilentStuck); err != nil {
 		return err
 	}
@@ -454,20 +454,20 @@ func writeDeploymentDetail(out io.Writer, result operator.DeploymentDetailResult
 		if target.JobState != nil {
 			state = string(*target.JobState)
 		}
-		if _, err := fmt.Fprintf(out, "  %s：%s（%s，job %s）\n", terminalSafe(target.DisplayName),
+		if _, err := fmt.Fprintf(out, "  %s: %s (%s, job %s)\n", terminalSafe(target.DisplayName),
 			terminalSafe(*target.StuckKind), terminalSafe(state), terminalSafe(jobID)); err != nil {
 			return err
 		}
 	}
 	if _, err := fmt.Fprintf(out,
-		"%s；%s consistency；Hub 評估時間 %s。\ndeployment %s channel=%s version=%s desired_revision=%d control_revision=%d state=%s attempt=%d\n",
+		"%s; %s consistency; Hub evaluation time %s.\ndeployment %s channel=%s version=%s desired_revision=%d control_revision=%d state=%s attempt=%d\n",
 		source, result.Consistency, result.EvaluatedAt.Format(time.RFC3339Nano),
 		terminalSafe(item.DeploymentID), terminalSafe(item.Channel), terminalSafe(version),
 		item.DesiredRevision, item.ControlRevision, terminalSafe(item.State), item.Attempt); err != nil {
 		return err
 	}
 	if item.BoundaryPause != nil {
-		if _, err := fmt.Fprintf(out, "安全閘門在 batch %d 後停住（%s；%s）\n",
+		if _, err := fmt.Fprintf(out, "Safety gate held after batch %d (%s; %s)\n",
 			item.BoundaryPause.OpenedBatch, terminalSafe(item.BoundaryPause.Kind),
 			item.BoundaryPause.PausedAt.Format(time.RFC3339Nano)); err != nil {
 			return err
@@ -513,14 +513,14 @@ func writeDeploymentDetail(out io.Writer, result operator.DeploymentDetailResult
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(out, "排除"); err != nil {
+	if _, err := fmt.Fprintln(out, "Excluded"); err != nil {
 		return err
 	}
 	for _, target := range result.Targets {
 		if target.ExcludedReason == nil {
 			continue
 		}
-		if _, err := fmt.Fprintf(out, "  %s：%s\n", terminalSafe(target.DisplayName), terminalSafe(*target.ExcludedReason)); err != nil {
+		if _, err := fmt.Fprintf(out, "  %s: %s\n", terminalSafe(target.DisplayName), terminalSafe(*target.ExcludedReason)); err != nil {
 			return err
 		}
 	}
@@ -537,7 +537,7 @@ func writeDeploymentPreview(out io.Writer, result operator.DeploymentCreatePrevi
 		return writeDeploymentJSON(out, result)
 	}
 	if _, err := fmt.Fprintf(out,
-		"%s；Hub 預覽時間 %s。\nchannel=%s version=%s batch=%d timeout=%ds irreversible=%t\nartifact=%s size=%d engines_node=%s verified=%t\n影響 %d 台，衝突 %d，缺套件 %d，unreachable %d，node 版本未知 %d，共 %d 批\n",
+		"%s; Hub preview time %s.\nchannel=%s version=%s batch=%d timeout=%ds irreversible=%t\nartifact=%s size=%d engines_node=%s verified=%t\nimpacts %d machines, conflicts %d, missing packages %d, unreachable %d, unknown node version %d, %d batches total\n",
 		source, result.PreviewedAt.Format(time.RFC3339Nano), terminalSafe(result.Channel),
 		terminalSafe(result.Artifact.Version), result.BatchSize, result.ExecutionTimeoutSeconds, result.Irreversible,
 		terminalSafe(result.Artifact.Digest), result.Artifact.SizeBytes, terminalSafe(result.Artifact.EnginesNode),
@@ -671,38 +671,38 @@ func runDeploymentMutationCommandWithDeps(ctx context.Context, argv []string, ou
 
 func parseDeploymentMutationCommand(argv []string, errOut io.Writer) (deploymentMutationInputs, deploymentReadTransport, error) {
 	if len(argv) == 0 || (argv[0] != "create" && argv[0] != "continue" && argv[0] != "retry" && argv[0] != "abandon") {
-		return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment mutation: 必須指定 create、continue、retry 或 abandon")
+		return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment mutation: must specify create, continue, retry, or abandon")
 	}
 	action, args := argv[0], argv[1:]
 	fs := flag.NewFlagSet("deployment "+action, flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintf(errOut, "用法：clawctl-hub deployment %s [flags]", action)
+		fmt.Fprintf(errOut, "Usage: clawctl-hub deployment %s [flags]", action)
 		if action != "create" {
 			fmt.Fprint(errOut, " <deployment-id>")
 		}
 		fmt.Fprintln(errOut)
-		fmt.Fprintln(errOut, "  正常模式先走 HTTP operator preview 再 apply；--db 僅供 Hub 完全停止時的 fenced break-glass。")
-		fmt.Fprintln(errOut, "  HTTP apply 前會建立 private recovery file；以同一 action 加 --recovery-file 即可安全 replay。")
-		fmt.Fprintln(errOut, "  仍可用完整 canonical retry flags；省略整組才會建立新 request。")
+		fmt.Fprintln(errOut, "  Normal mode runs HTTP operator preview before apply; --db is only for fenced break-glass when Hub is completely stopped.")
+		fmt.Fprintln(errOut, "  A private recovery file is created before HTTP apply; replay safely with the same action and --recovery-file.")
+		fmt.Fprintln(errOut, "  Full canonical retry flags remain supported; omitting the entire group creates a new request.")
 		fs.PrintDefaults()
 	}
 	hubURL, dbPath, jsonOutput := addDeploymentReadTransportFlags(fs)
-	channel := fs.String("channel", "", "create 的 canary 或 stable channel")
-	version := fs.String("version", "", "create 的 OpenClaw 版本")
-	artifactSHA := fs.String("artifact", "", "create 指定 artifact SHA-256（64 個小寫 hex）")
-	batch := fs.Int("batch", operator.DefaultDeploymentBatchSize, "create 後續每批台數（1 到 5）。第一批永遠是 1 台；省略或 1 代表後面也是 1 台")
-	timeout := fs.Int("timeout", operator.DefaultDeploymentTimeout, "create 執行逾時（秒）")
-	irreversible := fs.Bool("irreversible", false, "create 失敗不可逆")
-	confirmChannel := fs.String("confirm-channel", "", "逐字確認 canary 或 stable channel")
-	confirmVersion := fs.String("confirm-version", "", "逐字確認 OpenClaw 版本")
-	confirmDeploymentID := fs.String("confirm", "", "abandon 時逐字輸入完整 deployment_id")
-	reason := fs.String("reason", "", "變更理由（選填，最多 500 bytes）")
-	idempotencyKey := fs.String("idempotency-key", "", "ambiguous retry 的原 request key")
-	previewDigest := fs.String("preview-digest", "", "ambiguous retry 的原 preview digest")
-	expectedRevision := fs.Int64("expected-control-revision", 0, "ambiguous retry 的原 control revision")
-	expectedOpened := fs.Int("expected-opened-batch", 0, "ambiguous retry 的原 opened batch")
-	recoveryFile := fs.String("recovery-file", "", "private canonical recovery file（省略時 HTTP mode 自動建立）")
+	channel := fs.String("channel", "", "canary or stable channel for create")
+	version := fs.String("version", "", "OpenClaw version for create")
+	artifactSHA := fs.String("artifact", "", "artifact SHA-256 for create (64 lowercase hex)")
+	batch := fs.Int("batch", operator.DefaultDeploymentBatchSize, "machine count per subsequent batch for create (1 to 5); first batch is always 1 machine; omitted or 1 means subsequent batches are also 1 machine")
+	timeout := fs.Int("timeout", operator.DefaultDeploymentTimeout, "execution timeout for create (seconds)")
+	irreversible := fs.Bool("irreversible", false, "create failure is irreversible")
+	confirmChannel := fs.String("confirm-channel", "", "verbatim confirmation of canary or stable channel")
+	confirmVersion := fs.String("confirm-version", "", "verbatim confirmation of OpenClaw version")
+	confirmDeploymentID := fs.String("confirm", "", "verbatim full deployment_id for abandon")
+	reason := fs.String("reason", "", "reason for change (optional, at most 500 bytes)")
+	idempotencyKey := fs.String("idempotency-key", "", "original request key for ambiguous retry")
+	previewDigest := fs.String("preview-digest", "", "original preview digest for ambiguous retry")
+	expectedRevision := fs.Int64("expected-control-revision", 0, "original control revision for ambiguous retry")
+	expectedOpened := fs.Int("expected-opened-batch", 0, "original opened batch for ambiguous retry")
+	recoveryFile := fs.String("recovery-file", "", "private canonical recovery file (created automatically in HTTP mode when omitted)")
 
 	deploymentID := ""
 	if action != "create" && len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -722,15 +722,15 @@ func parseDeploymentMutationCommand(argv []string, errOut io.Writer) (deployment
 		}
 		if exists {
 			if document.Action != action {
-				return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment recovery file action 與 subcommand 不符")
+				return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment recovery file action does not match subcommand")
 			}
 			if deploymentID != "" || fs.NArg() != 0 {
-				return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment recovery replay 不接受 positional deployment-id")
+				return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment recovery replay does not accept positional deployment-id")
 			}
 			for name := range transport.explicit {
 				if name != "recovery-file" && name != "json" {
 					return deploymentMutationInputs{}, deploymentReadTransport{},
-						errors.New("deployment recovery replay 只接受 --recovery-file 與 --json；request/transport 以檔案為準")
+						errors.New("deployment recovery replay only accepts --recovery-file and --json; request/transport are defined by file")
 				}
 			}
 			inputs, recoveredTransport := deploymentInputsFromRecovery(document, *recoveryFile, *jsonOutput)
@@ -739,15 +739,15 @@ func parseDeploymentMutationCommand(argv []string, errOut io.Writer) (deployment
 	}
 	if action == "create" {
 		if fs.NArg() != 0 {
-			return deploymentMutationInputs{}, deploymentReadTransport{}, fmt.Errorf("deployment create: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+			return deploymentMutationInputs{}, deploymentReadTransport{}, fmt.Errorf("deployment create: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 		}
 	} else if deploymentID == "" {
 		if fs.NArg() != 1 {
-			return deploymentMutationInputs{}, deploymentReadTransport{}, fmt.Errorf("deployment %s: 必須提供且只提供一個 deployment-id", action)
+			return deploymentMutationInputs{}, deploymentReadTransport{}, fmt.Errorf("deployment %s: exactly one deployment-id must be provided", action)
 		}
 		deploymentID = fs.Arg(0)
 	} else if fs.NArg() != 0 {
-		return deploymentMutationInputs{}, deploymentReadTransport{}, fmt.Errorf("deployment %s: 只接受一個 deployment-id", action)
+		return deploymentMutationInputs{}, deploymentReadTransport{}, fmt.Errorf("deployment %s: only one deployment-id is accepted", action)
 	}
 	if action != "create" {
 		if err := validateDeploymentIdentifierCLI(deploymentID); err != nil {
@@ -759,7 +759,7 @@ func parseDeploymentMutationCommand(argv []string, errOut io.Writer) (deployment
 	}
 	if transport.explicit["reason"] {
 		if *reason == "" || *reason != strings.TrimSpace(*reason) || len(*reason) > 500 || containsDeploymentControl(*reason) {
-			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment mutation: --reason 不可為空、超過 500 bytes、含首尾空白或控制字元")
+			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment mutation: --reason cannot be empty, exceed 500 bytes, or contain leading/trailing whitespace or control characters")
 		}
 	}
 	inputs := deploymentMutationInputs{
@@ -769,26 +769,26 @@ func parseDeploymentMutationCommand(argv []string, errOut io.Writer) (deployment
 	}
 	if action == "create" {
 		if !transport.explicit["channel"] || (*channel != "canary" && *channel != "stable") {
-			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment create: --channel 必填且只接受 canary 或 stable")
+			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment create: --channel is required and only accepts canary or stable")
 		}
 		if !transport.explicit["version"] {
-			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment create: --version 必填")
+			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment create: --version is required")
 		}
 		if err := validateDeploymentReadCLIValue("version", *version, 128); err != nil {
 			return deploymentMutationInputs{}, deploymentReadTransport{}, err
 		}
 		if transport.explicit["artifact"] && !artifact.ValidSHA256Hex(*artifactSHA) {
-			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment create: --artifact 必須是 64 個小寫 hex")
+			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment create: --artifact must be 64 lowercase hex characters")
 		}
 		if *batch < 1 || *batch > store.MaxDeploymentBatchSize {
-			return deploymentMutationInputs{}, deploymentReadTransport{}, fmt.Errorf("deployment create: --batch 必須介於 1 與 %d", store.MaxDeploymentBatchSize)
+			return deploymentMutationInputs{}, deploymentReadTransport{}, fmt.Errorf("deployment create: --batch must be between 1 and %d", store.MaxDeploymentBatchSize)
 		}
 		if *timeout < 1 || *timeout > 86400 {
-			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment create: --timeout 必須介於 1 與 86400 秒")
+			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment create: --timeout must be between 1 and 86400 seconds")
 		}
 		if !transport.explicit["confirm-channel"] || !transport.explicit["confirm-version"] ||
 			*confirmChannel != *channel || *confirmVersion != *version {
-			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment create: --confirm-channel 與 --confirm-version 必須逐字等於 --channel 與 --version")
+			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment create: --confirm-channel and --confirm-version must verbatim match --channel and --version")
 		}
 		inputs.Planning = operator.DeploymentCreatePreviewRequest{
 			Channel: *channel, Version: *version, ArtifactSHA256: *artifactSHA,
@@ -796,15 +796,15 @@ func parseDeploymentMutationCommand(argv []string, errOut io.Writer) (deployment
 		}
 	} else if action == "abandon" {
 		if !transport.explicit["confirm"] || *confirmDeploymentID != deploymentID {
-			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment abandon: --confirm 必須逐字等於完整 deployment-id")
+			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment abandon: --confirm must verbatim match full deployment-id")
 		}
 	} else {
 		if !transport.explicit["confirm-channel"] || (*confirmChannel != "canary" && *confirmChannel != "stable") {
-			return deploymentMutationInputs{}, deploymentReadTransport{}, fmt.Errorf("deployment %s: --confirm-channel 必填且只接受 canary 或 stable", action)
+			return deploymentMutationInputs{}, deploymentReadTransport{}, fmt.Errorf("deployment %s: --confirm-channel is required and only accepts canary or stable", action)
 		}
 		if action == "retry" {
 			if !transport.explicit["confirm-version"] {
-				return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment retry: --confirm-version 必填")
+				return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment retry: --confirm-version is required")
 			}
 			if err := validateDeploymentReadCLIValue("confirm-version", *confirmVersion, 128); err != nil {
 				return deploymentMutationInputs{}, deploymentReadTransport{}, err
@@ -823,19 +823,19 @@ func parseDeploymentMutationCommand(argv []string, errOut io.Writer) (deployment
 		}
 	}
 	if provided != 0 && provided != len(group) {
-		return deploymentMutationInputs{}, deploymentReadTransport{}, fmt.Errorf("deployment %s: ambiguous retry 必須一起提供 %s；省略整組才會建立新 request", action, strings.Join(group, ", --"))
+		return deploymentMutationInputs{}, deploymentReadTransport{}, fmt.Errorf("deployment %s: ambiguous retry must provide %s together; omitting the entire group creates a new request", action, strings.Join(group, ", --"))
 	}
 	if provided == len(group) {
 		if err := validateDeploymentIdempotencyKey(*idempotencyKey); err != nil {
 			return deploymentMutationInputs{}, deploymentReadTransport{}, err
 		}
 		if !validDeploymentPreviewDigest(*previewDigest) {
-			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment mutation: --preview-digest 必須是 sha256: 加 64 個小寫 hex")
+			return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment mutation: --preview-digest must be sha256: followed by 64 lowercase hex characters")
 		}
 		inputs.IdempotencyKey, inputs.PreviewDigest = *idempotencyKey, *previewDigest
 		if action != "create" {
 			if *expectedRevision < 0 || *expectedOpened < 0 {
-				return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment mutation: expected control revision/opened batch 不可為負數")
+				return deploymentMutationInputs{}, deploymentReadTransport{}, errors.New("deployment mutation: expected control revision/opened batch cannot be negative")
 			}
 			inputs.ExpectedControlRevision, inputs.ExpectedOpenedBatch = expectedRevision, expectedOpened
 		}
@@ -863,7 +863,7 @@ func rejectDeploymentMutationFlags(action string, seen map[string]bool) error {
 	}
 	for name := range seen {
 		if !allowed[name] {
-			return fmt.Errorf("deployment %s: 不接受 --%s", action, name)
+			return fmt.Errorf("deployment %s: --%s is not accepted", action, name)
 		}
 	}
 	return nil
@@ -872,14 +872,14 @@ func rejectDeploymentMutationFlags(action string, seen map[string]bool) error {
 func validateDeploymentIdentifierCLI(value string) error {
 	if err := validateDeploymentReadCLIValue("deployment-id", value, 256); err != nil ||
 		strings.Contains(value, "/") || value == "." || value == ".." {
-		return errors.New("deployment-id 不可含首尾空白、控制字元、dot segment 或斜線，且長度不可超過 256 bytes")
+		return errors.New("deployment-id cannot contain leading/trailing whitespace, control characters, dot segments, or slashes, and length cannot exceed 256 bytes")
 	}
 	return nil
 }
 
 func validateDeploymentIdempotencyKey(value string) error {
 	if value == "" || value != strings.TrimSpace(value) || len(value) > 200 || containsDeploymentControl(value) {
-		return errors.New("deployment mutation: --idempotency-key 不可為空、超過 200 bytes、含首尾空白或控制字元")
+		return errors.New("deployment mutation: --idempotency-key cannot be empty, exceed 200 bytes, or contain leading/trailing whitespace or control characters")
 	}
 	return nil
 }
@@ -912,7 +912,7 @@ func httpDeploymentMutationOperations(ctx context.Context, client *operatorclien
 			case "abandon":
 				return client.PreviewDeploymentAbandon(ctx, deploymentID)
 			default:
-				return operator.DeploymentActionPreviewResult{}, errors.New("deployment mutation action 不合法")
+				return operator.DeploymentActionPreviewResult{}, errors.New("invalid deployment mutation action")
 			}
 		},
 		apply: func(inputs deploymentMutationInputs) (operator.DeploymentMutationResult, error) {
@@ -943,7 +943,7 @@ func httpDeploymentMutationOperations(ctx context.Context, client *operatorclien
 					Reason: inputs.Reason,
 				})
 			default:
-				return operator.DeploymentMutationResult{}, errors.New("deployment mutation action 不合法")
+				return operator.DeploymentMutationResult{}, errors.New("invalid deployment mutation action")
 			}
 		},
 	}
@@ -969,7 +969,7 @@ func directDeploymentMutationOperations(ctx context.Context, service *operator.S
 			case "abandon":
 				return service.PreviewDeploymentAbandonContext(ctx, operator.DeploymentAbandonPreviewRequest{DeploymentID: deploymentID}, now)
 			default:
-				return operator.DeploymentActionPreviewResult{}, errors.New("deployment mutation action 不合法")
+				return operator.DeploymentActionPreviewResult{}, errors.New("invalid deployment mutation action")
 			}
 		},
 		apply: func(inputs deploymentMutationInputs) (operator.DeploymentMutationResult, error) {
@@ -1002,7 +1002,7 @@ func directDeploymentMutationOperations(ctx context.Context, service *operator.S
 					IdempotencyKey: inputs.IdempotencyKey, Actor: actor,
 				})
 			default:
-				return operator.DeploymentMutationResult{}, errors.New("deployment mutation action 不合法")
+				return operator.DeploymentMutationResult{}, errors.New("invalid deployment mutation action")
 			}
 		},
 	}
@@ -1017,7 +1017,7 @@ func executeDeploymentMutation(inputs deploymentMutationInputs, operations deplo
 		if inputs.Action == "create" {
 			preview, err := operations.previewCreate(inputs.Planning)
 			if err != nil {
-				return fmt.Errorf("deployment create preview（%s）失敗：%w", operations.source, err)
+				return fmt.Errorf("deployment create preview (%s) failed: %w", operations.source, err)
 			}
 			createPreview = &preview
 			inputs.PreviewDigest = preview.PreviewDigest
@@ -1027,7 +1027,7 @@ func executeDeploymentMutation(inputs deploymentMutationInputs, operations deplo
 		} else {
 			preview, err := operations.previewAction(inputs.Action, inputs.DeploymentID)
 			if err != nil {
-				return fmt.Errorf("deployment %s preview（%s）失敗：%w", inputs.Action, operations.source, err)
+				return fmt.Errorf("deployment %s preview (%s) failed: %w", inputs.Action, operations.source, err)
 			}
 			actionPreview = &preview
 			inputs.PreviewDigest = preview.PreviewDigest
@@ -1039,14 +1039,14 @@ func executeDeploymentMutation(inputs deploymentMutationInputs, operations deplo
 		}
 		key, err := operator.NewIdempotencyKey("cli-deployment-" + inputs.Action)
 		if err != nil {
-			return fmt.Errorf("deployment %s 產生 idempotency key：%w", inputs.Action, err)
+			return fmt.Errorf("deployment %s generating idempotency key: %w", inputs.Action, err)
 		}
 		inputs.IdempotencyKey = key
 	}
 	if inputs.RecoveryFile == "" && inputs.RecoveryTransport.Mode == deploymentRecoveryHTTP {
 		path, err := defaultDeploymentRecoveryPath(inputs.Action, inputs.IdempotencyKey)
 		if err != nil {
-			return fmt.Errorf("deployment %s 建立 private recovery path：%w", inputs.Action, err)
+			return fmt.Errorf("deployment %s creating private recovery path: %w", inputs.Action, err)
 		}
 		inputs.RecoveryFile = path
 	}
@@ -1074,7 +1074,7 @@ func executeDeploymentMutation(inputs deploymentMutationInputs, operations deplo
 	}
 	result, err := operations.apply(inputs)
 	if err != nil {
-		return fmt.Errorf("deployment %s（%s；%s%s）失敗%s：%w", inputs.Action, operations.source,
+		return fmt.Errorf("deployment %s (%s; %s%s) failed%s: %w", inputs.Action, operations.source,
 			deploymentCanonicalCoordinates(inputs), deploymentConfirmationCoordinates(inputs),
 			operatorRejectionReplayNote(err), err)
 	}
@@ -1123,10 +1123,10 @@ func writeDeploymentActionPreview(w io.Writer, preview operator.DeploymentAction
 	// ⚠ DeploymentBlockerLabel 的 default 分支會把來自 wire 的 blocker token 原樣串進句子；這是唯一會進到終端機的非常數字串，所以一定要經過 terminalSafe。
 	impact := terminalSafe(operator.DeploymentActionImpact(preview.Action, preview.Eligibility))
 	if preview.Eligibility.Eligible {
-		if _, err := fmt.Fprintf(w, "確認後會發生：%s\n", impact); err != nil {
+		if _, err := fmt.Fprintf(w, "Action on confirmation: %s\n", impact); err != nil {
 			return err
 		}
-	} else if _, err := fmt.Fprintf(w, "目前不可執行：%s\n", impact); err != nil {
+	} else if _, err := fmt.Fprintf(w, "Currently not executable: %s\n", impact); err != nil {
 		return err
 	}
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
@@ -1189,7 +1189,7 @@ func writeDeploymentPromotion(out io.Writer, promotion operator.DeploymentPromot
 		return nil
 	}
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "CANARY MACHINE\tJOB\tINDEPENDENT\t下一步"); err != nil {
+	if _, err := fmt.Fprintln(tw, "CANARY MACHINE\tJOB\tINDEPENDENT\tNEXT_STEP"); err != nil {
 		return err
 	}
 	for _, target := range promotion.IndependentTargets {
@@ -1209,25 +1209,25 @@ func writeDeploymentPromotion(out io.Writer, promotion operator.DeploymentPromot
 func deploymentPromotionNextStepText(step string) string {
 	switch step {
 	case operator.PromotionNextStepNone:
-		return "無"
+		return "none"
 	case operator.PromotionNextStepAssignVerifier:
-		return "到工作單指派跨故障域 verifier"
+		return "assign cross-domain verifier to job"
 	case operator.PromotionNextStepWaitForVerifier:
-		return "等待已指派 verifier 完整回報"
+		return "wait for assigned verifier full report"
 	case operator.PromotionNextStepRerunVerifier:
-		return "重新執行已指派 verifier"
+		return "rerun assigned verifier"
 	case operator.PromotionNextStepAssignActiveVerifier:
-		return "到工作單指派仍有效的 verifier"
+		return "assign active verifier to job"
 	case operator.PromotionNextStepReassignVerifier:
-		return "重新指派 verifier"
+		return "reassign verifier"
 	case operator.PromotionNextStepUpgradeAndReassignVerifier:
-		return "升級後重新指派 verifier"
+		return "upgrade and reassign verifier"
 	case operator.PromotionNextStepRepairAndRerunCanary:
-		return "修復後重跑 canary"
+		return "repair and rerun canary"
 	case operator.PromotionNextStepRerunCanary:
-		return "確認 artifact 後重跑 canary"
+		return "confirm artifact and rerun canary"
 	default:
-		return "查看工作單"
+		return "inspect job"
 	}
 }
 
@@ -1267,7 +1267,7 @@ func writeDeploymentMutationResult(w io.Writer, result deploymentMutationCLIResu
 		replay = "idempotency replay"
 	}
 	if _, err := fmt.Fprintf(w,
-		"%s: deployment %s action=%s state=%s desired_revision=%d control_revision=%d opened_batch=%d；new_jobs=%d；%s；idempotency-key=%s preview-digest=%s\n",
+		"%s: deployment %s action=%s state=%s desired_revision=%d control_revision=%d opened_batch=%d; new_jobs=%d; %s; idempotency-key=%s preview-digest=%s\n",
 		result.Source, terminalSafe(result.Result.DeploymentID), terminalSafe(result.Result.Action),
 		terminalSafe(result.Result.State), result.Result.DesiredRevision, result.Result.ControlRevision,
 		result.Result.OpenedBatch, len(result.Result.Jobs), replay,
@@ -1275,7 +1275,7 @@ func writeDeploymentMutationResult(w io.Writer, result deploymentMutationCLIResu
 		return err
 	}
 	for _, job := range result.Result.Jobs {
-		if _, err := fmt.Fprintf(w, "  %s → %s（%s）\n", terminalSafe(job.MachineID), terminalSafe(job.JobID), terminalSafe(string(job.State))); err != nil {
+		if _, err := fmt.Fprintf(w, "  %s -> %s (%s)\n", terminalSafe(job.MachineID), terminalSafe(job.JobID), terminalSafe(string(job.State))); err != nil {
 			return err
 		}
 	}
@@ -1306,7 +1306,7 @@ func formatJobCounts(counts map[deploy.JobState]int) string {
 // judgement about this rollout.
 func writeDeploymentIndependentSummary(out io.Writer, summary operator.DeploymentIndependentSummary) error {
 	if _, err := fmt.Fprintf(out,
-		"independent: %d/%d 台已開單 target 有第二個 producer 回報通過；可用 producer %d\n",
+		"independent: %d/%d opened targets reported passed by second producer; live producers %d\n",
 		summary.PassedTargets, summary.OpenedTargets, summary.LiveProducers); err != nil {
 		return err
 	}
@@ -1314,7 +1314,7 @@ func writeDeploymentIndependentSummary(out io.Writer, summary operator.Deploymen
 		if count.Targets == 0 {
 			continue
 		}
-		if _, err := fmt.Fprintf(out, "  %s：%d 台——%s\n", terminalSafe(count.Verdict), count.Targets,
+		if _, err := fmt.Fprintf(out, "  %s: %d targets - %s\n", terminalSafe(count.Verdict), count.Targets,
 			terminalSafe(jobIndependentVerdictStatement(count.Verdict))); err != nil {
 			return err
 		}

@@ -393,7 +393,7 @@ func newHubHTTPHandler(h *hub, ui *web.Server, authorizer operatorRequestAuthori
 	authority string,
 ) (http.Handler, error) {
 	if canonical, ok := canonicalLiteralAuthority(authority); !ok || canonical != authority {
-		return nil, fmt.Errorf("operator authority %q 必須是 canonical literal-ip:port", authority)
+		return nil, fmt.Errorf("operator authority %q must be canonical literal-ip:port", authority)
 	}
 	root := http.NewServeMux()
 	nonOperatorRegistered := h.machineAndPublicRoutes(root)
@@ -422,7 +422,7 @@ func validateRouteManifests(nonOperatorRegistered []string,
 	}
 	for pattern := range nonOperatorPolicies {
 		if _, overlaps := operatorPolicies[pattern]; overlaps {
-			return fmt.Errorf("route %q 同時出現在 operator 與 non-operator manifest", pattern)
+			return fmt.Errorf("route %q appears in both operator and non-operator manifests", pattern)
 		}
 	}
 	return nil
@@ -432,21 +432,21 @@ func validateNonOperatorRoutePolicies(registered []string, policies map[string]n
 	seen := make(map[string]struct{}, len(registered))
 	for _, pattern := range registered {
 		if _, duplicate := seen[pattern]; duplicate {
-			return fmt.Errorf("non-operator route %q 註冊了兩次", pattern)
+			return fmt.Errorf("non-operator route %q registered twice", pattern)
 		}
 		seen[pattern] = struct{}{}
 		policy, ok := policies[pattern]
 		if !ok {
-			return fmt.Errorf("non-operator route %q 沒有 plane policy", pattern)
+			return fmt.Errorf("non-operator route %q is missing plane policy", pattern)
 		}
 		method, path, valid := strings.Cut(pattern, " ")
 		if !valid || !validRouteMethod(method) || path == "" {
-			return fmt.Errorf("non-operator route %q 不是 method/path pattern", pattern)
+			return fmt.Errorf("non-operator route %q is not a method/path pattern", pattern)
 		}
 		switch policy.Class {
 		case nonOperatorAgent:
 			if !strings.HasPrefix(path, "/v1/") {
-				return fmt.Errorf("non-operator route %q 不是合法 machine-plane path", pattern)
+				return fmt.Errorf("non-operator route %q is not a valid machine-plane path", pattern)
 			}
 			// The second segment is the plane discriminator. Requiring it to
 			// be literal prevents patterns such as /v1/{plane}/... or
@@ -454,23 +454,23 @@ func validateNonOperatorRoutePolicies(registered []string, policies map[string]n
 			segments := strings.Split(strings.TrimPrefix(path, "/"), "/")
 			if len(segments) < 2 || segments[0] != "v1" ||
 				!validMachinePlaneDiscriminator(segments[1]) {
-				return fmt.Errorf("non-operator route %q 的 machine-plane discriminator 必須是 literal", pattern)
+				return fmt.Errorf("non-operator route %q machine-plane discriminator must be literal", pattern)
 			}
 		case nonOperatorHealth:
 			if pattern != "GET /healthz" {
-				return fmt.Errorf("non-operator health route %q 不合法", pattern)
+				return fmt.Errorf("non-operator health route %q is invalid", pattern)
 			}
 		case nonOperatorMetrics:
 			// /metrics is an operator view route. Keeping the class lets tests
 			// prove a public registration is rejected, including aliases.
-			return fmt.Errorf("non-operator route %q 不得公開 /metrics；它要 operator view", pattern)
+			return fmt.Errorf("non-operator route %q must not expose /metrics; it requires operator view", pattern)
 		default:
-			return fmt.Errorf("non-operator route %q 的 plane policy 不合法", pattern)
+			return fmt.Errorf("non-operator route %q plane policy is invalid", pattern)
 		}
 	}
 	for pattern := range policies {
 		if _, ok := seen[pattern]; !ok {
-			return fmt.Errorf("non-operator plane policy %q 沒有對應 route", pattern)
+			return fmt.Errorf("non-operator plane policy %q has no matching route", pattern)
 		}
 	}
 	return nil
@@ -505,35 +505,35 @@ func validateOperatorRoutePolicies(registered []string, policies map[string]oper
 	seen := make(map[string]struct{}, len(registered))
 	for _, pattern := range registered {
 		if _, duplicate := seen[pattern]; duplicate {
-			return fmt.Errorf("operator route %q 註冊了兩次", pattern)
+			return fmt.Errorf("operator route %q registered twice", pattern)
 		}
 		seen[pattern] = struct{}{}
 		policy, ok := policies[pattern]
 		if !ok {
-			return fmt.Errorf("operator route %q 沒有 capability policy", pattern)
+			return fmt.Errorf("operator route %q is missing capability policy", pattern)
 		}
 		if policy.Permission < operatorauth.View || policy.Permission > operatorauth.Admin ||
 			!operatorRepresentationValid(pattern, policy.Representation) ||
 			(policy.SourceKind != operator.SourceKindWeb && policy.SourceKind != operator.SourceKindOperatorAPI) ||
 			!operatorSecurityProfileValid(pattern, policy.SecurityProfile) {
-			return fmt.Errorf("operator route %q 的 policy 不合法", pattern)
+			return fmt.Errorf("operator route %q policy is invalid", pattern)
 		}
 		method, path, valid := strings.Cut(pattern, " ")
 		if !valid || !validRouteMethod(method) || path == "" {
-			return fmt.Errorf("operator route %q 不是受支援的 method/path pattern", pattern)
+			return fmt.Errorf("operator route %q is not a supported method/path pattern", pattern)
 		}
 		if !isSafeMethod(method) && policy.Permission == operatorauth.View && pattern != navigationLanguagePattern {
-			return fmt.Errorf("unsafe operator route %q 不得分類為 view", pattern)
+			return fmt.Errorf("unsafe operator route %q must not be classified as view", pattern)
 		}
 		if policy.SourceKind == operator.SourceKindOperatorAPI {
 			if !strings.HasPrefix(path, "/v1/operator/") {
-				return fmt.Errorf("operator API route %q 必須在 /v1/operator/ namespace", pattern)
+				return fmt.Errorf("operator API route %q must be in /v1/operator/ namespace", pattern)
 			}
 		}
 	}
 	for pattern := range policies {
 		if _, ok := seen[pattern]; !ok {
-			return fmt.Errorf("operator capability policy %q 沒有對應 route", pattern)
+			return fmt.Errorf("operator capability policy %q has no matching route", pattern)
 		}
 	}
 	return nil
@@ -951,7 +951,7 @@ func (b *operatorBoundary) persistDenial(r *http.Request, pattern string,
 			"；pattern=" + pattern + "；" + detail,
 	}
 	if err := b.store.RecordOperatorDenial(entry); err != nil {
-		log.Printf("⚠ operator boundary denial audit 寫不進去 auth=%s boundary=%s pattern=%q: %v",
+		log.Printf("⚠ failed to write operator boundary denial audit auth=%s boundary=%s pattern=%q: %v",
 			authDecision, boundaryDecision, pattern, err)
 	}
 }
@@ -971,7 +971,7 @@ func (b *operatorBoundary) persistSuppressedDenials(admission operatorDenialAdmi
 			admission.windowStart.UTC().Format(time.RFC3339), admission.windowEnd.UTC().Format(time.RFC3339)),
 	}
 	if err := b.store.RecordOperatorDenial(entry); err != nil {
-		log.Printf("⚠ operator denial rate-limit summary 寫不進 audit：%v", err)
+		log.Printf("⚠ failed to write operator denial rate-limit summary to audit: %v", err)
 	}
 }
 
@@ -988,7 +988,7 @@ func (b *operatorBoundary) persistDenialAuditTruncated(admission operatorDenialA
 			"；此視窗寫入型拒絕的逐筆稽核已達上限；後續同類拒絕不另列。",
 	}
 	if err := b.store.RecordOperatorDenial(entry); err != nil {
-		log.Printf("⚠ operator denial audit-truncated marker 寫不進 audit：%v", err)
+		log.Printf("⚠ failed to write operator denial audit-truncated marker to audit: %v", err)
 	}
 }
 

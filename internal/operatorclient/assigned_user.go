@@ -37,7 +37,7 @@ func (c *Client) GetMachineAssignedUser(ctx context.Context, machineID string) (
 
 func (c *Client) PutMachineAssignedUser(ctx context.Context, machineID, key string, body MachineAssignedUserRequest) (MachineAssignedUserResponse, error) {
 	if strings.TrimSpace(key) == "" {
-		return MachineAssignedUserResponse{}, errors.New("Idempotency-Key 不可省略")
+		return MachineAssignedUserResponse{}, errors.New("operator client: Idempotency-Key is required")
 	}
 	return c.machineAssignedUser(ctx, machineID, key, &body)
 }
@@ -67,17 +67,17 @@ func (c *Client) machineAssignedUser(ctx context.Context, machineID, key string,
 		return out, err
 	}
 	if response.status != http.StatusOK {
-		return out, fmt.Errorf("指派使用者回應狀態無效：HTTP %d", response.status)
+		return out, fmt.Errorf("operator client: invalid assigned user response status: HTTP %d", response.status)
 	}
 	if err := validateJSONNoStoreResponse(response.header); err != nil {
 		return out, err
 	}
-	if err := decodeStrictJSONDocument(response.body, "指派使用者", &out); err != nil {
+	if err := decodeStrictJSONDocument(response.body, "assigned user", &out); err != nil {
 		return MachineAssignedUserResponse{}, err
 	}
 	etags := response.header.Values("ETag")
 	if out.Revision < 0 || len(etags) != 1 || etags[0] != fmt.Sprintf(`"assigned-user-revision-%d"`, out.Revision) {
-		return MachineAssignedUserResponse{}, errors.New("指派使用者版本不符")
+		return MachineAssignedUserResponse{}, errors.New("operator client: assigned user revision mismatch")
 	}
 	replayed, err := responseReplayEvidenceFromHeader(response.header)
 	if err != nil {
@@ -85,16 +85,16 @@ func (c *Client) machineAssignedUser(ctx context.Context, machineID, key string,
 	}
 	if out.MachineID != machineID || out.DisplayName == "" || out.Replayed != replayed ||
 		!validAssignedUserPair(out.UserID, out.UserLogin) || !validAssignedUserPair(out.PreviousUserID, out.PreviousUserLogin) {
-		return MachineAssignedUserResponse{}, errors.New("指派使用者回應內容不符")
+		return MachineAssignedUserResponse{}, errors.New("operator client: assigned user response content mismatch")
 	}
 	for _, value := range []string{out.DisplayName, out.UserLogin, out.PreviousUserLogin} {
 		if !utf8.ValidString(value) || len(value) > 4096 || strings.ContainsFunc(value, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) {
-			return MachineAssignedUserResponse{}, errors.New("指派使用者文字無效")
+			return MachineAssignedUserResponse{}, errors.New("operator client: invalid assigned user text")
 		}
 	}
 	if body == nil {
 		if out.Replayed || out.PreviousUserID != out.UserID || out.PreviousUserLogin != out.UserLogin {
-			return MachineAssignedUserResponse{}, errors.New("讀取指派使用者回應不符")
+			return MachineAssignedUserResponse{}, errors.New("operator client: read assigned user response mismatch")
 		}
 	} else {
 		wanted := body.UserID
@@ -106,7 +106,7 @@ func (c *Client) machineAssignedUser(ctx context.Context, machineID, key string,
 			revision++
 		}
 		if body.UserID == "" || out.UserID != wanted || out.DisplayName != body.ConfirmDisplayName || out.Revision != revision {
-			return MachineAssignedUserResponse{}, errors.New("指派使用者回應與要求不符")
+			return MachineAssignedUserResponse{}, errors.New("operator client: assigned user response does not match request")
 		}
 	}
 	out.Meta = ResponseMetadata{ETag: etags[0], ETagRevision: out.Revision, IdempotencyReplayed: replayed}

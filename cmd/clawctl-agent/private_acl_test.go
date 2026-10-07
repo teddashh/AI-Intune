@@ -171,11 +171,11 @@ func TestPrivateCredentialCopyNamesCurrentState(t *testing.T) {
 		}
 	}
 	unixNotice := enrollmentStoredNotice("machine-1", `C:\clawctl\agent.json`, "linux")
-	if !strings.Contains(unixNotice, "（0600）") || !strings.Contains(unixNotice, "已報到") {
+	if !strings.Contains(unixNotice, "(0600)") || !strings.Contains(unixNotice, "Enrolled") {
 		t.Fatalf("unix enrollment notice=%q", unixNotice)
 	}
 	windowsNotice := enrollmentStoredNotice("machine-1", `C:\clawctl\agent.json`, "windows")
-	if !strings.Contains(windowsNotice, "僅目前使用者可讀寫") {
+	if !strings.Contains(windowsNotice, "current user read/write only") {
 		t.Fatalf("windows enrollment notice=%q", windowsNotice)
 	}
 	if strings.Contains(windowsNotice, "0600") {

@@ -98,10 +98,10 @@ func TestInstallCLIPrintsWhatWasAssignedAndWhatItSees(t *testing.T) {
 	text := runInstallCLI(t)
 	for _, want := range []string{
 		operator.InstallReportCaveat,
-		"個資源", "資源", "被指派過", "一樣", "不一樣", "對不起來", "沒被指派過",
-		"機器", "這一格是什麼", "指派的", "看到的", "指派來源", "下一步",
+		"resources", "resource", "assigned", "matches", "differs", "unresolved", "unassigned",
+		"machine", "state", "assigned", "observed", "assignment source", "next step",
 		"claude", "gemini", "codex", "openclaw",
-		"2.1.195", "2026.5.26", "2026.6.10（檔案上讀的）",
+		"2.1.195", "2026.5.26", "2026.6.10 (read from file)",
 		"指派給 canary channel", "指派給這台", "never-came",
 		operator.InstallStateTitle(operator.InstallMatches),
 		operator.InstallStateTitle(operator.InstallAssignedOlder),
@@ -324,8 +324,8 @@ func TestTheInstallCellNextStepDoesNotWidenTheAlignedColumns(t *testing.T) {
 // 樣」那一欄是有人會直接照著動手的數字，而它可能比的是一個沒有人在跑的檔案。
 func TestInstallCLIAsksWhichFileBeforeItPrintsTheResourceTable(t *testing.T) {
 	text := runInstallCLI(t)
-	misattributed := strings.Index(text, "格看到的版號量的不是正在跑的那一份")
-	resources := strings.Index(text, "個資源\n")
+	misattributed := strings.Index(text, "visible versions measure an installation that is not running")
+	resources := strings.Index(text, "resources\n")
 	if misattributed < 0 {
 		t.Fatalf("沒有印出量錯檔案那一段：\n%s", text)
 	}
@@ -398,7 +398,7 @@ func TestInstallCLIKeepsThePathsOutOfThePerMachineTable(t *testing.T) {
 // 看起來像六件都要人動手。
 func TestInstallCLIPrintsTheRuntimeSummary(t *testing.T) {
 	text := runInstallCLI(t)
-	anchor := strings.Index(text, "看到的版號講的是哪一份：")
+	anchor := strings.Index(text, "Observed version source:")
 	if anchor < 0 {
 		t.Fatalf("沒有印出這一軸的摘要：\n%s", text)
 	}

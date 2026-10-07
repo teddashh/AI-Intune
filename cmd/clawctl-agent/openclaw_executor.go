@@ -150,7 +150,7 @@ func (e openclawExecutor) Run(ctx context.Context, job model.JobResponse) ([]mod
 	runningReleaseDir := filepath.Join(release, "lib", "node_modules", "openclaw")
 	if samePath(install.RunningDir, runningReleaseDir) && install.MainPID > 0 &&
 		install.ProcessMatchesUnit != nil && *install.ProcessMatchesUnit {
-		return d.verify(ctx, install.NodePath, indexJS, spec.Version, port, "已在目標 release 上"), nil
+		return d.verify(ctx, install.NodePath, indexJS, spec.Version, port, "already on target release"), nil
 	}
 
 	note, stageFailure, err := d.stage(ctx, job, spec, install, release)
@@ -163,7 +163,7 @@ func (e openclawExecutor) Run(ctx context.Context, job model.JobResponse) ([]mod
 
 	snapshot, err := d.switchRelease(ctx, job, install, indexJS, release)
 	if err != nil {
-		failed := d.verification("switch", "切換 OpenClaw release", "", err.Error(), 1, false)
+		failed := d.verification("switch", "switch OpenClaw release", "", err.Error(), 1, false)
 		rollback := d.rollbackWithOwnBudget(ctx, job, install, snapshot, port)
 		return []model.JobVerificationRequest{failed, rollback}, nil
 	}
@@ -194,7 +194,7 @@ func (d execDeps) retainSnapshots(job model.JobResponse) []string {
 		return nil
 	}
 	if err != nil {
-		return []string{"沒清 snapshots：" + err.Error()}
+		return []string{"did not clean snapshots: " + err.Error()}
 	}
 	keep := safeJobID(job.JobID)
 	var reports []string
@@ -206,10 +206,10 @@ func (d execDeps) retainSnapshots(job model.JobResponse) []string {
 		// 自己那份；本張成功後，更早快照對應的狀態已被這次成功取代。
 		logical := filepath.Join(d.snapshotsDir(), entry.Name())
 		if err := os.RemoveAll(d.fsPath(logical)); err != nil {
-			reports = append(reports, "清 snapshots 失敗 "+logical+"："+err.Error())
+			reports = append(reports, "failed to clean snapshot "+logical+": "+err.Error())
 			continue
 		}
-		reports = append(reports, "已清理 snapshot："+logical)
+		reports = append(reports, "cleaned snapshot: "+logical)
 	}
 	return reports
 }
@@ -225,7 +225,7 @@ func (d execDeps) retainFailedEvidence() []string {
 		} else {
 			// ⚠ DB discovery 若意外回到 ~/.openclaw 外，不能跟著它擴張 RemoveAll
 			// 的可達範圍；那會把專屬失敗證據清理變成任意目錄清理。
-			reports = append(reports, "沒清 DB 失敗證據：dbDir 不在 ~/.openclaw 底下："+dbDir)
+			reports = append(reports, "did not clean DB failure evidence: dbDir is not under ~/.openclaw: "+dbDir)
 		}
 	}
 	entries, err := os.ReadDir(d.fsPath(root))
@@ -233,7 +233,7 @@ func (d execDeps) retainFailedEvidence() []string {
 		return reports
 	}
 	if err != nil {
-		return append(reports, "沒清失敗證據："+err.Error())
+		return append(reports, "did not clean failure evidence: "+err.Error())
 	}
 	for _, entry := range entries {
 		matched := false
@@ -251,10 +251,10 @@ func (d execDeps) retainFailedEvidence() []string {
 		// 本機後來已成功，Hub 帳本裡的 verification 已取代它們作為失敗證據。
 		logical := filepath.Join(root, entry.Name())
 		if err := os.RemoveAll(d.fsPath(logical)); err != nil {
-			reports = append(reports, "清失敗證據失敗 "+logical+"："+err.Error())
+			reports = append(reports, "failed to clean failure evidence "+logical+": "+err.Error())
 			continue
 		}
-		reports = append(reports, "已清理失敗證據："+logical)
+		reports = append(reports, "cleaned failure evidence: "+logical)
 	}
 	return reports
 }
@@ -275,7 +275,7 @@ func (d execDeps) retainReleases(job model.JobResponse) []string {
 	if err != nil {
 		// ⚠ current 不可信時整條跳過；猜錯目前目標再 RemoveAll，會把正在跑的
 		// release 從磁碟刪掉。這比多留幾百 MB 嚴重得多。
-		return []string{"沒清 releases：current 讀不到：" + err.Error()}
+		return []string{"did not clean releases: failed to read current: " + err.Error()}
 	}
 	keep := map[string]struct{}{filepath.Clean(currentRoot): {}}
 	snapshot := filepath.Join(d.snapshotsDir(), safeJobID(job.JobID), "previous.json")
@@ -283,13 +283,13 @@ func (d execDeps) retainReleases(job model.JobResponse) []string {
 	if readErr == nil {
 		var previous previousRelease
 		if err := json.Unmarshal(b, &previous); err != nil {
-			return []string{"沒清 releases：這張單的 previous.json 讀不到：" + err.Error()}
+			return []string{"did not clean releases: failed to read previous.json for this job: " + err.Error()}
 		}
 		if underDir(previous.RunningDir, d.releasesDir()) {
 			keep[filepath.Clean(releaseRootOf(previous.RunningDir, d.releasesDir()))] = struct{}{}
 		}
 	} else if !errors.Is(readErr, os.ErrNotExist) {
-		return []string{"沒清 releases：這張單的 previous.json 讀不到：" + readErr.Error()}
+		return []string{"did not clean releases: failed to read previous.json for this job: " + readErr.Error()}
 	}
 
 	entries, err := os.ReadDir(d.fsPath(d.releasesDir()))
@@ -297,7 +297,7 @@ func (d execDeps) retainReleases(job model.JobResponse) []string {
 		return nil
 	}
 	if err != nil {
-		return []string{"沒清 releases：" + err.Error()}
+		return []string{"did not clean releases: " + err.Error()}
 	}
 	var reports []string
 	for _, entry := range entries {
@@ -308,10 +308,10 @@ func (d execDeps) retainReleases(job model.JobResponse) []string {
 		// ⚠ 不是固定留最近兩版：真正能退回的是本張 previous.json 的 running_dir，
 		// 真正在跑的是 current；留任意兩個版本可能剛好刪掉其中一個。
 		if err := os.RemoveAll(d.fsPath(logical)); err != nil {
-			reports = append(reports, "清 release 失敗 "+logical+"："+err.Error())
+			reports = append(reports, "failed to clean release "+logical+": "+err.Error())
 			continue
 		}
-		reports = append(reports, "已清理 release："+logical)
+		reports = append(reports, "cleaned release: "+logical)
 	}
 	return reports
 }
@@ -327,7 +327,7 @@ func (d execDeps) readCurrentRelease() (string, error) {
 	}
 	target = filepath.Clean(target)
 	if !underDir(target, d.releasesDir()) {
-		return "", fmt.Errorf("current 指到 releases 外：%s", target)
+		return "", fmt.Errorf("current points outside releases: %s", target)
 	}
 	root := releaseRootOf(target, d.releasesDir())
 	info, err := os.Lstat(d.fsPath(root))
@@ -335,7 +335,7 @@ func (d execDeps) readCurrentRelease() (string, error) {
 		return "", err
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("current 目標不是 release 目錄：%s", root)
+		return "", fmt.Errorf("current target is not a release directory: %s", root)
 	}
 	return root, nil
 }
@@ -400,52 +400,52 @@ func (e openclawExecutor) withDefaults() execDeps {
 func (d execDeps) gate(ctx context.Context, job model.JobResponse) (openClawRunSpec, *model.OpenClawInstall, int, error) {
 	kind, artifact, err := model.ParseJobSpec(job.Spec)
 	if err != nil {
-		return openClawRunSpec{}, nil, 0, rejectPrecondition("工作單 spec 不是合法 JSON：" + err.Error())
+		return openClawRunSpec{}, nil, 0, rejectPrecondition("job spec is not valid JSON: " + err.Error())
 	}
 	var spec openClawRunSpec
 	if err := json.Unmarshal(job.Spec, &spec); err != nil {
-		return spec, nil, 0, rejectPrecondition("工作單 spec 不是合法 JSON：" + err.Error())
+		return spec, nil, 0, rejectPrecondition("job spec is not valid JSON: " + err.Error())
 	}
 	if kind != agentadapter.ExecutorKindOpenClaw || spec.Kind != agentadapter.ExecutorKindOpenClaw {
-		return spec, nil, 0, rejectPrecondition(fmt.Sprintf("kind 必須是 openclaw，收到 %q", kind))
+		return spec, nil, 0, rejectPrecondition(fmt.Sprintf("kind must be openclaw, got %q", kind))
 	}
 	if job.ResourceKind != agentadapter.ExecutorKindOpenClaw || job.ResourceID != agentadapter.ExecutorKindOpenClaw {
-		return spec, nil, 0, rejectPrecondition("OpenClaw job identity 不合法")
+		return spec, nil, 0, rejectPrecondition("invalid OpenClaw job identity")
 	}
 	if artifact == nil || spec.Artifact == nil {
-		return spec, nil, 0, rejectPrecondition("artifact 缺少")
+		return spec, nil, 0, rejectPrecondition("missing artifact")
 	}
 	if strings.TrimSpace(spec.Version) == "" {
-		return spec, nil, 0, rejectPrecondition("version 是空的")
+		return spec, nil, 0, rejectPrecondition("version is empty")
 	}
 	if !safePathComponent(spec.Version) {
-		return spec, nil, 0, rejectPrecondition("version 不是安全的目錄名稱：" + spec.Version)
+		return spec, nil, 0, rejectPrecondition("version is not a safe directory name: " + spec.Version)
 	}
 	if len(spec.Artifact.SHA256) != sha256.Size*2 {
-		return spec, nil, 0, rejectPrecondition("artifact.sha256 不是 64 碼十六進位")
+		return spec, nil, 0, rejectPrecondition("artifact.sha256 is not 64 hex digits")
 	}
 	if _, err := hex.DecodeString(spec.Artifact.SHA256); err != nil {
-		return spec, nil, 0, rejectPrecondition("artifact.sha256 不是十六進位：" + err.Error())
+		return spec, nil, 0, rejectPrecondition("artifact.sha256 is not hex: " + err.Error())
 	}
 	if spec.Artifact.URL == "" {
-		return spec, nil, 0, rejectPrecondition("artifact.url 是空的")
+		return spec, nil, 0, rejectPrecondition("artifact.url is empty")
 	}
 	if !strings.HasPrefix(spec.Artifact.URL, "/") || strings.HasPrefix(spec.Artifact.URL, "//") {
 		// ⚠ agent 只從自己的 Hub 抓：絕對 URL 會讓 agent 連去別的地方下載，
 		// digest 擋得住位元組，擋不住那一次連線。
-		return spec, nil, 0, rejectPrecondition("artifact.url 必須是相對於 Hub 的路徑（/ 開頭）：" + spec.Artifact.URL)
+		return spec, nil, 0, rejectPrecondition("artifact.url must be relative to Hub (starting with /): " + spec.Artifact.URL)
 	}
 	if spec.Artifact.Size <= 0 || spec.Artifact.Size > maxOpenClawArtifactBytes {
-		return spec, nil, 0, rejectPrecondition("artifact.size 超出 OpenClaw artifact 上限")
+		return spec, nil, 0, rejectPrecondition("artifact.size exceeds OpenClaw artifact limit")
 	}
 	if job.ArtifactDigest != "sha256:"+spec.Artifact.SHA256 {
 		return spec, nil, 0, &rejectError{Code: deploy.ArtifactHashMismatch,
-			Detail: "工作單 artifact digest 與 OpenClaw spec 不一致"}
+			Detail: "job artifact digest does not match OpenClaw spec"}
 	}
 
 	install := d.discover(ctx)
 	if install == nil {
-		return spec, nil, 0, rejectPrecondition("discover 沒有回傳 OpenClawInstall")
+		return spec, nil, 0, rejectPrecondition("discover did not return OpenClawInstall")
 	}
 	checks := []struct {
 		ok     bool
@@ -460,9 +460,9 @@ func (d execDeps) gate(ctx context.Context, job model.JobResponse) (openClawRunS
 	}
 	for _, check := range checks {
 		if !check.ok {
-			detail := check.field + " 缺少"
+			detail := "missing " + check.field
 			if check.reason != "" {
-				detail += "：" + check.reason
+				detail += ": " + check.reason
 			}
 			return spec, install, 0, rejectPrecondition(detail)
 		}
@@ -470,42 +470,42 @@ func (d execDeps) gate(ctx context.Context, job model.JobResponse) (openClawRunS
 	resumableInactive := install.MainPID == 0 && (d.isManagedOpenClawInstall(install) || install.RunningDirExists)
 	if !resumableInactive {
 		if install.MainPID == 0 {
-			return spec, install, 0, rejectPrecondition("MainPID 缺少：" + install.ProcessReason)
+			return spec, install, 0, rejectPrecondition("missing MainPID: " + install.ProcessReason)
 		}
 		if install.ProcessMatchesUnit == nil {
-			detail := "ProcessMatchesUnit 缺少"
+			detail := "missing ProcessMatchesUnit"
 			if install.ProcessReason != "" {
-				detail += "：" + install.ProcessReason
+				detail += ": " + install.ProcessReason
 			}
 			return spec, install, 0, rejectPrecondition(detail)
 		}
 		if !*install.ProcessMatchesUnit {
 			// ⚠ 擋的是 unit 已改、process 尚未重啟的未知狀態；在兩套座標上再疊
 			// 一次升級，rollback 就不知道該回哪一套。
-			return spec, install, 0, rejectPrecondition("ProcessMatchesUnit=false：unit 改過但沒重啟；" + install.ProcessReason)
+			return spec, install, 0, rejectPrecondition("ProcessMatchesUnit=false: unit was modified without restart; " + install.ProcessReason)
 		}
 	}
 	port, ok := gatewayPort(install.GatewayArgs)
 	if !ok {
-		return spec, install, 0, rejectPrecondition("GatewayArgs 缺少 --port N")
+		return spec, install, 0, rejectPrecondition("GatewayArgs missing --port N")
 	}
 	matched, understood := rollout.NodeSatisfiesRange(install.NodeVersion, spec.Artifact.EnginesNode)
 	if !understood {
-		return spec, install, 0, rejectPrecondition("engines 語法我不會判：" + spec.Artifact.EnginesNode)
+		return spec, install, 0, rejectPrecondition("unsupported engines syntax: " + spec.Artifact.EnginesNode)
 	}
 	if !matched {
 		// ⚠ 擋的是 node 22.22.1/22.22.2 安裝 2026.7+ 後 npm 成功、舊 gateway
 		// 已停，新的才因 engines >=22.22.3 起不來。
-		return spec, install, 0, rejectPrecondition(fmt.Sprintf("NodeVersion %s 不符合 engines %s", install.NodeVersion, spec.Artifact.EnginesNode))
+		return spec, install, 0, rejectPrecondition(fmt.Sprintf("NodeVersion %s does not satisfy engines %s", install.NodeVersion, spec.Artifact.EnginesNode))
 	}
 
 	share := filepath.Join(d.home, ".local", "share")
 	if err := d.requireWritableAncestor(share); err != nil {
-		return spec, install, 0, rejectPrecondition("~/.local/share 不可寫：" + err.Error())
+		return spec, install, 0, rejectPrecondition("~/.local/share is not writable: " + err.Error())
 	}
 	dropInDir := d.dropInDir()
 	if err := d.requireWritableAncestor(dropInDir); err != nil {
-		return spec, install, 0, rejectPrecondition("openclaw-gateway drop-in 目錄不可寫：" + err.Error())
+		return spec, install, 0, rejectPrecondition("openclaw-gateway drop-in directory is not writable: " + err.Error())
 	}
 	return spec, install, port, nil
 }
@@ -530,7 +530,7 @@ func (d execDeps) requireWritableAncestor(logical string) error {
 		fi, err := os.Stat(path)
 		if err == nil {
 			if !fi.IsDir() {
-				return fmt.Errorf("%s 不是目錄", logical)
+				return fmt.Errorf("%s is not a directory", logical)
 			}
 			return pathWritable(path)
 		}
@@ -549,34 +549,34 @@ func (d execDeps) stage(ctx context.Context, job model.JobResponse, spec openCla
 	install *model.OpenClawInstall, release string) (string, *model.JobVerificationRequest, error) {
 	if fi, err := os.Lstat(d.fsPath(release)); err == nil {
 		if !fi.IsDir() {
-			return "", d.stageFailed("既有 release 不是目錄"), nil
+			return "", d.stageFailed("existing release is not a directory"), nil
 		}
 		if _, _, validErr := d.validateRelease(ctx, release, spec.Version, install.NodePath); validErr == nil {
-			return "重用既有 release", nil, nil
+			return "reused existing release", nil, nil
 		} else if ctx.Err() != nil {
-			return "", d.stageFailed("驗證既有 release 時 context 已取消：" + ctx.Err().Error()), nil
+			return "", d.stageFailed("context canceled while verifying existing release: " + ctx.Err().Error()), nil
 		}
 		broken := release + ".broken-" + safeJobID(job.JobID)
 		if _, err := os.Lstat(d.fsPath(broken)); err == nil {
-			return "", d.stageFailed("broken 證據路徑已存在，不覆寫：" + broken), nil
+			return "", d.stageFailed("broken evidence path already exists, not overwriting: " + broken), nil
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return "", d.stageFailed("讀不到 broken 證據路徑：" + err.Error()), nil
+			return "", d.stageFailed("cannot read broken evidence path: " + err.Error()), nil
 		}
 		if err := os.Rename(d.fsPath(release), d.fsPath(broken)); err != nil {
-			return "", d.stageFailed("既有 release 驗證失敗且搬不開：" + err.Error()), nil
+			return "", d.stageFailed("existing release verification failed and cannot be moved: " + err.Error()), nil
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", d.stageFailed("讀不到 release：" + err.Error()), nil
+		return "", d.stageFailed("cannot read release: " + err.Error()), nil
 	}
 
 	releases := d.releasesDir()
 	staging := filepath.Join(releases, ".staging-"+safeJobID(job.JobID))
 	if err := os.RemoveAll(d.fsPath(staging)); err != nil { // 只清理這張工作單自己的 staging 殘骸。
-		return "", d.stageFailed("清理舊 staging 失敗：" + err.Error()), nil
+		return "", d.stageFailed("failed to clean old staging: " + err.Error()), nil
 	}
 	defer os.RemoveAll(d.fsPath(staging))
 	if err := os.MkdirAll(d.fsPath(staging), 0o700); err != nil {
-		return "", d.stageFailed("建立 staging 失敗：" + err.Error()), nil
+		return "", d.stageFailed("failed to create staging: " + err.Error()), nil
 	}
 
 	tgz := filepath.Join(staging, "openclaw.tgz")
@@ -585,12 +585,12 @@ func (d execDeps) stage(ctx context.Context, job model.JobResponse, spec openCla
 		var sizeErr *artifactDownloadSizeError
 		if errors.As(err, &sizeErr) {
 			return "", nil, &rejectError{Code: deploy.ArtifactHashMismatch,
-				Detail: "OpenClaw artifact 超過宣告 size"}
+				Detail: "OpenClaw artifact exceeds declared size"}
 		}
-		return "", d.stageFailed("下載 artifact 失敗：" + err.Error()), nil
+		return "", d.stageFailed("failed to download artifact: " + err.Error()), nil
 	}
 	if !strings.EqualFold(actualHash, spec.Artifact.SHA256) || actualSize != spec.Artifact.Size {
-		detail := fmt.Sprintf("artifact 期望 sha256=%s size=%d，實得 sha256=%s size=%d",
+		detail := fmt.Sprintf("artifact expected sha256=%s size=%d; got sha256=%s size=%d",
 			shortDigest(spec.Artifact.SHA256), spec.Artifact.Size, shortDigest(actualHash), actualSize)
 		return "", nil, &rejectError{Code: deploy.ArtifactHashMismatch, Detail: detail}
 	}
@@ -601,7 +601,7 @@ func (d execDeps) stage(ctx context.Context, job model.JobResponse, spec openCla
 		"install", "-g", "--prefix", prefix, tgz,
 		"--no-audit", "--no-fund", "--loglevel=error")
 	if err != nil {
-		detail := fmt.Sprintf("npm install 失敗：%v", err)
+		detail := fmt.Sprintf("npm install failed: %v", err)
 		v := d.stageFailed(detail)
 		v.StdoutExcerpt = excerpt(stdout, maxExecOutput)
 		v.StderrExcerpt = excerpt(strings.TrimSpace(detail+"\n"+stderr), maxExecOutput)
@@ -609,9 +609,9 @@ func (d execDeps) stage(ctx context.Context, job model.JobResponse, spec openCla
 	}
 	if fi, err := os.Lstat(d.fsPath(prefix)); err != nil || !fi.IsDir() {
 		if err == nil {
-			err = errors.New("npm 產生的 prefix 不是目錄")
+			err = errors.New("npm-generated prefix is not a directory")
 		}
-		return "", d.stageFailed("npm prefix 版面不合法：" + err.Error()), nil
+		return "", d.stageFailed("invalid npm prefix layout: " + err.Error()), nil
 	}
 	stagedPackage := filepath.Join(prefix, "lib", "node_modules", "openclaw")
 	stdout, stderr, err = d.validateRelease(ctx, prefix, spec.Version, install.NodePath)
@@ -623,9 +623,9 @@ func (d execDeps) stage(ctx context.Context, job model.JobResponse, spec openCla
 		return "", v, nil
 	}
 	if err := os.Rename(d.fsPath(prefix), d.fsPath(release)); err != nil {
-		return "", d.stageFailed("發佈 staging release 失敗：" + err.Error()), nil
+		return "", d.stageFailed("failed to publish staging release: " + err.Error()), nil
 	}
-	return "安裝並驗過新的 release", nil, nil
+	return "installed and verified new release", nil, nil
 }
 
 type artifactDownloadSizeError struct {
@@ -633,7 +633,7 @@ type artifactDownloadSizeError struct {
 }
 
 func (e *artifactDownloadSizeError) Error() string {
-	return fmt.Sprintf("artifact 超過大小上限 %d", e.Maximum)
+	return fmt.Sprintf("artifact exceeds maximum size %d", e.Maximum)
 }
 
 func (d execDeps) downloadArtifactAtMost(ctx context.Context, rawURL, logicalDest string, maximum int64) (string, int64, error) {
@@ -686,18 +686,18 @@ func (d execDeps) validateRelease(ctx context.Context, prefix, version, nodePath
 	pkgDir := filepath.Join(prefix, "lib", "node_modules", "openclaw")
 	got, err := readPackageVersion(d.fsPath(filepath.Join(pkgDir, "package.json")))
 	if err != nil {
-		return "", "", fmt.Errorf("讀 staged package.json 失敗：%w", err)
+		return "", "", fmt.Errorf("failed to read staged package.json: %w", err)
 	}
 	if got != version {
-		return got, "", fmt.Errorf("staged package.json version=%q；要 %q", got, version)
+		return got, "", fmt.Errorf("staged package.json version=%q; want %q", got, version)
 	}
 	indexJS := filepath.Join(pkgDir, "dist", "index.js")
 	stdout, stderr, err := d.run(ctx, nodePath, indexJS, "--version")
 	if err != nil {
-		return stdout, stderr, fmt.Errorf("staged OpenClaw --version 失敗：%w", err)
+		return stdout, stderr, fmt.Errorf("staged OpenClaw --version failed: %w", err)
 	}
 	if !strings.Contains(stdout, version) {
-		return stdout, stderr, fmt.Errorf("staged OpenClaw --version 不含 %q", version)
+		return stdout, stderr, fmt.Errorf("staged OpenClaw --version does not contain %q", version)
 	}
 	return stdout, stderr, nil
 }
@@ -713,7 +713,7 @@ func readPackageVersion(path string) (string, error) {
 		return "", err
 	}
 	if len(b) > 1<<20 {
-		return "", errors.New("package.json 超過 1 MiB")
+		return "", errors.New("package.json exceeds 1 MiB")
 	}
 	var p struct {
 		Version string `json:"version"`
@@ -722,7 +722,7 @@ func readPackageVersion(path string) (string, error) {
 		return "", err
 	}
 	if p.Version == "" {
-		return "", errors.New("version 欄位是空的")
+		return "", errors.New("version field is empty")
 	}
 	return p.Version, nil
 }
@@ -741,7 +741,7 @@ func (d execDeps) runInOwnScope(ctx context.Context, unit, name string, args ...
 }
 
 func (d execDeps) stageFailed(detail string) *model.JobVerificationRequest {
-	v := d.verification("stage", "npm install 並驗證 staging release", "", detail, 1, false)
+	v := d.verification("stage", "npm install and verify staging release", "", detail, 1, false)
 	return &v
 }
 
@@ -762,18 +762,18 @@ func (d execDeps) switchRelease(ctx context.Context, job model.JobResponse, inst
 		envPath := filepath.Join(d.home, ".config", "clawctl", "hermes.env")
 		environment, readErr := readHermesEnvironment(d, envPath)
 		if readErr != nil {
-			return snapshot, fmt.Errorf("讀取 active Hermes identity 失敗：%w", readErr)
+			return snapshot, fmt.Errorf("failed to read active Hermes identity: %w", readErr)
 		}
 		image, parseErr := hermesImageFromEnvironment(environment)
 		if parseErr != nil {
-			return snapshot, fmt.Errorf("active Hermes identity 不合法：%w", parseErr)
+			return snapshot, fmt.Errorf("invalid active Hermes identity: %w", parseErr)
 		}
 		snapshot.hermesImage = image
 	}
 	dropIn := filepath.Join(d.dropInDir(), openClawDropIn)
 	if info, err := os.Lstat(d.fsPath(dropIn)); err == nil {
 		if !info.Mode().IsRegular() || info.Size() > 64<<10 {
-			return snapshot, errors.New("既有 OpenClaw drop-in 不合法")
+			return snapshot, errors.New("invalid existing OpenClaw drop-in")
 		}
 		body, readErr := os.ReadFile(d.fsPath(dropIn))
 		if readErr != nil {
@@ -803,19 +803,19 @@ func (d execDeps) switchRelease(ctx context.Context, job model.JobResponse, inst
 		return snapshot, err
 	}
 	if _, stderr, err := d.systemctl(ctx, "--user", "daemon-reload"); err != nil {
-		return snapshot, fmt.Errorf("systemctl daemon-reload 失敗：%v：%s", err, excerpt(stderr, maxExecOutput))
+		return snapshot, fmt.Errorf("systemctl daemon-reload failed: %v: %s", err, excerpt(stderr, maxExecOutput))
 	}
 	if _, stderr, err := d.systemctl(ctx, "--user", "stop", openClawUnit); err != nil {
-		return snapshot, fmt.Errorf("systemctl stop 失敗：%v：%s", err, excerpt(stderr, maxExecOutput))
+		return snapshot, fmt.Errorf("systemctl stop failed: %v: %s", err, excerpt(stderr, maxExecOutput))
 	}
 	if snapshot.hermesActive {
 		if _, stderr, err := d.systemctl(ctx, "--user", "stop", hermesUnit); err != nil {
-			return snapshot, fmt.Errorf("systemctl stop Hermes 失敗：%v：%s", err, excerpt(stderr, maxExecOutput))
+			return snapshot, fmt.Errorf("systemctl stop Hermes failed: %v: %s", err, excerpt(stderr, maxExecOutput))
 		}
 	}
 	if snapshot.hermesEnabled {
 		if _, stderr, err := d.systemctl(ctx, "--user", "disable", hermesUnit); err != nil {
-			return snapshot, fmt.Errorf("systemctl disable Hermes 失敗：%v：%s", err, excerpt(stderr, maxExecOutput))
+			return snapshot, fmt.Errorf("systemctl disable Hermes failed: %v: %s", err, excerpt(stderr, maxExecOutput))
 		}
 	}
 
@@ -826,16 +826,16 @@ func (d execDeps) switchRelease(ctx context.Context, job model.JobResponse, inst
 	if fi, err := os.Stat(d.fsPath(config)); err == nil && !fi.IsDir() {
 		configCopy := filepath.Join(snapshot.dir, "openclaw.json")
 		if err := copyFile(d.fsPath(config), d.fsPath(configCopy), 0o600); err != nil {
-			return snapshot, fmt.Errorf("快照 openclaw.json 失敗：%w", err)
+			return snapshot, fmt.Errorf("failed to snapshot openclaw.json: %w", err)
 		}
 		snapshot.configCopy = configCopy
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return snapshot, fmt.Errorf("讀 openclaw.json 失敗：%w", err)
+		return snapshot, fmt.Errorf("failed to read openclaw.json: %w", err)
 	}
 	if dbDir, _, ok := d.dbDir(); ok {
 		dbSnapshot := filepath.Join(snapshot.dir, filepath.Base(dbDir))
 		if err := copyTree(d.fsPath(dbDir), d.fsPath(dbSnapshot)); err != nil {
-			return snapshot, fmt.Errorf("快照 OpenClaw DB 目錄失敗：%w", err)
+			return snapshot, fmt.Errorf("failed to snapshot OpenClaw DB directory: %w", err)
 		}
 		snapshot.dbDir = dbDir
 		snapshot.dbSnapshot = dbSnapshot
@@ -844,15 +844,15 @@ func (d execDeps) switchRelease(ctx context.Context, job model.JobResponse, inst
 		return snapshot, err
 	}
 	if err := d.setCurrent(release); err != nil {
-		return snapshot, fmt.Errorf("切換 current symlink 失敗：%w", err)
+		return snapshot, fmt.Errorf("failed to switch current symlink: %w", err)
 	}
 	if !snapshot.openClawEnabled {
 		if _, stderr, err := d.systemctl(ctx, "--user", "enable", openClawUnit); err != nil {
-			return snapshot, fmt.Errorf("systemctl enable 失敗：%v：%s", err, excerpt(stderr, maxExecOutput))
+			return snapshot, fmt.Errorf("systemctl enable failed: %v: %s", err, excerpt(stderr, maxExecOutput))
 		}
 	}
 	if _, stderr, err := d.systemctl(ctx, "--user", "start", openClawUnit); err != nil {
-		return snapshot, fmt.Errorf("systemctl start 失敗：%v：%s", err, excerpt(stderr, maxExecOutput))
+		return snapshot, fmt.Errorf("systemctl start failed: %v: %s", err, excerpt(stderr, maxExecOutput))
 	}
 	return snapshot, nil
 }
@@ -864,9 +864,9 @@ func (d execDeps) configureLocalGateway(ctx context.Context, nodePath, indexJS s
 	}
 	detail := strings.TrimSpace(strings.Join([]string{stdout, stderr}, "\n"))
 	if detail != "" {
-		return fmt.Errorf("設定 OpenClaw gateway.mode=local 失敗：%w：%s", err, excerpt(detail, maxExecOutput))
+		return fmt.Errorf("failed to set OpenClaw gateway.mode=local: %w: %s", err, excerpt(detail, maxExecOutput))
 	}
-	return fmt.Errorf("設定 OpenClaw gateway.mode=local 失敗：%w", err)
+	return fmt.Errorf("failed to set OpenClaw gateway.mode=local: %w", err)
 }
 
 func dropInContent(nodePath, indexJS string, args []string) string {
@@ -938,12 +938,12 @@ func (d execDeps) processEvidence(ctx context.Context, indexJS string) model.Job
 		procText := strings.ReplaceAll(strings.TrimRight(string(cmdline), "\x00"), "\x00", " ")
 		switch {
 		case showRunErr != nil:
-			return d.verification(rule, procPath, "", "問 systemd MainPID 失敗："+commandErr(showErr, showRunErr), exitCode(showRunErr), false)
+			return d.verification(rule, procPath, "", "failed to query systemd MainPID: "+commandErr(showErr, showRunErr), exitCode(showRunErr), false)
 		case mainPID > 0 && procErr == nil && cmdlineContains(cmdline, indexJS):
 			return d.verification(rule, procPath, "MainPID="+strconv.Itoa(mainPID)+"\n"+procText, "", 0, true)
 		case mainPID > 0 && procErr == nil && !systemdForkPlaceholder(procText):
 			return d.verification(rule, procPath, procText,
-				"MainPID "+strconv.Itoa(mainPID)+" 跑的不是 "+indexJS, 1, false)
+				"MainPID "+strconv.Itoa(mainPID)+" is not running "+indexJS, 1, false)
 		}
 		// MainPID=0（unit 在重啟之間）、/proc 讀不到（PID 剛換）、或還是 "(node)" 佔位：等一下再問。
 		if err := d.sleep(ctx, 2*time.Second); err != nil {
@@ -952,7 +952,7 @@ func (d execDeps) processEvidence(ctx context.Context, indexJS string) model.Job
 				last = procErr.Error()
 			}
 			return d.verification(rule, procPath, last,
-				"等到期限仍讀不到新 release 的 argv：MainPID="+strconv.Itoa(mainPID)+"；"+err.Error(), 1, false)
+				"timed out waiting for new release argv: MainPID="+strconv.Itoa(mainPID)+"; "+err.Error(), 1, false)
 		}
 	}
 }
@@ -966,7 +966,7 @@ func systemdForkPlaceholder(cmdline string) bool {
 
 func (d execDeps) health(ctx context.Context, port int, rule string) model.JobVerificationRequest {
 	rawURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
-	last := "尚未收到回應"
+	last := "no response received yet"
 	for {
 		resp, err := d.httpGet(ctx, rawURL)
 		if err == nil {
@@ -983,9 +983,9 @@ func (d execDeps) health(ctx context.Context, port int, rule string) model.JobVe
 			if readErr != nil {
 				last = readErr.Error()
 			} else if jsonErr != nil {
-				last = fmt.Sprintf("HTTP %d；JSON 錯誤：%v；body=%s", resp.StatusCode, jsonErr, last)
+				last = fmt.Sprintf("HTTP %d; JSON error: %v; body=%s", resp.StatusCode, jsonErr, last)
 			} else {
-				last = fmt.Sprintf("HTTP %d；body=%s", resp.StatusCode, last)
+				last = fmt.Sprintf("HTTP %d; body=%s", resp.StatusCode, last)
 			}
 		} else {
 			last = err.Error()
@@ -1002,16 +1002,16 @@ func (d execDeps) rollback(ctx context.Context, job model.JobResponse, install *
 	dropIn := filepath.Join(d.dropInDir(), openClawDropIn)
 	if snapshot.previous.DropInExisted {
 		if err := atomicWriteFile(d.fsPath(dropIn), snapshot.previous.DropIn, 0o644); err != nil {
-			problems = append(problems, "還原 drop-in："+err.Error())
+			problems = append(problems, "restore drop-in: "+err.Error())
 		}
 	} else if err := os.Remove(d.fsPath(dropIn)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		problems = append(problems, "刪除 drop-in："+err.Error())
+		problems = append(problems, "delete drop-in: "+err.Error())
 	}
 	if _, stderr, err := d.systemctl(ctx, "--user", "daemon-reload"); err != nil {
-		problems = append(problems, "daemon-reload："+commandErr(stderr, err))
+		problems = append(problems, "daemon-reload: "+commandErr(stderr, err))
 	}
 	if _, stderr, err := d.systemctl(ctx, "--user", "stop", openClawUnit); err != nil {
-		problems = append(problems, "stop："+commandErr(stderr, err))
+		problems = append(problems, "stop: "+commandErr(stderr, err))
 	}
 
 	failedSuffix := ".failed-" + safeJobID(job.JobID)
@@ -1022,28 +1022,28 @@ func (d execDeps) rollback(ctx context.Context, job model.JobResponse, install *
 	if currentDB != "" {
 		if _, err := os.Lstat(d.fsPath(currentDB)); err == nil {
 			if err := renameWithoutOverwrite(d.fsPath(currentDB), d.fsPath(currentDB+failedSuffix)); err != nil {
-				problems = append(problems, "保留失敗 DB："+err.Error())
+				problems = append(problems, "preserve failed DB: "+err.Error())
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
-			problems = append(problems, "讀失敗 DB："+err.Error())
+			problems = append(problems, "read failed DB: "+err.Error())
 		}
 	}
 	if snapshot.dbSnapshot != "" {
 		if err := copyTree(d.fsPath(snapshot.dbSnapshot), d.fsPath(snapshot.dbDir)); err != nil {
-			problems = append(problems, "還原 DB："+err.Error())
+			problems = append(problems, "restore DB: "+err.Error())
 		}
 	}
 	if snapshot.configSource != "" {
 		if _, err := os.Lstat(d.fsPath(snapshot.configSource)); err == nil {
 			if err := renameWithoutOverwrite(d.fsPath(snapshot.configSource), d.fsPath(snapshot.configSource+failedSuffix)); err != nil {
-				problems = append(problems, "保留失敗 openclaw.json："+err.Error())
+				problems = append(problems, "preserve failed openclaw.json: "+err.Error())
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
-			problems = append(problems, "讀失敗 openclaw.json："+err.Error())
+			problems = append(problems, "read failed openclaw.json: "+err.Error())
 		}
 		if snapshot.configCopy != "" {
 			if err := copyFile(d.fsPath(snapshot.configCopy), d.fsPath(snapshot.configSource), 0o600); err != nil {
-				problems = append(problems, "還原 openclaw.json："+err.Error())
+				problems = append(problems, "restore openclaw.json: "+err.Error())
 			}
 		}
 	}
@@ -1052,29 +1052,29 @@ func (d execDeps) rollback(ctx context.Context, job model.JobResponse, install *
 	// 靠 current 回答「現在是哪一版」的人會被騙。previous 不在 releases 底下就沒有 current 可指。
 	if underDir(snapshot.previous.RunningDir, d.releasesDir()) {
 		if err := d.setCurrent(releaseRootOf(snapshot.previous.RunningDir, d.releasesDir())); err != nil {
-			problems = append(problems, "還原 current symlink："+err.Error())
+			problems = append(problems, "restore current symlink: "+err.Error())
 		}
 	} else if err := os.Remove(d.fsPath(filepath.Join(d.openClawRoot(), "current"))); err != nil && !errors.Is(err, os.ErrNotExist) {
-		problems = append(problems, "拿掉 current symlink："+err.Error())
+		problems = append(problems, "remove current symlink: "+err.Error())
 	}
 	if !snapshot.openClawEnabled {
 		if _, stderr, err := d.systemctl(ctx, "--user", "disable", openClawUnit); err != nil {
-			problems = append(problems, "disable "+openClawUnit+"："+commandErr(stderr, err))
+			problems = append(problems, "disable "+openClawUnit+": "+commandErr(stderr, err))
 		}
 	}
 	if snapshot.hermesEnabled {
 		if _, stderr, err := d.systemctl(ctx, "--user", "enable", hermesUnit); err != nil {
-			problems = append(problems, "enable "+hermesUnit+"："+commandErr(stderr, err))
+			problems = append(problems, "enable "+hermesUnit+": "+commandErr(stderr, err))
 		}
 	}
 	if snapshot.openClawActive {
 		if _, stderr, err := d.systemctl(ctx, "--user", "start", openClawUnit); err != nil {
-			problems = append(problems, "start OpenClaw："+commandErr(stderr, err))
+			problems = append(problems, "start OpenClaw: "+commandErr(stderr, err))
 		}
 	}
 	if snapshot.hermesActive {
 		if _, stderr, err := d.systemctl(ctx, "--user", "start", hermesUnit); err != nil {
-			problems = append(problems, "start Hermes："+commandErr(stderr, err))
+			problems = append(problems, "start Hermes: "+commandErr(stderr, err))
 		}
 	}
 	var health model.JobVerificationRequest
@@ -1090,7 +1090,7 @@ func (d execDeps) rollback(ctx context.Context, job model.JobResponse, install *
 			for _, check := range checks {
 				evidence = append(evidence, check.RuleID+"="+strconv.FormatBool(check.Passed))
 				if !check.Passed {
-					problems = append(problems, "verify Hermes "+check.RuleID+"："+check.StderrExcerpt)
+					problems = append(problems, "verify Hermes "+check.RuleID+": "+check.StderrExcerpt)
 				}
 			}
 			stdout = strings.Join(evidence, " ")
@@ -1100,13 +1100,13 @@ func (d execDeps) rollback(ctx context.Context, job model.JobResponse, install *
 	if len(problems) > 0 {
 		health.Passed = false
 		health.ExitCode = 1
-		health.StderrExcerpt = excerpt(strings.Join(append(problems, health.StderrExcerpt), "；"), maxExecOutput)
+		health.StderrExcerpt = excerpt(strings.Join(append(problems, health.StderrExcerpt), "; "), maxExecOutput)
 	}
 	if !health.Passed {
 		// ⚠ 擋的是「rollback 指令跑過」被誤報成「舊 gateway 已回來」；
 		// Restart=always 下 systemctl start 成功仍可能立即 crash-loop。
-		health.StderrExcerpt = excerpt("退回後 health 仍未通過；"+health.StderrExcerpt, maxExecOutput)
-		log.Printf("錯誤：工作單 %s 退回後 health 仍未通過：%s", job.JobID, health.StderrExcerpt)
+		health.StderrExcerpt = excerpt("health still failing after rollback; "+health.StderrExcerpt, maxExecOutput)
+		log.Printf("ERROR: job %s health still failing after rollback: %s", job.JobID, health.StderrExcerpt)
 	}
 	_ = install // 保留呼叫形狀：rollback 的座標來自 previous.json，而非重新猜測。
 	return health
@@ -1115,19 +1115,19 @@ func (d execDeps) rollback(ctx context.Context, job model.JobResponse, install *
 func hermesImageFromEnvironment(environment string) (string, error) {
 	lines := strings.Split(environment, "\n")
 	if len(lines) != 3 || lines[2] != "" {
-		return "", errors.New("Hermes environment layout 不合法")
+		return "", errors.New("invalid Hermes environment layout")
 	}
 	image, ok := strings.CutPrefix(lines[0], "HERMES_IMAGE=")
 	if !ok || image == "" {
-		return "", errors.New("HERMES_IMAGE 缺少")
+		return "", errors.New("missing HERMES_IMAGE")
 	}
 	version, ok := strings.CutPrefix(image, "docker.io/nousresearch/hermes-agent:v")
 	if !ok || !validHermesExactVersion(version) {
-		return "", errors.New("HERMES_IMAGE 不合法")
+		return "", errors.New("invalid HERMES_IMAGE")
 	}
 	index, ok := strings.CutPrefix(lines[1], "HERMES_IMAGE_INDEX=")
 	if !ok || !validHermesDigest(index) {
-		return "", errors.New("HERMES_IMAGE_INDEX 不合法")
+		return "", errors.New("invalid HERMES_IMAGE_INDEX")
 	}
 	return image, nil
 }
@@ -1253,7 +1253,7 @@ func copyFile(src, dst string, mode fs.FileMode) error {
 
 func renameWithoutOverwrite(src, dst string) error {
 	if _, err := os.Lstat(dst); err == nil {
-		return fmt.Errorf("證據路徑已存在，不覆寫：%s", dst)
+		return fmt.Errorf("evidence path already exists, not overwriting: %s", dst)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -1302,7 +1302,7 @@ func copyTree(src, dst string) error {
 			return os.Symlink(link, target)
 		}
 		if !info.Mode().IsRegular() {
-			return fmt.Errorf("不支援快照特殊檔案 %s（mode %s）", path, info.Mode())
+			return fmt.Errorf("snapshotting special file %s not supported (mode %s)", path, info.Mode())
 		}
 		return copyFile(path, target, info.Mode().Perm())
 	})
@@ -1462,14 +1462,14 @@ func sweepOrphanStaging(ctx context.Context, home, fsRoot string, systemctl exec
 	units := parseStageScopeUnits(stdout)
 	var reports []string
 	if listErr != nil {
-		reports = append(reports, "掃不到孤兒 scope（不是 0）："+listErr.Error())
+		reports = append(reports, "cannot list orphan scopes (not 0): "+listErr.Error())
 	}
 
 	// stillAlive：沒停掉（stop 失敗或預算用完沒輪到）的 scope 對應的 staging 目錄名；這些不刪。
 	stillAlive := map[string]bool{}
 	for i, unit := range units {
 		if err := ctx.Err(); err != nil {
-			reports = append(reports, fmt.Sprintf("孤兒 scope 掃描中止：還有 %d 個孤兒 scope 沒處理：%v", len(units)-i, err))
+			reports = append(reports, fmt.Sprintf("orphan scope sweep aborted: %d orphan scopes remain unhandled: %v", len(units)-i, err))
 			for _, left := range units[i:] {
 				stillAlive[stageScopeStagingDir(left)] = true
 			}
@@ -1478,11 +1478,11 @@ func sweepOrphanStaging(ctx context.Context, home, fsRoot string, systemctl exec
 		// systemctl stop 會阻塞到 scope 停完；scope 預設以 control-group 為單位，
 		// 先送 SIGTERM，逾時再由 systemd 送 SIGKILL。
 		if _, _, err := systemctl(ctx, "--user", "stop", unit); err != nil {
-			reports = append(reports, fmt.Sprintf("停不掉孤兒 scope %s：%v", unit, err))
+			reports = append(reports, fmt.Sprintf("failed to stop orphan scope %s: %v", unit, err))
 			stillAlive[stageScopeStagingDir(unit)] = true
 			continue
 		}
-		reports = append(reports, "已停掉孤兒 npm scope："+unit)
+		reports = append(reports, "stopped orphan npm scope: "+unit)
 	}
 
 	// ⚠ 必須先停 scope 再刪 staging；反過來時 npm 會把 prefix 重新 mkdir 回去，
@@ -1490,16 +1490,16 @@ func sweepOrphanStaging(ctx context.Context, home, fsRoot string, systemctl exec
 	// 所以沒停掉的 scope，它的 staging 也留著（stillAlive）。
 	cleaned, kept, cleanErr := cleanOpenClawStagingKeeping(home, fsRoot, stillAlive)
 	if cleanErr != nil {
-		reports = append(reports, "清理 OpenClaw staging 殘骸失敗（工作單迴圈仍啟動）："+cleanErr.Error())
+		reports = append(reports, "failed to clean OpenClaw staging remnants (job loop still started): "+cleanErr.Error())
 	}
 	for _, path := range kept {
-		reports = append(reports, "留著 "+path+"：它的 npm scope 還沒停，刪了會被寫回來；下次啟動再清")
+		reports = append(reports, "keeping "+path+": its npm scope has not stopped and would be recreated; will clean on next startup")
 	}
 	for _, path := range cleaned {
-		reports = append(reports, "已清理上次中斷留下的 OpenClaw staging："+path)
+		reports = append(reports, "cleaned OpenClaw staging left from previous interruption: "+path)
 	}
 	if listErr == nil && len(units) == 0 && cleanErr == nil && len(cleaned) == 0 {
-		reports = append(reports, "啟動掃描：沒有孤兒 npm scope、沒有 staging 殘骸")
+		reports = append(reports, "startup sweep: no orphan npm scopes, no staging remnants")
 	}
 	return reports
 }

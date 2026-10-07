@@ -125,27 +125,27 @@ func runTailnetCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 	fs := flag.NewFlagSet("tailnet", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub tailnet [--json] [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "      clawctl-hub tailnet ignore|unignore --peer-id ID --reason REASON [mutation flags]")
-		fmt.Fprintln(errOut, "  預設使用 discovered HTTP operator API；--db 是 stopped-service direct DB break-glass。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub tailnet [--json] [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "       clawctl-hub tailnet ignore|unignore --peer-id ID --reason REASON [mutation flags]")
+		fmt.Fprintln(errOut, "  default uses discovered HTTP operator API; --db is stopped-service direct DB break-glass")
 		fs.PrintDefaults()
 	}
-	hubURL := fs.String("hub-url", "", "HTTP operator API base URL（省略時自動發現）")
-	dbPath := fs.String("db", "", "stopped-service direct DB break-glass 的既有 SQLite 檔位置")
-	jsonOutput := fs.Bool("json", false, "輸出 stable operator JSON DTO")
+	hubURL := fs.String("hub-url", "", "HTTP operator API base URL (auto-discovered if omitted)")
+	dbPath := fs.String("db", "", "path to existing SQLite file for stopped-service direct DB break-glass")
+	jsonOutput := fs.Bool("json", false, "output stable operator JSON DTO")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
 		fs.Usage()
-		return fmt.Errorf("tailnet: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("tailnet: positional arguments not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	seen := visitedFlags(fs)
 	options := tailnetCommandOptions{HubURL: *hubURL, DBPath: *dbPath, ExplicitHub: seen["hub-url"], ExplicitDB: seen["db"], JSON: *jsonOutput}
 	return withTailnetCommandBackend(ctx, "tailnet read", options, deps, func(backend tailnetCommandBackend, source string, now time.Time) error {
 		result, err := backend.Tailnet(ctx, now)
 		if err != nil {
-			return fmt.Errorf("讀取 Tailnet 清單失敗（%s）：%w", source, err)
+			return fmt.Errorf("failed to read Tailnet overview (%s): %w", source, err)
 		}
 		if !result.Available {
 			if options.JSON {
@@ -155,7 +155,7 @@ func runTailnetCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 			} else if err := writeTailnetOverview(out, source, result); err != nil {
 				return err
 			}
-			return fmt.Errorf("Tailnet 清單無法取得（%s）：%s", source, result.Unavailable)
+			return fmt.Errorf("Tailnet overview unavailable (%s): %s", source, result.Unavailable)
 		}
 		if options.JSON {
 			return writeTailnetJSON(out, result)
@@ -168,39 +168,39 @@ func runTailnetMutationCommand(ctx context.Context, action string, argv []string
 	fs := flag.NewFlagSet("tailnet "+action, flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintf(errOut, "用法：clawctl-hub tailnet %s --peer-id ID --reason REASON [--preview | --confirm-hostname HOST] [--json] [--hub-url URL | --db PATH]\n", action)
-		fmt.Fprintln(errOut, "  ignore 預設 30 天；可用 --days 1..366，retry 則重用原 --expires-at。")
-		fmt.Fprintln(errOut, "  ambiguous response retry：重用 --idempotency-key、--expected-revision、--preview-digest；ignore 另重用 --expires-at。")
+		fmt.Fprintf(errOut, "Usage: clawctl-hub tailnet %s --peer-id ID --reason REASON [--preview | --confirm-hostname HOST] [--json] [--hub-url URL | --db PATH]\n", action)
+		fmt.Fprintln(errOut, "  ignore defaults to 30 days; use --days 1..366, reuse original --expires-at on retry")
+		fmt.Fprintln(errOut, "  ambiguous response retry: reuse --idempotency-key, --expected-revision, --preview-digest; ignore additionally reuses --expires-at")
 		fs.PrintDefaults()
 	}
-	hubURL := fs.String("hub-url", "", "HTTP operator API base URL（省略時自動發現）")
-	dbPath := fs.String("db", "", "stopped-service direct DB break-glass 的既有 SQLite 檔位置")
+	hubURL := fs.String("hub-url", "", "HTTP operator API base URL (auto-discovered if omitted)")
+	dbPath := fs.String("db", "", "path to existing SQLite file for stopped-service direct DB break-glass")
 	peerID := fs.String("peer-id", "", "Tailscale stable node ID")
-	reason := fs.String("reason", "", "建立或移除規則的理由")
-	confirm := fs.String("confirm-hostname", "", "套用時逐字確認 preview 顯示的 hostname")
-	days := fs.Int("days", 30, "ignore 規則效期天數（1..366）")
-	expiresRaw := fs.String("expires-at", "", "retry 使用原 RFC3339 expiry")
-	previewOnly := fs.Bool("preview", false, "只顯示規則預覽，不套用")
-	jsonOutput := fs.Bool("json", false, "輸出 stable operator JSON DTO")
-	key := fs.String("idempotency-key", "", "ambiguous response retry 使用原 request key")
-	revision := fs.Int64("expected-revision", 0, "ambiguous response retry 使用原 revision")
-	digest := fs.String("preview-digest", "", "ambiguous response retry 使用原 preview digest")
+	reason := fs.String("reason", "", "reason for creating or removing the rule")
+	confirm := fs.String("confirm-hostname", "", "exact match confirmation of hostname displayed in preview when applying")
+	days := fs.Int("days", 30, "ignore rule duration in days (1..366)")
+	expiresRaw := fs.String("expires-at", "", "original RFC3339 expiry for retry")
+	previewOnly := fs.Bool("preview", false, "show rule preview only, do not apply")
+	jsonOutput := fs.Bool("json", false, "output stable operator JSON DTO")
+	key := fs.String("idempotency-key", "", "original request key for ambiguous response retry")
+	revision := fs.Int64("expected-revision", 0, "original revision for ambiguous response retry")
+	digest := fs.String("preview-digest", "", "original preview digest for ambiguous response retry")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("tailnet %s: 不接受 positional arguments：%q", action, strings.Join(fs.Args(), " "))
+		return fmt.Errorf("tailnet %s: positional arguments not accepted: %q", action, strings.Join(fs.Args(), " "))
 	}
 	seen := visitedFlags(fs)
 	if seen["hub-url"] && seen["db"] {
-		return fmt.Errorf("tailnet %s: --hub-url 與 --db 不可同時明示", action)
+		return fmt.Errorf("tailnet %s: cannot specify both --hub-url and --db", action)
 	}
 	if (seen["hub-url"] && strings.TrimSpace(*hubURL) == "") || (seen["db"] && strings.TrimSpace(*dbPath) == "") {
-		return fmt.Errorf("tailnet %s: 明示的 --hub-url / --db 不可為空", action)
+		return fmt.Errorf("tailnet %s: explicit --hub-url / --db cannot be empty", action)
 	}
 	canonicalPeer, canonicalReason, canonicalConfirm := strings.TrimSpace(*peerID), strings.TrimSpace(*reason), strings.TrimSpace(*confirm)
 	if canonicalPeer == "" || canonicalReason == "" {
-		return fmt.Errorf("tailnet %s: --peer-id 與 --reason 必填", action)
+		return fmt.Errorf("tailnet %s: --peer-id and --reason are required", action)
 	}
 	retryCount := 0
 	for _, name := range []string{"idempotency-key", "expected-revision", "preview-digest"} {
@@ -209,16 +209,16 @@ func runTailnetMutationCommand(ctx context.Context, action string, argv []string
 		}
 	}
 	if retryCount != 0 && retryCount != 3 {
-		return fmt.Errorf("tailnet %s: retry 必須同時提供原 --idempotency-key、--expected-revision 與 --preview-digest", action)
+		return fmt.Errorf("tailnet %s: retry requires original --idempotency-key, --expected-revision, and --preview-digest together", action)
 	}
 	if *previewOnly && (retryCount != 0 || seen["confirm-hostname"]) {
-		return fmt.Errorf("tailnet %s: --preview 不接受 confirmation 或 apply retry coordinates", action)
+		return fmt.Errorf("tailnet %s: --preview does not accept confirmation or apply retry coordinates", action)
 	}
 	if !*previewOnly && canonicalConfirm == "" {
-		return fmt.Errorf("tailnet %s: apply 的 --confirm-hostname 必填，且不會由 preview 自動代填", action)
+		return fmt.Errorf("tailnet %s: apply requires --confirm-hostname and is not auto-filled by preview", action)
 	}
 	if retryCount == 3 && (strings.TrimSpace(*key) == "" || *revision < 0 || !validLifecycleRetryDigest(strings.TrimSpace(*digest))) {
-		return fmt.Errorf("tailnet %s: retry key、revision 或 preview digest 不合法", action)
+		return fmt.Errorf("tailnet %s: retry key, revision, or preview digest is invalid", action)
 	}
 	now := deps.now
 	if now == nil {
@@ -227,22 +227,22 @@ func runTailnetMutationCommand(ctx context.Context, action string, argv []string
 	expiresAt := time.Time{}
 	if action == "ignore" {
 		if *days < 1 || *days > 366 {
-			return errors.New("tailnet ignore: --days 必須是 1 至 366")
+			return errors.New("tailnet ignore: --days must be between 1 and 366")
 		}
 		if seen["expires-at"] {
 			parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(*expiresRaw))
 			if err != nil {
-				return fmt.Errorf("tailnet ignore: --expires-at 必須是 RFC3339：%w", err)
+				return fmt.Errorf("tailnet ignore: --expires-at must be RFC3339: %w", err)
 			}
 			expiresAt = parsed.UTC()
 		} else {
 			if retryCount != 0 {
-				return errors.New("tailnet ignore: retry 必須重用原 --expires-at")
+				return errors.New("tailnet ignore: retry must reuse original --expires-at")
 			}
 			expiresAt = now().UTC().Add(time.Duration(*days) * 24 * time.Hour)
 		}
 	} else if seen["days"] || seen["expires-at"] {
-		return errors.New("tailnet unignore 不接受 --days 或 --expires-at")
+		return errors.New("tailnet unignore does not accept --days or --expires-at")
 	}
 	options := tailnetCommandOptions{
 		HubURL: *hubURL, DBPath: *dbPath, ExplicitHub: seen["hub-url"], ExplicitDB: seen["db"],
@@ -260,7 +260,7 @@ func withTailnetCommandBackend(ctx context.Context, command string, options tail
 	run func(tailnetCommandBackend, string, time.Time) error,
 ) error {
 	if options.ExplicitHub && options.ExplicitDB {
-		return fmt.Errorf("%s: --hub-url 與 --db 不可同時明示", command)
+		return fmt.Errorf("%s: cannot specify both --hub-url and --db", command)
 	}
 	nowFn := deps.now
 	if nowFn == nil {
@@ -268,7 +268,7 @@ func withTailnetCommandBackend(ctx context.Context, command string, options tail
 	}
 	if options.ExplicitDB {
 		if deps.newTailnetSource == nil {
-			return fmt.Errorf("%s: Tailnet source 未初始化", command)
+			return fmt.Errorf("%s: Tailnet source not initialized", command)
 		}
 		return withDirectOperatorStore(ctx, command, options.DBPath, deps.machineCommandDeps, func(st *store.Store) error {
 			return run(tailnetDirectBackend{service: operator.NewWithTailnet(st, deps.newTailnetSource())}, "direct DB operator service", nowFn().UTC())
@@ -295,7 +295,7 @@ func executeTailnetMutation(ctx context.Context, backend tailnetCommandBackend, 
 			PeerID: options.PeerID, Action: options.Action, ExpiresAt: options.ExpiresAt, Reason: options.Reason,
 		}, now)
 		if err != nil {
-			return fmt.Errorf("預覽 Tailnet 規則失敗（%s）：%w", source, err)
+			return fmt.Errorf("failed to preview Tailnet rule (%s): %w", source, err)
 		}
 		if options.Preview {
 			if options.JSON {
@@ -323,14 +323,14 @@ func executeTailnetMutation(ctx context.Context, backend tailnetCommandBackend, 
 				_ = writeTailnetOverview(errOut, source+" authoritative current", current)
 			}
 		}
-		return fmt.Errorf("套用 Tailnet 規則失敗（%s；idempotency-key=%q expected-revision=%d%s）：%w",
+		return fmt.Errorf("failed to apply Tailnet rule (%s; idempotency-key=%q expected-revision=%d%s): %w",
 			source, apply.IdempotencyKey, apply.ExpectedRevision, operatorRejectionReplayNote(err), err)
 	}
 	var current *operator.TailnetOverview
 	if result.Replayed {
 		read, err := backend.Tailnet(ctx, now)
 		if err != nil || !read.Available {
-			return fmt.Errorf("Tailnet 規則已回放歷史 receipt，但重新讀取 authoritative current 失敗：%v", err)
+			return fmt.Errorf("Tailnet rule replayed historical receipt, but failed to reload authoritative current: %v", err)
 		}
 		current = &read
 	}

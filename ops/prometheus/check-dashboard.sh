@@ -18,12 +18,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DASH="$HERE/grafana/clawctl.json"
 
 [ -r "$DASH" ] || {
-	echo "讀不到 $DASH" >&2
+	echo "Cannot read $DASH" >&2
 	exit 1
 }
 
-echo "儀表板 $DASH"
-echo "資料來源 $PROM"
+echo "Dashboard $DASH"
+echo "Data source $PROM"
 echo
 
 python3 - "$DASH" "$PROM" <<'PY'
@@ -59,7 +59,7 @@ for p in dash["panels"]:
         data, err = query(expr)
         if err is not None:
             bad += 1
-            print("   \033[31m✗\033[0m %-34s 打不到 Prometheus：%s" % (legend, err))
+            print("   \033[31m✗\033[0m %-34s Cannot reach Prometheus: %s" % (legend, err))
             continue
         if data.get("status") != "success":
             bad += 1
@@ -69,7 +69,7 @@ for p in dash["panels"]:
         n = len(data["data"]["result"])
         if n == 0:
             empty += 1
-            print("   \033[33m○\033[0m %-34s \033[33m0 條序列 —— 這一格會是空的\033[0m" % legend)
+            print("   \033[33m○\033[0m %-34s \033[33m0 series — this panel will be empty\033[0m" % legend)
             print("       %s" % expr)
         else:
             ok += 1
@@ -77,20 +77,20 @@ for p in dash["panels"]:
             labels = sample["metric"]
             who = labels.get("machine") or labels.get("instance") or "?"
             val = sample.get("value", ["", "?"])[1]
-            print("   \033[32m✓\033[0m %-34s %d 條   例：%s = %s" % (legend, n, who, val))
+            print("   \033[32m✓\033[0m %-34s %d series   e.g.: %s = %s" % (legend, n, who, val))
     print()
 
 print("─" * 60)
-print("有資料 %d   \033[33m空的 %d\033[0m   \033[31m查詢壞掉 %d\033[0m" % (ok, empty, bad))
+print("With data %d   \033[33mEmpty %d\033[0m   \033[31mBroken query %d\033[0m" % (ok, empty, bad))
 
 if bad:
-    print("\n查詢壞掉＝指標名寫錯或語法錯，一定要修。")
+    print("\nBroken query = typo in metric name or syntax error, must fix")
 if empty:
     print("""
-空的不一定是錯的，但一定要先問清楚是哪一種：
-  (a) 那件事真的沒發生（例：沒有任何憑證即將到期）—— 沒問題
-  (b) 指標名打錯 / label 撞名（exported_machine）/ job 沒在抓 —— 是 bug
-分辨方法：拿掉 label 篩選再查一次。整個指標族都空的話是 (b)。""")
+Empty is not necessarily wrong, but you must first clarify which kind it is:
+  (a) That event really did not happen (e.g. no credentials expiring soon) — ok
+  (b) Typo in metric name / conflicting label (exported_machine) / job not scraping — bug
+How to tell: remove label filter and query again. If the entire metric family is empty, it is (b)""")
 
 sys.exit(1 if (bad or empty) else 0)
 PY

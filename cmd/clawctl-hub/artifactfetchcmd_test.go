@@ -170,7 +170,7 @@ func TestArtifactFetchCLIHTTPPreviewEnqueueAndWaitsForTerminal(t *testing.T) {
 		terminal.ResultSHA256 == nil || terminal.OperationID != "0123456789abcdef0123456789abcdef" {
 		t.Fatalf("terminal=%+v err=%v stdout=%s", terminal, err, out.String())
 	}
-	if !strings.Contains(errOut.String(), "Artifact fetch（HTTP operator API）") ||
+	if !strings.Contains(errOut.String(), "Artifact fetch (HTTP operator API)") ||
 		!strings.Contains(errOut.String(), artifactFetchCLITestDigest("a")) ||
 		!strings.Contains(errOut.String(), artifact.ProductionRegistryOrigin) {
 		t.Fatalf("preview impact missing: %s", errOut.String())

@@ -48,7 +48,7 @@ func TestMachinesCLIUsesDiscoveredOperatorAPIAndNeverTouchesDB(t *testing.T) {
 		t.Fatalf("machines list: %v; stderr=%s", err, errOut.String())
 	}
 	if !strings.Contains(out.String(), "HTTP operator API") ||
-		!strings.Contains(out.String(), f.machine.id) || !strings.Contains(out.String(), "分母") {
+		!strings.Contains(out.String(), f.machine.id) || !strings.Contains(out.String(), "denominator") {
 		t.Fatalf("list output=%q", out.String())
 	}
 	if _, err := os.Stat(missingDB); !os.IsNotExist(err) {
@@ -190,14 +190,14 @@ func TestMachinesCLIShowsDetailWhenAssignedUserUnavailable(t *testing.T) {
 				}
 				if !unavailable {
 					baseline = out.String()
-					if !jsonOutput && !strings.Contains(baseline, "指派使用者: 未指派（版本 0）\n") {
+					if !jsonOutput && !strings.Contains(baseline, "assigned user: unassigned (revision 0)\n") {
 						t.Fatalf("成功讀取時缺少指派狀態：%s", baseline)
 					}
 					continue
 				}
 				want := baseline
 				if !jsonOutput {
-					want = strings.Replace(baseline, "指派使用者: 未指派（版本 0）\n", "指派使用者: 無法取得\n", 1)
+					want = strings.Replace(baseline, "assigned user: unassigned (revision 0)\n", "assigned user: unavailable\n", 1)
 				}
 				if out.String() != want {
 					t.Fatalf("指派使用者無法取得時，明細或狀態詞不符：\n實際=%s\n預期=%s", out.String(), want)

@@ -81,7 +81,7 @@ type MachineDataHolding struct {
 // （observed_state 3.6 萬列）實測 19 張表一輪 8 毫秒。
 func (s *Store) MachineDataHoldings(machineID string) ([]MachineDataHolding, error) {
 	if machineID == "" {
-		return nil, fmt.Errorf("store: machine data holdings 需要 machine id")
+		return nil, fmt.Errorf("store: machine data holdings requires machine id")
 	}
 	var exists bool
 	if err := s.rdb.QueryRow(
@@ -96,7 +96,7 @@ func (s *Store) MachineDataHoldings(machineID string) ([]MachineDataHolding, err
 	for _, table := range machineDataTables {
 		holding, err := s.machineDataHolding(table, machineID)
 		if err != nil {
-			return nil, fmt.Errorf("store: 讀 %s 的留存量: %w", table.Table, err)
+			return nil, fmt.Errorf("store: read %s holdings: %w", table.Table, err)
 		}
 		holdings = append(holdings, holding)
 	}

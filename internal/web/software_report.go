@@ -177,7 +177,7 @@ func buildSoftwareMatrix(report operator.SoftwareReport) softwareMatrix {
 func (s *Server) softwareMatrix(now time.Time) softwareMatrix {
 	report, err := s.operator.SoftwareReport(now)
 	if err != nil {
-		log.Printf("讀全機隊軟體清查失敗（總覽照常顯示）：%v", err)
+		log.Printf("failed to read full fleet software inventory (overview displays normally): %v", err)
 		return softwareMatrix{}
 	}
 	return buildSoftwareMatrix(report)

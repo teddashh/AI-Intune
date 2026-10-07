@@ -26,7 +26,7 @@ func cmdNotifyCheck(argv []string) {
 }
 
 func writeNotifyCheckUsage(errOut io.Writer) {
-	fmt.Fprintln(errOut, "usage: clawctl-hub notify-check [--notify-env PATH]")
+	fmt.Fprintln(errOut, "Usage: clawctl-hub notify-check [--notify-env PATH]")
 	fmt.Fprintln(errOut, "  Load the notify env file and check configured channels.")
 	fmt.Fprintln(errOut, "  Telegram: getMe and getChat (sends nothing).")
 	fmt.Fprintln(errOut, "  Webhook: validate config and print scheme+host (does not POST).")

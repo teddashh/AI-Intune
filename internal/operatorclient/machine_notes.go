@@ -60,7 +60,7 @@ func (c *Client) PreviewMachineNotes(ctx context.Context, machineID string,
 		out.CurrentNotes == out.Notes || out.PreviewedAt.IsZero() || out.PreviewedAt.Location() != time.UTC ||
 		!out.RegistryNotesChanged || !out.MachineConfigurationUnchanged || !out.AgentUnaffected ||
 		!validSHA256Digest(out.PreviewDigest) {
-		return MachineNotesPreviewResponse{}, errors.New("operator client: machine notes preview 不符合 target 與影響契約")
+		return MachineNotesPreviewResponse{}, errors.New("operator client: machine notes preview does not conform to target and effect contract")
 	}
 	if err := validateNotesText(out.CurrentNotes); err != nil {
 		return MachineNotesPreviewResponse{}, err
@@ -80,7 +80,7 @@ func (c *Client) PutMachineNotes(ctx context.Context, machineID, idempotencyKey 
 		validateRenameText(body.ConfirmDisplayName) != nil ||
 		!validSHA256Digest(body.PreviewDigest) || strings.TrimSpace(body.Reason) == "" ||
 		body.Reason != strings.TrimSpace(body.Reason) || len(body.Reason) > 500 {
-		return out, errors.New("operator client: machine notes apply request 不完整或不合法")
+		return out, errors.New("operator client: machine notes apply request is incomplete or invalid")
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -111,17 +111,17 @@ func (c *Client) PutMachineNotes(ctx context.Context, machineID, idempotencyKey 
 		out.NotesPresent != (body.Notes != "") || out.AppliedAt.IsZero() || out.AppliedAt.Location() != time.UTC ||
 		!out.RegistryNotesChanged || !out.MachineConfigurationUnchanged || !out.AgentUnaffected ||
 		out.PreviewDigest != body.PreviewDigest || out.Replayed != replayed {
-		return MachineNotesResponse{}, errors.New("operator client: machine notes result 不符合 request 與影響契約")
+		return MachineNotesResponse{}, errors.New("operator client: machine notes result does not conform to request and effect contract")
 	}
 	return out, nil
 }
 
 func validateNotesText(value string) error {
 	if len(value) > store.OperatorMachineNotesMaxBytes || !utf8.ValidString(value) {
-		return errors.New("operator client: machine notes 不合法")
+		return errors.New("operator client: machine notes is invalid")
 	}
 	if value != strings.TrimSpace(value) {
-		return errors.New("operator client: machine notes 前後不可有空白")
+		return errors.New("operator client: machine notes cannot have leading or trailing whitespace")
 	}
 	if value != "" {
 		if err := validateMachineClientText("machine notes", value, store.OperatorMachineNotesMaxBytes); err != nil {

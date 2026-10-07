@@ -30,9 +30,9 @@ func newPendingEnrollmentForRevokeCLI(t *testing.T, st *store.Store, displayName
 
 func assertEnrollTokenRevokeSafetyOutput(t *testing.T, output string) {
 	t.Helper()
-	if (!strings.Contains(output, "保留名冊") && !strings.Contains(output, "名冊保留")) ||
-		!strings.Contains(output, "分母變化 0") ||
-		!strings.Contains(output, "已啟用 agent credential 不受影響") {
+	if (!strings.Contains(output, "roster preserved") && !strings.Contains(output, "preserves roster")) ||
+		!strings.Contains(output, "denominator delta 0") ||
+		!strings.Contains(output, "active agent credential unaffected") {
 		t.Fatalf("revoke output lacks explicit registry/denominator/active-credential impact: %q", output)
 	}
 }
@@ -214,7 +214,7 @@ func TestEnrollTokenRevokeCLIRetryCoordinatesMustBePaired(t *testing.T) {
 	} {
 		var out, errOut bytes.Buffer
 		err := runEnrollTokenCommandWithDeps(t.Context(), args, &out, &errOut, deps)
-		if err == nil || !strings.Contains(err.Error(), "必須成對提供") || out.Len() != 0 {
+		if err == nil || !strings.Contains(err.Error(), "must be provided together") || out.Len() != 0 {
 			t.Fatalf("args=%v err=%v stdout=%q stderr=%q", args, err, out.String(), errOut.String())
 		}
 	}

@@ -43,7 +43,7 @@ SELECT o.machine_id, o.subject, o.payload, o.measured_at, o.received_at
  ORDER BY o.machine_id ASC, o.subject ASC, o.measured_at DESC, o.rowid DESC`,
 		KindCLITool)
 	if err != nil {
-		return nil, fmt.Errorf("store: 讀全機隊工具: %w", err)
+		return nil, fmt.Errorf("store: read fleet tools: %w", err)
 	}
 	defer rows.Close()
 
@@ -52,7 +52,7 @@ SELECT o.machine_id, o.subject, o.payload, o.measured_at, o.received_at
 	for rows.Next() {
 		var machineID, subject, payload, measured, recv string
 		if err := rows.Scan(&machineID, &subject, &payload, &measured, &recv); err != nil {
-			return nil, fmt.Errorf("store: scan 全機隊工具: %w", err)
+			return nil, fmt.Errorf("store: scan fleet tools: %w", err)
 		}
 		key := machineID + "\x00" + subject
 		if seen[key] {
@@ -76,7 +76,7 @@ SELECT o.machine_id, o.subject, o.payload, o.measured_at, o.received_at
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: 讀全機隊工具: %w", err)
+		return nil, fmt.Errorf("store: read fleet tools: %w", err)
 	}
 	return out, nil
 }

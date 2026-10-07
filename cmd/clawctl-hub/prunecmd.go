@@ -89,56 +89,56 @@ func runPruneCommandWithDeps(ctx context.Context, argv []string, out, errOut io.
 	fs := flag.NewFlagSet("prune", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub prune [--json] [--as-of TIME] [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "      clawctl-hub prune --apply --reason REASON --confirm 'DELETE N ROWS' [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "  預設只預覽並使用 discovered HTTP operator API；--db 是 stopped-service direct DB break-glass。")
-		fmt.Fprintln(errOut, "  ambiguous response retry 必須重用原 request key、評估時間、revision、preview digest 與三個 --keep-* policy 值。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub prune [--json] [--as-of TIME] [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "       clawctl-hub prune --apply --reason REASON --confirm 'DELETE N ROWS' [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "  default previews only and uses discovered HTTP operator API; --db is stopped-service direct DB break-glass")
+		fmt.Fprintln(errOut, "  ambiguous response retry must reuse original request key, evaluation time, revision, preview digest, and three --keep-* policy values")
 		fs.PrintDefaults()
 	}
 	def := store.DefaultRetention()
-	hubURL := fs.String("hub-url", "", "HTTP operator API base URL（省略時自動發現）")
-	dbPath := fs.String("db", "", "stopped-service direct DB break-glass 的既有 SQLite 檔位置")
-	apply := fs.Bool("apply", false, "依已確認的預覽永久刪除資料")
-	jsonOutput := fs.Bool("json", false, "輸出 stable operator JSON DTO")
-	keepObs := fs.Duration("keep-observations", def.Observations, "觀測保留多久")
-	keepCheckins := fs.Duration("keep-checkins", def.Checkins, "心跳保留多久")
-	keepOccupancy := fs.Duration("keep-occupancy", def.Occupancy, "票的占用帳保留多久")
-	asOf := fs.String("as-of", "", "預覽使用的 YYYY-MM-DD 或 RFC3339 評估時間；不可與 --apply 併用")
-	reason := fs.String("reason", "", "永久清理的稽核理由")
-	confirm := fs.String("confirm", "", "逐字輸入預覽顯示的 DELETE N ROWS")
-	key := fs.String("idempotency-key", "", "ambiguous response retry 使用原 request key")
-	evaluatedAtRaw := fs.String("evaluated-at", "", "ambiguous response retry 使用原 RFC3339 評估時間")
-	revision := fs.Int64("expected-revision", 0, "ambiguous response retry 使用原 retention revision")
-	digest := fs.String("preview-digest", "", "ambiguous response retry 使用原 preview digest")
+	hubURL := fs.String("hub-url", "", "HTTP operator API base URL (auto-discovered if omitted)")
+	dbPath := fs.String("db", "", "path to existing SQLite file for stopped-service direct DB break-glass")
+	apply := fs.Bool("apply", false, "permanently delete data according to confirmed preview")
+	jsonOutput := fs.Bool("json", false, "output stable operator JSON DTO")
+	keepObs := fs.Duration("keep-observations", def.Observations, "retention duration for observations")
+	keepCheckins := fs.Duration("keep-checkins", def.Checkins, "retention duration for check-ins")
+	keepOccupancy := fs.Duration("keep-occupancy", def.Occupancy, "retention duration for ticket occupancy ledgers")
+	asOf := fs.String("as-of", "", "preview evaluation time as YYYY-MM-DD or RFC3339; cannot be used with --apply")
+	reason := fs.String("reason", "", "audit reason for permanent data pruning")
+	confirm := fs.String("confirm", "", "exact match of DELETE N ROWS shown in preview")
+	key := fs.String("idempotency-key", "", "original request key for ambiguous response retry")
+	evaluatedAtRaw := fs.String("evaluated-at", "", "original RFC3339 evaluation time for ambiguous response retry")
+	revision := fs.Int64("expected-revision", 0, "original retention revision for ambiguous response retry")
+	digest := fs.String("preview-digest", "", "original preview digest for ambiguous response retry")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("prune: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("prune: positional arguments not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	seen := visitedFlags(fs)
 	if seen["hub-url"] && seen["db"] {
-		return errors.New("prune: --hub-url 與 --db 不可同時明示")
+		return errors.New("prune: cannot specify both --hub-url and --db")
 	}
 	if (seen["hub-url"] && strings.TrimSpace(*hubURL) == "") || (seen["db"] && strings.TrimSpace(*dbPath) == "") {
-		return errors.New("prune: 明示的 --hub-url / --db 不可為空")
+		return errors.New("prune: explicit --hub-url / --db cannot be empty")
 	}
 	if *apply && *asOf != "" {
-		return errors.New("prune: --as-of 與 --apply 不可同時使用")
+		return errors.New("prune: cannot use both --as-of and --apply")
 	}
 	if !*apply && (seen["reason"] || seen["confirm"] || seen["idempotency-key"] || seen["evaluated-at"] ||
 		seen["expected-revision"] || seen["preview-digest"]) {
-		return errors.New("prune: preview 不接受 apply confirmation 或 retry coordinates")
+		return errors.New("prune: preview does not accept apply confirmation or retry coordinates")
 	}
 	canonicalReason, canonicalConfirm := strings.TrimSpace(*reason), strings.TrimSpace(*confirm)
 	if *apply && (canonicalReason == "" || canonicalReason != *reason || len(canonicalReason) > 500 || canonicalConfirm == "") {
-		return errors.New("prune: --apply 需要 canonical --reason（最多 500 字）與逐字 --confirm")
+		return errors.New("prune: --apply requires canonical --reason (at most 500 chars) and exact --confirm")
 	}
 	policy, err := store.NewOperatorRetentionPolicy(store.RetentionPolicy{
 		Observations: *keepObs, Checkins: *keepCheckins, Occupancy: *keepOccupancy,
 	})
 	if err != nil {
-		return fmt.Errorf("prune: retention policy 不合法：%w", err)
+		return fmt.Errorf("prune: invalid retention policy: %w", err)
 	}
 	retryCount := 0
 	for _, name := range []string{"idempotency-key", "evaluated-at", "expected-revision", "preview-digest"} {
@@ -147,7 +147,7 @@ func runPruneCommandWithDeps(ctx context.Context, argv []string, out, errOut io.
 		}
 	}
 	if retryCount != 0 && retryCount != 4 {
-		return errors.New("prune: retry 必須同時提供原 --idempotency-key、--evaluated-at、--expected-revision 與 --preview-digest")
+		return errors.New("prune: retry requires original --idempotency-key, --evaluated-at, --expected-revision, and --preview-digest together")
 	}
 	policyFlags := 0
 	for _, name := range []string{"keep-observations", "keep-checkins", "keep-occupancy"} {
@@ -156,7 +156,7 @@ func runPruneCommandWithDeps(ctx context.Context, argv []string, out, errOut io.
 		}
 	}
 	if retryCount == 4 && policyFlags != 3 {
-		return errors.New("prune: retry 必須重用原本三個 --keep-* retention policy 值")
+		return errors.New("prune: retry must reuse original three --keep-* retention policy values")
 	}
 	nowFn := deps.now
 	if nowFn == nil {
@@ -166,7 +166,7 @@ func runPruneCommandWithDeps(ctx context.Context, argv []string, out, errOut io.
 	if *asOf != "" {
 		evaluatedAt, err = parseAsOf(*asOf)
 		if err != nil {
-			return fmt.Errorf("prune: --as-of 讀不懂：%w", err)
+			return fmt.Errorf("prune: cannot parse --as-of: %w", err)
 		}
 		evaluatedAt = evaluatedAt.Truncate(time.Second)
 	}
@@ -174,7 +174,7 @@ func runPruneCommandWithDeps(ctx context.Context, argv []string, out, errOut io.
 		evaluatedAt, err = time.Parse(time.RFC3339Nano, strings.TrimSpace(*evaluatedAtRaw))
 		if err != nil || !evaluatedAt.Equal(evaluatedAt.UTC().Truncate(time.Second)) || strings.TrimSpace(*key) == "" ||
 			*revision < 0 || !validLifecycleRetryDigest(strings.TrimSpace(*digest)) {
-			return errors.New("prune: retry request key、時間、revision 或 preview digest 不合法")
+			return errors.New("prune: retry request key, time, revision, or preview digest is invalid")
 		}
 	}
 	options := pruneCommandOptions{
@@ -214,11 +214,11 @@ func executePruneCommand(ctx context.Context, backend pruneCommandBackend, sourc
 	if !options.HasRetry {
 		configuredPolicy, err := options.Policy.RetentionPolicy()
 		if err != nil {
-			return fmt.Errorf("prune: retention policy 不合法：%w", err)
+			return fmt.Errorf("prune: invalid retention policy: %w", err)
 		}
 		status, err := backend.Status(ctx, options.EvaluatedAt, configuredPolicy)
 		if err != nil {
-			return fmt.Errorf("讀取 retention policy 失敗（%s）：%w", source, err)
+			return fmt.Errorf("failed to read retention policy (%s): %w", source, err)
 		}
 		if !options.ExplicitEvaluation {
 			options.EvaluatedAt = status.EvaluatedAt
@@ -228,7 +228,7 @@ func executePruneCommand(ctx context.Context, backend pruneCommandBackend, sourc
 		}
 		preview, err := backend.Preview(ctx, options.EvaluatedAt, options.Policy)
 		if err != nil {
-			return fmt.Errorf("預覽資料清理失敗（%s）：%w", source, err)
+			return fmt.Errorf("failed to preview data pruning (%s): %w", source, err)
 		}
 		if !options.Apply {
 			if options.JSON {
@@ -237,10 +237,10 @@ func executePruneCommand(ctx context.Context, backend pruneCommandBackend, sourc
 			return writePrunePreview(out, source, preview)
 		}
 		if options.Confirm != preview.Confirmation {
-			return fmt.Errorf("prune: --confirm 與最新預覽不符；需要逐字輸入 %q", preview.Confirmation)
+			return fmt.Errorf("prune: --confirm does not match latest preview; exact input %q required", preview.Confirmation)
 		}
 		if preview.TotalDeleted == 0 {
-			return errors.New("prune: 目前沒有可清理資料；未建立 apply request")
+			return errors.New("prune: no prunable data at this time; apply request not created")
 		}
 		key, err := operator.NewIdempotencyKey("cli-retention-prune")
 		if err != nil {
@@ -252,14 +252,14 @@ func executePruneCommand(ctx context.Context, backend pruneCommandBackend, sourc
 	}
 	retention, err := apply.Policy.RetentionPolicy()
 	if err != nil {
-		return fmt.Errorf("prune: apply policy 不合法：%w", err)
+		return fmt.Errorf("prune: invalid apply policy: %w", err)
 	}
 	fmt.Fprintf(errOut, "retention private retry coordinates: idempotency-key=%s evaluated-at=%s expected-revision=%d preview-digest=%s keep-observations=%s keep-checkins=%s keep-occupancy=%s\n",
 		options.IdempotencyKey, apply.EvaluatedAt.Format(time.RFC3339), apply.ExpectedRevision, apply.PreviewDigest,
 		retention.Observations, retention.Checkins, retention.Occupancy)
 	result, err := backend.Apply(ctx, options.IdempotencyKey, apply)
 	if err != nil {
-		return fmt.Errorf("永久清理資料失敗（%s；idempotency-key=%q expected-revision=%d%s）：%w",
+		return fmt.Errorf("failed to permanently prune data (%s; idempotency-key=%q expected-revision=%d%s): %w",
 			source, options.IdempotencyKey, apply.ExpectedRevision, operatorRejectionReplayNote(err), err)
 	}
 	if options.JSON {

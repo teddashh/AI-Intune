@@ -141,35 +141,35 @@ func ReportCSVOptionalTime(value *time.Time) string {
 
 func validateReportCSVDocument(doc ReportCSVDocument) error {
 	if !reportCSVFilenamePattern.MatchString(doc.Filename) {
-		return fmt.Errorf("%w: 檔名 %q 不是 canonical 的 .csv 檔名", ErrInvalidReportCSV, doc.Filename)
+		return fmt.Errorf("%w: filename %q is not a canonical .csv filename", ErrInvalidReportCSV, doc.Filename)
 	}
 	if len(doc.Columns) == 0 {
-		return fmt.Errorf("%w: 一份匯出至少要有一欄", ErrInvalidReportCSV)
+		return fmt.Errorf("%w: an export must have at least one column", ErrInvalidReportCSV)
 	}
 	if position, bad := firstReportCSVControlRune(doc.Caveat); bad {
-		return fmt.Errorf("%w: 限制那一句第 %d 個字元是控制字元", ErrInvalidReportCSV, position+1)
+		return fmt.Errorf("%w: character %d of the caveat is a control character", ErrInvalidReportCSV, position+1)
 	}
 	seen := make(map[string]bool, len(doc.Columns))
 	for _, column := range reportCSVColumns(doc) {
 		if !reportCSVKeyPattern.MatchString(column.Key) {
-			return fmt.Errorf("%w: 欄位代號 %q 不是 canonical", ErrInvalidReportCSV, column.Key)
+			return fmt.Errorf("%w: column key %q is not canonical", ErrInvalidReportCSV, column.Key)
 		}
 		if seen[column.Key] {
-			return fmt.Errorf("%w: 欄位代號 %q 出現兩次", ErrInvalidReportCSV, column.Key)
+			return fmt.Errorf("%w: column key %q appears twice", ErrInvalidReportCSV, column.Key)
 		}
 		seen[column.Key] = true
 		if strings.TrimSpace(column.Header) == "" {
-			return fmt.Errorf("%w: 欄位 %q 沒有標題", ErrInvalidReportCSV, column.Key)
+			return fmt.Errorf("%w: column %q has no header", ErrInvalidReportCSV, column.Key)
 		}
 	}
 	for index, row := range doc.Rows {
 		if len(row) != len(doc.Columns) {
-			return fmt.Errorf("%w: 第 %d 列有 %d 格，欄位有 %d 個",
+			return fmt.Errorf("%w: row %d has %d cells; column count is %d",
 				ErrInvalidReportCSV, index+1, len(row), len(doc.Columns))
 		}
 		for cell, value := range row {
 			if position, bad := firstReportCSVControlRune(value); bad {
-				return fmt.Errorf("%w: 第 %d 列第 %d 格第 %d 個字元是控制字元",
+				return fmt.Errorf("%w: row %d cell %d character %d is a control character",
 					ErrInvalidReportCSV, index+1, cell+1, position+1)
 			}
 		}

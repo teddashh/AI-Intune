@@ -78,7 +78,7 @@ func (s *Service) CreateDiagnosticNoop(req DiagnosticNoopRequest) (DiagnosticNoo
 	}
 	if !alreadyAudited {
 		if auditErr := s.store.RecordAudit(entry); auditErr != nil {
-			log.Printf("operator diagnostic noop audit 寫入失敗 subject=%s: %v", entry.Subject, auditErr)
+			log.Printf("operator diagnostic noop audit write failed subject=%s: %v", entry.Subject, auditErr)
 		}
 	}
 	return result, err

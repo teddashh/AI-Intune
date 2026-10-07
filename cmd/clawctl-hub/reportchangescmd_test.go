@@ -312,8 +312,8 @@ func TestReportChangesHumanOutputExplainsSemanticsAndKeepsCursorRaw(t *testing.T
 	text := run(baseArgs)
 	for _, wanted := range []string{
 		"fixed_window_rowid_ceilings_with_retention_mutability", "(from,to]", "endpoint_delta",
-		"coverage：", "kind_counts 套用相同 filter", "transition", "window_comparison",
-		"只比較觀測視窗兩端", "next cursor: ",
+		"Coverage: ", "kind_counts apply the same filter", "transition", "window_comparison",
+		"compares observation window endpoints only", "next cursor: ",
 	} {
 		if !strings.Contains(text, wanted) {
 			t.Errorf("human output misses %q: %s", wanted, text)

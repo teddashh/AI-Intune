@@ -120,7 +120,7 @@ func (c *Client) RegisterVerifier(ctx context.Context, idempotencyKey string,
 	body VerifierCreateRequest,
 ) (VerifierResponse, error) {
 	if strings.TrimSpace(idempotencyKey) == "" {
-		return VerifierResponse{}, errors.New("operator client: Idempotency-Key 不可省略")
+		return VerifierResponse{}, errors.New("operator client: Idempotency-Key cannot be omitted")
 	}
 	response, err := c.doVerifierMutation(ctx, "/v1/operator/verifiers", idempotencyKey, body)
 	if err != nil {
@@ -176,11 +176,11 @@ func (c *Client) RevokeVerifier(ctx context.Context, verifierID, idempotencyKey 
 	body VerifierRevocationRequest,
 ) (store.OperatorVerifierRevocationResult, error) {
 	if strings.TrimSpace(idempotencyKey) == "" {
-		return store.OperatorVerifierRevocationResult{}, errors.New("operator client: Idempotency-Key 不可省略")
+		return store.OperatorVerifierRevocationResult{}, errors.New("operator client: Idempotency-Key cannot be omitted")
 	}
 	if body.ExpectedRevision == nil {
 		return store.OperatorVerifierRevocationResult{}, errors.New(
-			"operator client: verifier revocation 必須帶 expected_revision")
+			"operator client: verifier revocation must include expected_revision")
 	}
 	path, err := verifierPath(verifierID, "/revocations")
 	if err != nil {
@@ -504,7 +504,7 @@ func validVerifierCredential(value string) bool {
 func verifierPath(verifierID, suffix string) (string, error) {
 	if strings.TrimSpace(verifierID) != verifierID || verifierID == "" ||
 		strings.Contains(verifierID, "/") || verifierID == "." || verifierID == ".." {
-		return "", errors.New("operator client: verifier_id 不可為空、帶前後空白、dot segment 或包含斜線")
+		return "", errors.New("operator client: verifier_id cannot be empty, have leading or trailing whitespace, dot segment, or contain slash")
 	}
 	return "/v1/operator/verifiers/" + url.PathEscape(verifierID) + suffix, nil
 }

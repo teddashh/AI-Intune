@@ -53,7 +53,7 @@ func TestAMisspelledFieldIsRejected(t *testing.T) {
 
 func TestInvalidRulesAreRefusedLoudly(t *testing.T) {
 	cases := []struct{ name, json, want string }{
-		{"相對路徑", `{"machine":"m","unit":"u","artifact":"rel/x","max_age_seconds":60,"why":"w"}`, "絕對路徑"},
+		{"相對路徑", `{"machine":"m","unit":"u","artifact":"rel/x","max_age_seconds":60,"why":"w"}`, "absolute path"},
 		{"沒有 why", `{"machine":"m","unit":"u","artifact":"/tmp/x","max_age_seconds":60,"why":""}`, "why"},
 		{"門檻是 0", `{"machine":"m","unit":"u","artifact":"/tmp/x","max_age_seconds":0,"why":"w"}`, "max_age_seconds"},
 		{"沒有 unit", `{"machine":"m","unit":"","artifact":"/tmp/x","max_age_seconds":60,"why":"w"}`, "unit"},

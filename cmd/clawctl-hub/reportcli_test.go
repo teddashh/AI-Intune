@@ -47,7 +47,7 @@ func TestReportListCLIPrintsWhatEachReportAnswers(t *testing.T) {
 		t.Fatalf("err=%v errOut=%s", err, errOut.String())
 	}
 	text := out.String()
-	if !strings.Contains(text, "報告\t") && !strings.Contains(text, "報告  ") {
+	if !strings.Contains(text, "report\t") && !strings.Contains(text, "report  ") {
 		t.Fatalf("沒有表頭：\n%s", text)
 	}
 	index, err := operator.ReportIndexFor(store.DefaultRetention(), hubNow())
@@ -61,7 +61,7 @@ func TestReportListCLIPrintsWhatEachReportAnswers(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(text, "份報告，其中") {
+	if !strings.Contains(text, "reports, ") || !strings.Contains(text, "can be exported in full") {
 		t.Fatalf("沒有總計那一行：\n%s", text)
 	}
 }
@@ -112,9 +112,9 @@ func TestMachineTimelineCLIPrintsEverySourceAndEveryRow(t *testing.T) {
 	}
 	text := out.String()
 	for _, want := range []string{
-		"cnode-operator（" + f.machine.id + "）最近 7 天共",
-		"來源", "列數", "讀的是什麼", "時間（UTC）", "發生了什麼",
-		"判定為 Degraded", "開了一張工作單", "說明：磁碟快滿了", "證據：/jobs/",
+		"cnode-operator (" + f.machine.id + ") last 7 days, ",
+		"SOURCE", "ROWS", "EVIDENCE READ", "TIME (UTC)", "WHAT HAPPENED",
+		"判定為 Degraded", "開了一張工作單", "Detail: 磁碟快滿了", "Evidence: /jobs/",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("輸出少了 %q：\n%s", want, text)
@@ -148,7 +148,7 @@ func TestMachineTimelineCLIWarnsWhenStateHistoryDidNotReadTheWholeWindow(t *test
 	}, &out, &errOut, deps); err != nil {
 		t.Fatalf("執行時間軸失敗：%v；錯誤輸出：%s", err, errOut.String())
 	}
-	if !strings.Contains(out.String(), "沒讀完這段期間。下一步：") {
+	if !strings.Contains(out.String(), "did not finish reading this period. Next step:") {
 		t.Fatalf("輸出沒有狀態來源未讀完的警告：\n%s", out.String())
 	}
 }
@@ -219,7 +219,7 @@ func TestALongReasonDoesNotWidenTheTimelineColumns(t *testing.T) {
 	if shortRow != longRow {
 		t.Fatalf("長理由把事件那一列撐開了：\n%q\n%q", shortRow, longRow)
 	}
-	if !strings.Contains(long, "說明：這條判定的理由很長。") {
+	if !strings.Contains(long, "Detail: 這條判定的理由很長。") {
 		t.Fatalf("長理由沒有印出來：\n%s", long)
 	}
 }
@@ -244,7 +244,7 @@ func TestMachineTimelineCLIRefusesWhatItCannotRun(t *testing.T) {
 	// 格式的話，而他漏掉的是一個 flag。
 	if err := runMachineCommandWithDeps(t.Context(), []string{"timeline", "--hub-url", base},
 		&missing, &missingErr, deps); err == nil ||
-		!strings.Contains(err.Error(), "machine timeline: --machine 必填") {
+		!strings.Contains(err.Error(), "machine timeline: --machine is required") {
 		t.Fatalf("沒有 --machine 時說的是：%v", err)
 	}
 	for name, argv := range map[string][]string{

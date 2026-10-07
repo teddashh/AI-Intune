@@ -20,7 +20,7 @@ import (
 func (c *Client) DailyReport(ctx context.Context, window time.Duration) (operator.DailyReportResult, error) {
 	var out operator.DailyReportResult
 	if window < time.Second || window > operator.MaxDailyReportWindow || window%time.Second != 0 {
-		return out, fmt.Errorf("operator client: daily report window 必須是 1s 到 %s 的整秒", operator.MaxDailyReportWindow)
+		return out, fmt.Errorf("operator client: daily report window must be whole seconds between 1s and %s", operator.MaxDailyReportWindow)
 	}
 	query := url.Values{"since_seconds": []string{strconv.FormatInt(int64(window/time.Second), 10)}}
 	req, err := c.newOperatorRequest(ctx, http.MethodGet, "/v1/operator/daily-report?"+query.Encode(), nil)
@@ -50,19 +50,19 @@ func validateDailyReport(result operator.DailyReportResult, requested time.Durat
 	if result.SchemaVersion != operator.DailyReportSchemaVersion || result.EvaluatedAt.IsZero() ||
 		result.EvaluatedAt.Location() != time.UTC || result.EvaluatedAt.Nanosecond() != 0 ||
 		result.Since.IsZero() || result.Since.Location() != time.UTC || result.Since.Nanosecond() != 0 {
-		return errors.New("operator client: daily report identity 不一致")
+		return errors.New("operator client: daily report identity is inconsistent")
 	}
 	if result.WindowSeconds != int64(requested/time.Second) ||
 		!result.Since.Equal(result.EvaluatedAt.Add(-requested)) {
-		return errors.New("operator client: daily report window 與 request 不一致")
+		return errors.New("operator client: daily report window is inconsistent with request")
 	}
 	if result.Body == "" || len(result.Body) > operator.MaxDailyReportBodyBytes || !utf8.ValidString(result.Body) ||
 		!strings.HasSuffix(result.Body, "\n") {
-		return errors.New("operator client: daily report 本文為空、過大、編碼不合法或沒有結尾換行")
+		return errors.New("operator client: daily report body is empty, too large, improperly encoded, or missing trailing newline")
 	}
 	for _, char := range result.Body {
 		if char != '\n' && (unicode.IsControl(char) || unicode.Is(unicode.Cf, char)) {
-			return errors.New("operator client: daily report 本文含控制或格式字元")
+			return errors.New("operator client: daily report body contains control or format characters")
 		}
 	}
 	return nil
@@ -107,7 +107,7 @@ func (c *Client) MachineTimeline(ctx context.Context, machineID string, days int
 ) {
 	var out operator.MachineTimelineResult
 	if days < 0 || days > operator.MaxMachineTimelineDays {
-		return out, fmt.Errorf("operator client: 時間軸範圍 %d 天超出 1–%d",
+		return out, fmt.Errorf("operator client: timeline range %d days is outside 1-%d",
 			days, operator.MaxMachineTimelineDays)
 	}
 	suffix := "/timeline"
@@ -141,16 +141,16 @@ func validateReportIndex(index operator.ReportIndex) error {
 	kinds := operator.ReportKinds()
 	if index.SchemaVersion != operator.ReportIndexSchemaVersion || index.EvaluatedAt.IsZero() ||
 		index.EvaluatedAt.Location() != time.UTC {
-		return errors.New("operator client: report index identity 不一致")
+		return errors.New("operator client: report index identity is inconsistent")
 	}
 	if index.Total != len(kinds) || len(index.Entries) != index.Total {
-		return fmt.Errorf("operator client: report index 說有 %d 份，清單有 %d 份，這個 Hub 做得出 %d 份",
+		return fmt.Errorf("operator client: report index reports %d reports, list has %d, this Hub can produce %d",
 			index.Total, len(index.Entries), len(kinds))
 	}
 	exportable := 0
 	for position, entry := range index.Entries {
 		if entry.Kind != kinds[position] {
-			return fmt.Errorf("operator client: report index 第 %d 份是 %q，固定順序上是 %q",
+			return fmt.Errorf("operator client: report index entry %d is %q, fixed order expects %q",
 				position+1, entry.Kind, kinds[position])
 		}
 		if err := validateReportEntry(entry); err != nil {
@@ -161,7 +161,7 @@ func validateReportIndex(index operator.ReportIndex) error {
 		}
 	}
 	if exportable != index.Exportable {
-		return fmt.Errorf("operator client: report index 說 %d 份匯得出整份，逐項數出 %d 份",
+		return fmt.Errorf("operator client: report index reports %d reports exportable whole, counted %d",
 			index.Exportable, exportable)
 	}
 	return nil
@@ -170,10 +170,10 @@ func validateReportIndex(index operator.ReportIndex) error {
 func validateReportEntry(entry operator.ReportEntry) error {
 	if strings.TrimSpace(entry.Title) == "" || strings.TrimSpace(entry.Question) == "" ||
 		strings.TrimSpace(entry.Evidence) == "" || !strings.HasPrefix(entry.Path, "/") {
-		return fmt.Errorf("operator client: report %q 少了名稱、回答什麼、證據或路徑", entry.Kind)
+		return fmt.Errorf("operator client: report %q is missing title, question, evidence, or path", entry.Kind)
 	}
 	if entry.Scope != operator.ReportScopeFleet && entry.Scope != operator.ReportScopeMachine {
-		return fmt.Errorf("operator client: report %q 的範圍是 %q", entry.Kind, entry.Scope)
+		return fmt.Errorf("operator client: report %q scope is %q", entry.Kind, entry.Scope)
 	}
 	// 這些字串會原樣印到終端機。控制字元在那裡是跳脫序列，不是文字。
 	for name, value := range map[string]string{
@@ -188,37 +188,37 @@ func validateReportEntry(entry operator.ReportEntry) error {
 	case operator.ReportExportWholeWindow:
 	case operator.ReportExportPagedOnly:
 		if entry.ExportPath != "" {
-			return fmt.Errorf("operator client: report %q 說沒有整份匯出卻給了 %q", entry.Kind, entry.ExportPath)
+			return fmt.Errorf("operator client: report %q claims no whole export but provides %q", entry.Kind, entry.ExportPath)
 		}
 	default:
-		return fmt.Errorf("operator client: report %q 的匯出狀態是 %q", entry.Kind, entry.Export)
+		return fmt.Errorf("operator client: report %q export state is %q", entry.Kind, entry.Export)
 	}
 	if entry.ExportPath != "" && !strings.HasPrefix(entry.ExportPath, "/") {
-		return fmt.Errorf("operator client: report %q 的匯出路徑是 %q", entry.Kind, entry.ExportPath)
+		return fmt.Errorf("operator client: report %q export path is %q", entry.Kind, entry.ExportPath)
 	}
 	if entry.Range.DefaultDays < 0 || entry.Range.MaxDays < 0 ||
 		entry.Range.MaxDays > 0 && (entry.Range.DefaultDays < 1 || entry.Range.DefaultDays > entry.Range.MaxDays) {
-		return fmt.Errorf("operator client: report %q 的範圍 %+v 站不住", entry.Kind, entry.Range)
+		return fmt.Errorf("operator client: report %q range %+v is invalid", entry.Kind, entry.Range)
 	}
 	switch entry.Horizon.Kind {
 	case operator.ReportHorizonUnbounded, operator.ReportHorizonPerCategory,
 		operator.ReportHorizonNewestKept:
 		if entry.Horizon.Days != 0 {
-			return fmt.Errorf("operator client: report %q 說看得回去多遠是 %q 卻給了 %d 天",
+			return fmt.Errorf("operator client: report %q claims horizon is %q but specifies %d days",
 				entry.Kind, entry.Horizon.Kind, entry.Horizon.Days)
 		}
 	case operator.ReportHorizonRetention:
 		if entry.Horizon.Days < 1 ||
 			entry.Range.MaxDays > 0 && entry.Horizon.Days > entry.Range.MaxDays {
-			return fmt.Errorf("operator client: report %q 說看得到 %d 天，但它一次最多問 %d 天",
+			return fmt.Errorf("operator client: report %q claims %d days visible, but can only query at most %d days at once",
 				entry.Kind, entry.Horizon.Days, entry.Range.MaxDays)
 		}
 	default:
-		return fmt.Errorf("operator client: report %q 的保留期交代是 %q", entry.Kind, entry.Horizon.Kind)
+		return fmt.Errorf("operator client: report %q retention horizon is %q", entry.Kind, entry.Horizon.Kind)
 	}
 	// 一份不是時間窗的報告不可以同時宣稱一個天數。
 	if entry.Range.Instant && (entry.Range.DefaultDays != 0 || entry.Range.MaxDays != 0) {
-		return fmt.Errorf("operator client: report %q 說不是一段期間卻給了天數 %+v",
+		return fmt.Errorf("operator client: report %q is not a duration but specifies days %+v",
 			entry.Kind, entry.Range)
 	}
 	// 這四句是由同一組函式產生的。對面換了一種說法，就是對同一件事有第二種解釋。
@@ -226,7 +226,7 @@ func validateReportEntry(entry operator.ReportEntry) error {
 		entry.RangeSentence != operator.ReportRangeSentence(entry.Range) ||
 		entry.HorizonSentence != operator.ReportHorizonSentence(entry.Horizon) ||
 		entry.ExportSentence != operator.ReportExportSentence(entry.Export, entry.Scope, entry.Range) {
-		return fmt.Errorf("operator client: report %q 的交代跟它自己的欄位對不起來", entry.Kind)
+		return fmt.Errorf("operator client: report %q sentences do not match its fields", entry.Kind)
 	}
 	return nil
 }
@@ -235,7 +235,7 @@ func validateMachineTimeline(result operator.MachineTimelineResult, machineID st
 	if result.SchemaVersion != operator.MachineTimelineSchemaVersion || result.MachineID != machineID ||
 		strings.TrimSpace(result.DisplayName) == "" || result.EvaluatedAt.IsZero() ||
 		result.EvaluatedAt.Location() != time.UTC {
-		return errors.New("operator client: machine timeline identity 不一致")
+		return errors.New("operator client: machine timeline identity is inconsistent")
 	}
 	if err := validateMachineClientText("machine timeline display_name", result.DisplayName, 256); err != nil {
 		return err
@@ -248,7 +248,7 @@ func validateMachineTimeline(result operator.MachineTimelineResult, machineID st
 		return err
 	}
 	if result.Total != len(result.Entries) || counted != result.Total {
-		return fmt.Errorf("operator client: machine timeline 說 %d 列，清單有 %d 列，各來源加起來 %d 列",
+		return fmt.Errorf("operator client: machine timeline reports %d rows, list has %d rows, sources total %d rows",
 			result.Total, len(result.Entries), counted)
 	}
 	return validateMachineTimelineEntries(result)
@@ -257,21 +257,21 @@ func validateMachineTimeline(result operator.MachineTimelineResult, machineID st
 func validateMachineTimelineWindow(result operator.MachineTimelineResult, days int) error {
 	window := result.Window
 	if days > 0 && window.Days != days {
-		return fmt.Errorf("operator client: 問的是 %d 天，回來的是 %d 天", days, window.Days)
+		return fmt.Errorf("operator client: requested %d days, returned %d days", days, window.Days)
 	}
 	if window.Days < 1 || window.Days > operator.MaxMachineTimelineDays {
-		return fmt.Errorf("operator client: machine timeline 的範圍是 %d 天", window.Days)
+		return fmt.Errorf("operator client: machine timeline range is %d days", window.Days)
 	}
 	if window.From.Location() != time.UTC || window.To.Location() != time.UTC {
-		return errors.New("operator client: machine timeline 的窗不是 UTC")
+		return errors.New("operator client: machine timeline window is not UTC")
 	}
 	if window.To.Sub(window.From) != time.Duration(window.Days)*24*time.Hour {
-		return fmt.Errorf("operator client: machine timeline 說 %d 天，窗是 %v",
+		return fmt.Errorf("operator client: machine timeline reports %d days, window duration is %v",
 			window.Days, window.To.Sub(window.From))
 	}
 	// 評估的那一刻必須在窗裡面，否則「最近 N 天」少掉的正好是剛剛發生的事。
 	if window.To.Before(result.EvaluatedAt) || window.To.Sub(result.EvaluatedAt) >= time.Second {
-		return fmt.Errorf("operator client: machine timeline 的窗結束在 %v，評估時間是 %v",
+		return fmt.Errorf("operator client: machine timeline window ends at %v, evaluated_at is %v",
 			window.To, result.EvaluatedAt)
 	}
 	return nil
@@ -280,21 +280,21 @@ func validateMachineTimelineWindow(result operator.MachineTimelineResult, days i
 func validateMachineTimelineSources(result operator.MachineTimelineResult) (int, error) {
 	sources := operator.MachineTimelineSources()
 	if len(result.Sources) != len(sources) {
-		return 0, fmt.Errorf("operator client: machine timeline 交代了 %d 個來源，應該有 %d 個",
+		return 0, fmt.Errorf("operator client: machine timeline reports %d sources, expected %d",
 			len(result.Sources), len(sources))
 	}
 	counted, complete := 0, true
 	for position, read := range result.Sources {
 		if read.Source != sources[position] {
-			return 0, fmt.Errorf("operator client: machine timeline 第 %d 個來源是 %q，固定順序上是 %q",
+			return 0, fmt.Errorf("operator client: machine timeline source %d is %q, fixed order expects %q",
 				position+1, read.Source, sources[position])
 		}
 		if read.Label != operator.MachineTimelineSourceLabel(read.Source) ||
 			read.Evidence != operator.MachineTimelineSourceEvidence(read.Source) {
-			return 0, fmt.Errorf("operator client: 來源 %q 的名字或證據跟它自己對不起來", read.Source)
+			return 0, fmt.Errorf("operator client: source %q label or evidence does not match itself", read.Source)
 		}
 		if read.Count < 0 {
-			return 0, fmt.Errorf("operator client: 來源 %q 說讀到 %d 列", read.Source, read.Count)
+			return 0, fmt.Errorf("operator client: source %q reports %d rows read", read.Source, read.Count)
 		}
 		wantNextStep := ""
 		if !read.Complete {
@@ -302,12 +302,12 @@ func validateMachineTimelineSources(result operator.MachineTimelineResult) (int,
 			complete = false
 		}
 		if read.NextStep != wantNextStep {
-			return 0, fmt.Errorf("operator client: 來源 %q 的下一步跟它讀完沒讀完對不起來", read.Source)
+			return 0, fmt.Errorf("operator client: source %q next step does not match its completion status", read.Source)
 		}
 		counted += read.Count
 	}
 	if result.Complete != complete {
-		return 0, errors.New("operator client: machine timeline 的完整性跟逐個來源對不起來")
+		return 0, errors.New("operator client: machine timeline completeness does not match individual sources")
 	}
 	return counted, nil
 }
@@ -318,22 +318,22 @@ func validateMachineTimelineEntries(result operator.MachineTimelineResult) error
 	for index, entry := range result.Entries {
 		source, known := operator.MachineTimelineSourceOf(entry.Kind)
 		if !known || source != entry.Source {
-			return fmt.Errorf("operator client: 第 %d 列的種類 %q 與來源 %q 對不起來",
+			return fmt.Errorf("operator client: row %d kind %q does not match source %q",
 				index+1, entry.Kind, entry.Source)
 		}
 		if entry.At.IsZero() || entry.At.Location() != time.UTC {
-			return fmt.Errorf("operator client: 第 %d 列沒有 UTC 時間", index+1)
+			return fmt.Errorf("operator client: row %d lacks UTC timestamp", index+1)
 		}
 		if entry.At.Before(result.Window.From) || entry.At.After(result.Window.To) {
-			return fmt.Errorf("operator client: 第 %d 列的時間 %v 在窗 %v–%v 外面",
+			return fmt.Errorf("operator client: row %d timestamp %v is outside window %v-%v",
 				index+1, entry.At, result.Window.From, result.Window.To)
 		}
 		if index > 0 && entry.At.After(previous) {
-			return fmt.Errorf("operator client: 第 %d 列比它前面那一列新", index+1)
+			return fmt.Errorf("operator client: row %d is newer than previous row", index+1)
 		}
 		previous = entry.At
 		if strings.TrimSpace(entry.Summary) == "" {
-			return fmt.Errorf("operator client: 第 %d 列沒有說發生了什麼", index+1)
+			return fmt.Errorf("operator client: row %d does not describe what happened", index+1)
 		}
 		if err := validateMachineClientText("machine timeline summary", entry.Summary, 512); err != nil {
 			return err
@@ -344,13 +344,13 @@ func validateMachineTimelineEntries(result operator.MachineTimelineResult) error
 			}
 		}
 		if entry.Href != "" && !strings.HasPrefix(entry.Href, "/") {
-			return fmt.Errorf("operator client: 第 %d 列的證據連結是 %q", index+1, entry.Href)
+			return fmt.Errorf("operator client: row %d evidence link is %q", index+1, entry.Href)
 		}
 		counts[entry.Source]++
 	}
 	for _, read := range result.Sources {
 		if counts[read.Source] != read.Count {
-			return fmt.Errorf("operator client: 來源 %q 說 %d 列，清單上有 %d 列",
+			return fmt.Errorf("operator client: source %q reports %d rows, list has %d rows",
 				read.Source, read.Count, counts[read.Source])
 		}
 	}

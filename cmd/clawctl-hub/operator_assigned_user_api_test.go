@@ -198,7 +198,7 @@ func TestAssignedUserDirectCLIUsesRosterAndClears(t *testing.T) {
 	if err := runMachineAssignedUser(t.Context(), f.store, nil, inputs, &out); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "未指派") {
+	if !strings.Contains(out.String(), "unassigned") {
 		t.Fatal(out.String())
 	}
 }
@@ -243,7 +243,7 @@ func TestAssignedUserHTTPCLIUsesOperatorClient(t *testing.T) {
 		}
 		wanted := "user@example.com"
 		if user == "none" {
-			wanted = "未指派"
+			wanted = "unassigned"
 		}
 		if !strings.Contains(out.String(), wanted) {
 			t.Fatal(out.String())
@@ -284,9 +284,9 @@ func TestAssignedUserMachineDetailCLIShowsExplicitState(t *testing.T) {
 		if err := writeMachineDetail(&out, detail, false, "機器明細", &assigned); err != nil {
 			t.Fatal(err)
 		}
-		expected := "指派使用者: 未指派（版本 0）"
+		expected := "assigned user: unassigned (revision 0)"
 		if assigned.UserID != "" {
-			expected = `指派使用者: "user@example.com"（版本 3）`
+			expected = `assigned user: "user@example.com" (revision 3)`
 		}
 		if !strings.Contains(out.String(), expected) {
 			t.Fatal(out.String())

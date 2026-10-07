@@ -927,7 +927,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	// ⚠ 證據體檢壞掉不該讓整個總覽打不開。看不到機隊比看不到體檢嚴重。
 	dead, err := s.store.DeadSignals(now)
 	if err != nil {
-		log.Printf("證據體檢失敗（總覽照常顯示）：%v", err)
+		log.Printf("evidence health check failed (overview displays normally): %v", err)
 		dead = nil
 	} else {
 		dead = projectDeadSignalDisplayNames(dead, displayNames)
@@ -935,7 +935,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	// ⚠ 同理：重複 agent 的偵測壞掉不該讓總覽打不開。
 	dup, err := s.store.DoubleAgents(now)
 	if err != nil {
-		log.Printf("重複 agent 偵測失敗（總覽照常顯示）：%v", err)
+		log.Printf("duplicate agent detection failed (overview displays normally): %v", err)
 		dup = nil
 	} else {
 		dup = projectDoubleAgentDisplayNames(dup, displayNames)
@@ -944,7 +944,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	// ⚠ 讀不到 Hub 的日誌不該讓總覽打不開。
 	hubEvents, err := s.store.HubEventsBetween(now.Add(-24*time.Hour), now)
 	if err != nil {
-		log.Printf("讀 Hub 自己的日誌失敗（總覽照常顯示）：%v", err)
+		log.Printf("failed to read Hub's own logs (overview displays normally): %v", err)
 		hubEvents = nil
 	} else {
 		hubEvents = projectHubEventPresentation(hubEvents)
@@ -953,7 +953,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	var deploymentLines []deploymentHeadlineRow
 	deploymentsKnown := err == nil
 	if err != nil {
-		log.Printf("讀 deployment 帳本失敗（總覽照常顯示）：%v", err)
+		log.Printf("failed to read deployment ledger (overview displays normally): %v", err)
 		deploymentLines = []deploymentHeadlineRow{{Text: "讀不到部署帳本，不能判斷有沒有部署卡住。", Unknown: true}}
 	} else {
 		deploymentViews = projectDeploymentDisplayNames(deploymentViews, displayNames)
@@ -1502,7 +1502,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 	if err := s.tmpl.ExecuteTemplate(w, name, data); err != nil {
 		// ⚠ 這裡不能靜悄悄。樣板錯了畫面會少一整塊，而少一塊的畫面
 		// 看起來就像「那台沒事」—— 跟這個產品要避免的失效模式一模一樣。
-		log.Printf("樣板 %s 渲染失敗：%v", name, err)
+		log.Printf("failed to render template %s: %v", name, err)
 	}
 }
 

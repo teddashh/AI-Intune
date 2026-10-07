@@ -214,7 +214,7 @@ func (s *Service) RevokeEnrollToken(req EnrollTokenRevocationRequest) (EnrollTok
 	}
 	if !alreadyAudited {
 		if auditErr := s.store.RecordAudit(entry); auditErr != nil {
-			log.Printf("operator audit 寫入失敗 action=%s subject=%s: %v",
+			log.Printf("operator audit write failed action=%s subject=%s: %v",
 				entry.Action, entry.Subject, auditErr)
 		}
 	}
@@ -268,7 +268,7 @@ func (s *Service) CreateEnrollToken(req EnrollTokenCreateRequest) (EnrollTokenCr
 	}
 	if !alreadyAudited {
 		if auditErr := s.store.RecordAudit(entry); auditErr != nil {
-			log.Printf("operator audit 寫入失敗 action=%s subject=%s: %v",
+			log.Printf("operator audit write failed action=%s subject=%s: %v",
 				entry.Action, entry.Subject, auditErr)
 		}
 	}
@@ -343,7 +343,7 @@ func (s *Service) ChangeMachineChannel(req MachineChannelRequest) (MachineChanne
 		if auditErr := s.store.RecordAudit(entry); auditErr != nil {
 			// Replays already have their original atomic evidence; this per-attempt
 			// row (and requests rejected before a key exists) remains best-effort.
-			log.Printf("operator audit 寫入失敗 action=%s subject=%s: %v",
+			log.Printf("operator audit write failed action=%s subject=%s: %v",
 				entry.Action, entry.Subject, auditErr)
 		}
 	}

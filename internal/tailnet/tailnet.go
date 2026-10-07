@@ -145,13 +145,13 @@ func queryWith(ctx context.Context, run func(context.Context) ([]byte, error)) S
 	}
 	var raw rawStatus
 	if err := json.Unmarshal(out, &raw); err != nil {
-		return Status{Unavailable: fmt.Sprintf("tailscale status 的輸出看不懂（%v）", err)}
+		return Status{Unavailable: fmt.Sprintf("cannot parse tailscale status output (%v)", err)}
 	}
 	if raw.Error != "" {
-		return Status{Unavailable: "tailscale 回報：" + raw.Error}
+		return Status{Unavailable: "tailscale reported: " + raw.Error}
 	}
 	if raw.Self == nil {
-		return Status{Unavailable: "tailscale status 未回報本機"}
+		return Status{Unavailable: "tailscale status did not report local node"}
 	}
 
 	logins := map[string]string{}
@@ -260,10 +260,10 @@ func runTailscale(ctx context.Context) ([]byte, error) {
 func humanReason(err error) string {
 	var ee *exec.ExitError
 	if errors.As(err, &ee) && len(ee.Stderr) > 0 {
-		return "tailscale status 失敗：" + strings.TrimSpace(string(ee.Stderr))
+		return "tailscale status failed: " + strings.TrimSpace(string(ee.Stderr))
 	}
 	if errors.Is(err, exec.ErrNotFound) {
-		return "這台 Hub 上沒有 tailscale 指令，所以沒有第二份機器清單可以對照"
+		return "tailscale command is not installed on this Hub, so there is no second machine list for comparison"
 	}
-	return "問不到 tailscale：" + err.Error()
+	return "cannot query tailscale: " + err.Error()
 }

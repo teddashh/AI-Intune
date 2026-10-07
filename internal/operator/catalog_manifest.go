@@ -188,6 +188,6 @@ func (s *Service) recordCatalogManifestFallback(request CatalogManifestPublishRe
 	entry.IdempotencyKey, entry.RequestDigest, entry.OK = request.IdempotencyKey, digest, false
 	entry.Detail = "catalog manifest verification failed"
 	if auditErr := s.store.RecordAudit(entry); auditErr != nil {
-		log.Printf("operator catalog manifest audit 寫入失敗 subject=%s: %v", entry.Subject, auditErr)
+		log.Printf("operator catalog manifest audit write failed subject=%s: %v", entry.Subject, auditErr)
 	}
 }

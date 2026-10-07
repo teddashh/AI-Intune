@@ -79,8 +79,8 @@ func TestWriteDeploymentActionPreviewAddsHumanImpactOnlyToHumanOutput(t *testing
 				Deployment:  operator.DeploymentSummary{DeploymentID: "deployment-finish", Channel: "canary"},
 				Eligibility: operator.DeploymentActionEligibility{Eligible: true, Outcome: "finish"},
 			},
-			wantHuman:       "確認後會發生：\"所有批次都已開完且最後一批是 succeeded；確認後會把 deployment 收成 finished。\"",
-			forbiddenInJSON: []string{"確認後會發生", "所有批次都已開完"},
+			wantHuman:       "Action on confirmation: \"所有批次都已開完且最後一批是 succeeded；確認後會把 deployment 收成 finished。\"",
+			forbiddenInJSON: []string{"Action on confirmation", "所有批次都已開完"},
 		},
 		{
 			name: "ineligible blockers",
@@ -92,8 +92,8 @@ func TestWriteDeploymentActionPreviewAddsHumanImpactOnlyToHumanOutput(t *testing
 					Blockers: []string{"material_unavailable", "nonterminal_jobs"},
 				},
 			},
-			wantHuman:       "目前不可執行：\"Hub 無法重新驗證原 deployment material；仍有未終態工作單\"",
-			forbiddenInJSON: []string{"目前不可執行", "Hub 無法重新驗證原 deployment material", "仍有未終態工作單"},
+			wantHuman:       "Currently not executable: \"Hub 無法重新驗證原 deployment material；仍有未終態工作單\"",
+			forbiddenInJSON: []string{"Currently not executable", "Hub 無法重新驗證原 deployment material", "仍有未終態工作單"},
 		},
 	}
 	for _, tt := range tests {

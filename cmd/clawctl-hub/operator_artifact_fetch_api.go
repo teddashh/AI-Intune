@@ -113,7 +113,7 @@ func (h *hub) handleListOperatorArtifactFetches(w http.ResponseWriter, r *http.R
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "artifact fetch operation filter 不合法")
 			return
 		}
-		log.Printf("讀取 artifact fetch operations 失敗: %v", err)
+		log.Printf("failed to read artifact fetch operations: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 artifact fetch operations 失敗")
 		return
 	}
@@ -132,7 +132,7 @@ func (h *hub) handleGetOperatorArtifactFetch(w http.ResponseWriter, r *http.Requ
 			writeErr(w, http.StatusNotFound, "ARTIFACT_FETCH_NOT_FOUND", "找不到指定的 artifact fetch operation")
 			return
 		}
-		log.Printf("讀取 artifact fetch operation 失敗 operation=%q: %v", r.PathValue("id"), err)
+		log.Printf("failed to read artifact fetch operation operation=%q: %v", r.PathValue("id"), err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 artifact fetch operation 失敗")
 		return
 	}
@@ -214,7 +214,7 @@ func writeOperatorArtifactFetchPreviewError(w http.ResponseWriter, err error) {
 		errors.Is(err, artifact.ErrMetadataTooLarge):
 		writeErr(w, http.StatusBadGateway, "REGISTRY_RESPONSE_REJECTED", "registry metadata 未通過 intake policy")
 	default:
-		log.Printf("建立 artifact fetch preview 失敗: %v", err)
+		log.Printf("failed to create artifact fetch preview: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "建立 artifact fetch preview 失敗")
 	}
 }
@@ -231,7 +231,7 @@ func writeOperatorArtifactFetchError(w http.ResponseWriter, err error) {
 		w.Header().Set("Idempotency-Replayed", "true")
 	}
 	if status == http.StatusInternalServerError {
-		log.Printf("建立 artifact fetch operation 失敗: %v", err)
+		log.Printf("failed to create artifact fetch operation: %v", err)
 	}
 	writeErr(w, status, code, detail)
 }

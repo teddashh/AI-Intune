@@ -41,7 +41,7 @@ var (
 	ErrJobPrerequisiteNotFound          = errors.New("store: prerequisite job not found")
 	ErrJobPrerequisiteWrongMachine      = errors.New("store: prerequisite job belongs to another machine")
 	ErrBadChannel                       = errors.New("store: machine channel must be canary, stable, or empty")
-	ErrNeverObserved                    = errors.New("store: 這台從沒回報過，指派了也沒有 agent 會來領單")
+	ErrNeverObserved                    = errors.New("store: machine has never reported, no agent will claim the job even if assigned")
 	ErrManagedCatalogDeploymentRequired = errors.New("store: managed catalog writes require a profile assignment or deployment")
 	ErrOpenClawDeploymentRequired       = ErrManagedCatalogDeploymentRequired
 )
@@ -650,11 +650,11 @@ func (s *Store) logJobLookupMiss(jobID, machineID string) {
 	err := s.rdb.QueryRow(`SELECT machine_id FROM jobs WHERE job_id = ?`, jobID).Scan(&owner)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		log.Printf("找不到工作單 job=%s（查詢機器=%s）", jobID, machineID)
+		log.Printf("job not found job=%s (requesting machine=%s)", jobID, machineID)
 	case err != nil:
-		log.Printf("無法判斷工作單查詢失敗原因 job=%s machine=%s：%v", jobID, machineID, err)
+		log.Printf("cannot determine job lookup failure reason job=%s machine=%s: %v", jobID, machineID, err)
 	default:
-		log.Printf("工作單歸屬不符 job=%s owner=%s requester=%s", jobID, owner, machineID)
+		log.Printf("job ownership mismatch job=%s owner=%s requester=%s", jobID, owner, machineID)
 	}
 }
 
@@ -1233,7 +1233,7 @@ SELECT jobs.state,
 		// 這不是錯誤資料，是還沒到時候。
 		return "", ErrNotVerifying
 	}
-	return "", fmt.Errorf("store: 工作單 %s 未能寫入成功狀態", jobID)
+	return "", fmt.Errorf("store: job %s failed to transition to succeeded state", jobID)
 }
 
 func (s *Store) measuredEvidenceStatus(jobID string) (required, ready bool, err error) {

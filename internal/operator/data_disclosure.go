@@ -335,7 +335,7 @@ func DataDisclosureFor(policy store.RetentionPolicy, evaluatedAt time.Time) (Dat
 func dataCategoryFor(key DataCategoryKey, policy store.RetentionPolicy) (DataCategory, error) {
 	shape, known := dataCategoryShapes[key]
 	if !known {
-		return DataCategory{}, fmt.Errorf("%w: 不認得的資料類別 %q", ErrInvalidDataDisclosure, key)
+		return DataCategory{}, fmt.Errorf("%w: unknown data category %q", ErrInvalidDataDisclosure, key)
 	}
 	retention, err := dataRetentionFor(shape, policy)
 	if err != nil {
@@ -374,20 +374,20 @@ func dataRetentionFor(shape dataCategoryShape, policy store.RetentionPolicy) (Da
 	}
 	if len(classes) != len(shape.tables) {
 		return DataRetention{}, fmt.Errorf(
-			"%w: %q 裡有的表被時間清、有的不被清，一句保留期講不了兩種待遇",
+			"%w: some tables in %q are pruned by time while others are not; a single retention statement cannot describe both treatments",
 			ErrInvalidDataDisclosure, shape.title)
 	}
 	for _, class := range classes[1:] {
 		if class != classes[0] {
 			return DataRetention{}, fmt.Errorf(
-				"%w: %q 裡的表看的是兩個不同的保留期（%q 與 %q）",
+				"%w: tables in %q use two different retention classes (%q and %q)",
 				ErrInvalidDataDisclosure, shape.title, classes[0], class)
 		}
 	}
 	horizon, known := store.RetentionHorizon(classes[0], policy)
 	if !known {
 		return DataRetention{}, fmt.Errorf(
-			"%w: 不認得的保留期類別 %q", ErrInvalidDataDisclosure, classes[0])
+			"%w: unknown retention class %q", ErrInvalidDataDisclosure, classes[0])
 	}
 	retention.Kind = DataRetentionTimed
 	retention.Class = string(classes[0])
@@ -426,7 +426,7 @@ type MachineDataCategory struct {
 func (s *Service) MachineData(machineID string, policy store.RetentionPolicy, evaluatedAt time.Time) (MachineDataResult, error) {
 	trimmed := strings.TrimSpace(machineID)
 	if trimmed == "" || trimmed != machineID {
-		return MachineDataResult{}, fmt.Errorf("%w: machine id 必須是 canonical", ErrInvalidDataDisclosure)
+		return MachineDataResult{}, fmt.Errorf("%w: machine id must be canonical", ErrInvalidDataDisclosure)
 	}
 	disclosure, err := DataDisclosureFor(policy, evaluatedAt)
 	if err != nil {
@@ -471,7 +471,7 @@ func machineDataCategory(category DataCategory, byTable map[string]store.Machine
 		holding, known := byTable[table]
 		if !known {
 			return MachineDataCategory{}, fmt.Errorf(
-				"%w: 揭露面講了 %q，但沒有人量它", ErrInvalidDataDisclosure, table)
+				"%w: disclosure surface specifies %q, but nothing measures it", ErrInvalidDataDisclosure, table)
 		}
 		measured.Rows += holding.Rows
 		measured.Undated += holding.Rows - holding.Dated

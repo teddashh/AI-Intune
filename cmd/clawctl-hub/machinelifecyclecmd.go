@@ -30,50 +30,50 @@ func runMachineLifecycleSubcommand(ctx context.Context, argv []string, out, errO
 	fs := flag.NewFlagSet("machine lifecycle", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub machine lifecycle --machine <name|id> [--set active|retired (--preview | --reason REASON --confirm-name NAME)] [--json] [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "  省略 --set：讀取 lifecycle；--preview：顯示 impact，state 不變。")
-		fmt.Fprintln(errOut, "  discovery：--hub-url、CLAWCTL_HUB_URL、operator.json。")
-		fmt.Fprintln(errOut, "  transport：HTTP；--db 用於已停止的 Hub。")
-		fmt.Fprintln(errOut, "  retry：重用 --idempotency-key、--expected-revision、--preview-digest。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub machine lifecycle --machine <name|id> [--set active|retired (--preview | --reason REASON --confirm-name NAME)] [--json] [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "  Omit --set: read lifecycle; --preview: show impact, state unchanged.")
+		fmt.Fprintln(errOut, "  discovery: --hub-url, CLAWCTL_HUB_URL, operator.json.")
+		fmt.Fprintln(errOut, "  transport: HTTP; --db for stopped Hub.")
+		fmt.Fprintln(errOut, "  retry: reuse --idempotency-key, --expected-revision, --preview-digest.")
 		fs.PrintDefaults()
 	}
-	dbPath := fs.String("db", "", "stopped-service direct DB break-glass 的既有 SQLite 檔位置")
-	hubURL := fs.String("hub-url", "", "HTTP operator API base URL（省略時自動發現）")
-	machine := fs.String("machine", "", "direct DB: display_name 或 machine_id；HTTP: machine_id")
-	set := fs.String("set", "", "desired lifecycle：active 或 retired；省略即只讀")
-	confirmName := fs.String("confirm-name", "", "套用時必須逐字相同的 display_name")
-	reason := fs.String("reason", "", "生命週期變更理由（套用時必填）")
-	preview := fs.Bool("preview", false, "只做原生 impact preview，不套用")
-	jsonOutput := fs.Bool("json", false, "輸出 stable operator JSON DTO")
-	idempotencyKey := fs.String("idempotency-key", "", "ambiguous response 重試用原 request key")
-	expectedRevision := fs.Int64("expected-revision", 0, "明示 lifecycle revision；重試 receipt 時必填")
-	previewDigest := fs.String("preview-digest", "", "ambiguous response 重試用原 preview digest")
+	dbPath := fs.String("db", "", "Existing SQLite file path for stopped-service direct DB break-glass")
+	hubURL := fs.String("hub-url", "", "HTTP operator API base URL (auto-discovered if omitted)")
+	machine := fs.String("machine", "", "direct DB: display_name or machine_id; HTTP: machine_id")
+	set := fs.String("set", "", "Desired lifecycle: active or retired; omit for read-only")
+	confirmName := fs.String("confirm-name", "", "Exact display_name match required when applying")
+	reason := fs.String("reason", "", "Reason for lifecycle change (required when applying)")
+	preview := fs.Bool("preview", false, "Preview impact only without applying")
+	jsonOutput := fs.Bool("json", false, "Output stable operator JSON DTO")
+	idempotencyKey := fs.String("idempotency-key", "", "Original request key for ambiguous response retries")
+	expectedRevision := fs.Int64("expected-revision", 0, "Explicit lifecycle revision; required when retrying receipt")
+	previewDigest := fs.String("preview-digest", "", "Original preview digest for ambiguous response retries")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("machine lifecycle: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("machine lifecycle: unexpected positional arguments: %q", strings.Join(fs.Args(), " "))
 	}
 	seen := make(map[string]bool)
 	fs.Visit(func(item *flag.Flag) { seen[item.Name] = true })
 	if strings.TrimSpace(*machine) == "" {
-		return errors.New("machine lifecycle: --machine 必填")
+		return errors.New("machine lifecycle: --machine is required")
 	}
 	if seen["hub-url"] && seen["db"] {
-		return errors.New("machine lifecycle: --hub-url（HTTP mode）與 --db（direct mode）不可同時明示")
+		return errors.New("machine lifecycle: --hub-url (HTTP mode) and --db (direct mode) cannot both be specified")
 	}
 	if (seen["hub-url"] && strings.TrimSpace(*hubURL) == "") ||
 		(seen["db"] && strings.TrimSpace(*dbPath) == "") {
-		return errors.New("machine lifecycle: 明示的 --hub-url / --db 不可為空")
+		return errors.New("machine lifecycle: explicit --hub-url / --db cannot be empty")
 	}
 	if !seen["set"] {
 		for _, name := range []string{"confirm-name", "reason", "preview", "idempotency-key", "expected-revision", "preview-digest"} {
 			if seen[name] {
-				return fmt.Errorf("machine lifecycle: 只讀模式不接受 --%s；先明示 --set active|retired", name)
+				return fmt.Errorf("machine lifecycle: read-only mode does not accept --%s; specify --set active|retired first", name)
 			}
 		}
 	} else if *set != string(store.MachineLifecycleActive) && *set != string(store.MachineLifecycleRetired) {
-		return errors.New("machine lifecycle: --set 只接受 active 或 retired")
+		return errors.New("machine lifecycle: --set only accepts active or retired")
 	}
 	privateCount := 0
 	for _, name := range []string{"idempotency-key", "preview-digest"} {
@@ -82,28 +82,28 @@ func runMachineLifecycleSubcommand(ctx context.Context, argv []string, out, errO
 		}
 	}
 	if privateCount > 0 && (!seen["idempotency-key"] || !seen["preview-digest"] || !seen["expected-revision"]) {
-		return errors.New("machine lifecycle: retry 必須同時提供原 --idempotency-key、--expected-revision 與 --preview-digest")
+		return errors.New("machine lifecycle: retry must provide original --idempotency-key, --expected-revision, and --preview-digest together")
 	}
 	if *preview && privateCount > 0 {
-		return errors.New("machine lifecycle: --preview 不接受 apply retry key/digest")
+		return errors.New("machine lifecycle: --preview does not accept apply retry key/digest")
 	}
 	if *preview && (seen["confirm-name"] || seen["reason"]) {
-		return errors.New("machine lifecycle: --preview 不接受 --confirm-name 或 --reason；它不建立 state")
+		return errors.New("machine lifecycle: --preview does not accept --confirm-name or --reason; it does not create state")
 	}
 	if seen["expected-revision"] && *expectedRevision < 0 {
-		return errors.New("machine lifecycle: --expected-revision 不可為負數")
+		return errors.New("machine lifecycle: --expected-revision cannot be negative")
 	}
 	if !*preview && seen["set"] {
 		if strings.TrimSpace(*confirmName) == "" {
-			return errors.New("machine lifecycle: apply 的 --confirm-name 必填，且不會由 GET 自動代填")
+			return errors.New("machine lifecycle: --confirm-name is required for apply, and will not be auto-populated by GET")
 		}
 		if strings.TrimSpace(*reason) == "" {
-			return errors.New("machine lifecycle: apply 的 --reason 必填")
+			return errors.New("machine lifecycle: --reason is required for apply")
 		}
 	}
 	if seen["idempotency-key"] && (strings.TrimSpace(*idempotencyKey) == "" || len(*idempotencyKey) > 200 ||
 		!validLifecycleRetryDigest(strings.TrimSpace(*previewDigest))) {
-		return errors.New("machine lifecycle: retry key 不可為空且最多 200 bytes；preview digest 必須是 canonical sha256")
+		return errors.New("machine lifecycle: retry key cannot be empty and max 200 bytes; preview digest must be canonical sha256")
 	}
 	inputs := machineLifecycleInputs{
 		Machine: *machine, DesiredState: store.MachineLifecycleState(*set),
@@ -127,12 +127,12 @@ func runMachineLifecycleHTTP(ctx context.Context, client *operatorclient.Client,
 	out, errOut io.Writer,
 ) error {
 	if strings.TrimSpace(inputs.Machine) == "" {
-		return errors.New("machine lifecycle HTTP: --machine 必須是 machine_id")
+		return errors.New("machine lifecycle HTTP: --machine must be machine_id")
 	}
 	if inputs.DesiredState == "" {
 		result, err := client.MachineLifecycle(ctx, inputs.Machine)
 		if err != nil {
-			return fmt.Errorf("讀取 machine lifecycle 失敗（HTTP operator API）：%w", err)
+			return fmt.Errorf("failed to read machine lifecycle (HTTP operator API): %w", err)
 		}
 		if inputs.JSON {
 			return writeLifecycleJSON(out, result)
@@ -149,7 +149,7 @@ func runMachineLifecycleHTTP(ctx context.Context, client *operatorclient.Client,
 	}
 	current, err := client.MachineLifecycle(ctx, inputs.Machine)
 	if err != nil {
-		return fmt.Errorf("讀取 machine lifecycle 失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read machine lifecycle (HTTP operator API): %w", err)
 	}
 	revision := current.LifecycleRevision
 	if inputs.ExpectedRevision != nil {
@@ -159,7 +159,7 @@ func runMachineLifecycleHTTP(ctx context.Context, client *operatorclient.Client,
 		DesiredState: inputs.DesiredState, ExpectedRevision: revision,
 	})
 	if err != nil {
-		return fmt.Errorf("預覽 machine lifecycle 失敗（HTTP operator API；expected-revision=%d）：%w", revision, err)
+		return fmt.Errorf("failed to preview machine lifecycle (HTTP operator API; expected-revision=%d): %w", revision, err)
 	}
 	if inputs.Preview {
 		if inputs.JSON {
@@ -173,11 +173,11 @@ func runMachineLifecycleHTTP(ctx context.Context, client *operatorclient.Client,
 			preview.ActiveJobCount, preview.OpenAgentSessionCount, preview.Blockers, preview.PreviewDigest)
 	}
 	if len(preview.Blockers) != 0 {
-		return fmt.Errorf("machine lifecycle preview 有 blocker %q；未送出 apply", strings.Join(preview.Blockers, ","))
+		return fmt.Errorf("machine lifecycle preview has blocker %q; apply not submitted", strings.Join(preview.Blockers, ","))
 	}
 	key, err := operator.NewIdempotencyKey("cli-machine-lifecycle")
 	if err != nil {
-		return fmt.Errorf("產生 machine lifecycle request key：%w", err)
+		return fmt.Errorf("generate machine lifecycle request key: %w", err)
 	}
 	writeLifecycleRetireSessionNotice(errOut, inputs.DesiredState, preview.OpenAgentSessionCount)
 	return applyMachineLifecycleHTTP(ctx, client, inputs, revision, preview.PreviewDigest, key, out, errOut)
@@ -200,17 +200,17 @@ func applyMachineLifecycleHTTP(ctx context.Context, client *operatorclient.Clien
 					current.PendingEnrollmentTokenCount, current.PendingEnrollmentTokenExpiredCount,
 					current.PendingEnrollmentRedemptionAllowed, current.ActiveJobCount, current.Meta.ETag)
 			} else {
-				return fmt.Errorf("套用 machine lifecycle 收到歷史 rejection replay，但重新讀取 authoritative current 失敗：%w（原 replay：%v）", readErr, err)
+				return fmt.Errorf("apply machine lifecycle received historical rejection replay, but failed to re-read authoritative current: %w (original replay: %v)", readErr, err)
 			}
 		}
-		return fmt.Errorf("套用 machine lifecycle 失敗（HTTP operator API；idempotency-key=%q expected-revision=%d%s）：%w",
+		return fmt.Errorf("failed to apply machine lifecycle (HTTP operator API; idempotency-key=%q expected-revision=%d%s): %w",
 			key, revision, operatorRejectionReplayNote(err), err)
 	}
 	var current *operatorclient.MachineLifecycleReadResponse
 	if result.Replayed {
 		read, err := client.MachineLifecycle(ctx, inputs.Machine)
 		if err != nil {
-			return fmt.Errorf("machine lifecycle 已回放歷史 receipt，但重新讀取 authoritative current 失敗：%w", err)
+			return fmt.Errorf("machine lifecycle replayed historical receipt, but failed to re-read authoritative current: %w", err)
 		}
 		current = &read
 	}
@@ -247,7 +247,7 @@ func runMachineLifecycleDirect(ctx context.Context, dbPath string, inputs machin
 	return withDirectOperatorStore(ctx, "machine lifecycle", dbPath, deps, func(st *store.Store) error {
 		machine, err := resolveMachine(st, inputs.Machine, true)
 		if err != nil {
-			return fmt.Errorf("machine lifecycle direct target：%w", err)
+			return fmt.Errorf("machine lifecycle direct target: %w", err)
 		}
 		service := operator.New(st)
 		if inputs.DesiredState == "" {
@@ -274,7 +274,7 @@ func runMachineLifecycleDirect(ctx context.Context, dbPath string, inputs machin
 				MachineID: machine.MachineID, DesiredState: inputs.DesiredState, ExpectedRevision: &revision,
 			})
 			if err != nil {
-				return fmt.Errorf("預覽 machine lifecycle 失敗（direct DB operator service；expected-revision=%d）：%w", revision, err)
+				return fmt.Errorf("failed to preview machine lifecycle (direct DB operator service; expected-revision=%d): %w", revision, err)
 			}
 			if inputs.Preview {
 				if inputs.JSON {
@@ -292,7 +292,7 @@ func runMachineLifecycleDirect(ctx context.Context, dbPath string, inputs machin
 					preview.ActiveJobCount, preview.OpenAgentSessionCount, blockers, preview.PreviewDigest)
 			}
 			if len(preview.Blockers) != 0 {
-				return fmt.Errorf("machine lifecycle preview 有 blocker %q；未送出 apply", preview.Blockers)
+				return fmt.Errorf("machine lifecycle preview has blocker %q; apply not submitted", preview.Blockers)
 			}
 			digest = preview.PreviewDigest
 			key, err = operator.NewIdempotencyKey("cli-machine-lifecycle")
@@ -320,17 +320,17 @@ func runMachineLifecycleDirect(ctx context.Context, dbPath string, inputs machin
 						current.PendingEnrollmentTokenExpiredCount, current.PendingEnrollmentRedemptionAllowed,
 						current.ActiveJobCount, "")
 				} else {
-					return fmt.Errorf("machine lifecycle 收到歷史 rejection replay，但重新讀取 authoritative current 失敗：%w（原 replay：%v）", readErr, err)
+					return fmt.Errorf("machine lifecycle received historical rejection replay, but failed to re-read authoritative current: %w (original replay: %v)", readErr, err)
 				}
 			}
-			return fmt.Errorf("套用 machine lifecycle 失敗（direct DB operator service；idempotency-key=%q expected-revision=%d%s）：%w",
+			return fmt.Errorf("failed to apply machine lifecycle (direct DB operator service; idempotency-key=%q expected-revision=%d%s): %w",
 				key, revision, operatorRejectionReplayNote(err), err)
 		}
 		var current *operator.MachineLifecycleReadResult
 		if result.Replayed {
 			read, err := service.MachineLifecycle(machine.MachineID)
 			if err != nil {
-				return fmt.Errorf("machine lifecycle 已回放歷史 receipt，但重新讀取 authoritative current 失敗：%w", err)
+				return fmt.Errorf("machine lifecycle replayed historical receipt, but failed to re-read authoritative current: %w", err)
 			}
 			current = &read
 		}
@@ -396,10 +396,10 @@ func writeLifecycleRead(out io.Writer, source, machineID, displayName string, st
 	pending, pendingExpired int64, redemption bool, activeJobs int64, etag string,
 ) error {
 	if etag != "" {
-		etag = "；ETag=" + etag
+		etag = "; ETag=" + etag
 	}
 	_, err := fmt.Fprintf(out,
-		"%s: %s (%s) lifecycle=%s revision=%d%s\ndenominator=%t；agent credential present=%t authentication allowed=%t；pending tickets=%d expired=%d redemption allowed=%t；nonterminal jobs=%d\n",
+		"%s: %s (%s) lifecycle=%s revision=%d%s\ndenominator=%t; agent credential present=%t authentication allowed=%t; pending tickets=%d expired=%d redemption allowed=%t; nonterminal jobs=%d\n",
 		source, terminalSafe(displayName), terminalSafe(machineID), state, revision, etag,
 		denominator, credential, authentication, pending, pendingExpired, redemption, activeJobs)
 	return err
@@ -415,7 +415,7 @@ func writeLifecyclePreview(out io.Writer, source, machineID, displayName string,
 		blockerText = strings.Join(blockers, ",")
 	}
 	_, err := fmt.Fprintf(out,
-		"%s preview: %s (%s) %s → %s；lifecycle-revision=%d；denominator-delta=%d\nagent credential present=%t authentication=%t→%t；pending tickets=%d expired=%d redemption=%t→%t；nonterminal jobs=%d；terminal sessions currently open=%d blockers=%s\npreview-digest=%s\n",
+		"%s preview: %s (%s) %s → %s; lifecycle-revision=%d; denominator-delta=%d\nagent credential present=%t authentication=%t→%t; pending tickets=%d expired=%d redemption=%t→%t; nonterminal jobs=%d; terminal sessions currently open=%d blockers=%s\npreview-digest=%s\n",
 		source, terminalSafe(displayName), terminalSafe(machineID), before, after, revision, denominatorDelta,
 		credential, authBefore, authAfter, pending, pendingExpired, redemptionBefore, redemptionAfter,
 		activeJobs, openAgentSessions, blockerText, digest)
@@ -424,7 +424,7 @@ func writeLifecyclePreview(out io.Writer, source, machineID, displayName string,
 
 func writeLifecycleRetireSessionNotice(errOut io.Writer, desired store.MachineLifecycleState, openAgentSessions int64) {
 	if desired == store.MachineLifecycleRetired && openAgentSessions > 0 {
-		fmt.Fprintf(errOut, "machine lifecycle notice: terminal sessions currently open: %d；retiring ends any still open when applied.\n", openAgentSessions)
+		fmt.Fprintf(errOut, "machine lifecycle notice: terminal sessions currently open: %d; retiring ends any still open when applied.\n", openAgentSessions)
 	}
 }
 
@@ -434,10 +434,10 @@ func writeLifecycleApply(out io.Writer, source, machineID, displayName string,
 	key, etag string, replayed bool,
 ) error {
 	if etag != "" {
-		etag = "；ETag=" + etag
+		etag = "; ETag=" + etag
 	}
 	_, err := fmt.Fprintf(out,
-		"%s: %s (%s) %s → %s；revision=%d%s；changed=%t no-op=%t replayed=%t\nauthentication=%t→%t；pending redemption=%t→%t；idempotency-key=%s\n",
+		"%s: %s (%s) %s → %s; revision=%d%s; changed=%t no-op=%t replayed=%t\nauthentication=%t→%t; pending redemption=%t→%t; idempotency-key=%s\n",
 		source, terminalSafe(displayName), terminalSafe(machineID), before, after, revision, etag,
 		changed, noOp, replayed, authBefore, authAfter, redemptionBefore, redemptionAfter, key)
 	return err

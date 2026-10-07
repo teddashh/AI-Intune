@@ -210,7 +210,7 @@ func (l *wsLink) heartbeatLoop(ctx context.Context) {
 
 func (h *hub) persistAgentTerminalClosures(sessionIDs []string, reason string) {
 	if _, err := h.store.CloseAgentSessionsByID(sessionIDs, reason); err != nil {
-		log.Printf("終端工作階段已關閉，但關閉狀態未能寫入資料庫；請修復資料庫：%v", err)
+		log.Printf("terminal session closed, but closure state could not be written to database; please repair the database: %v", err)
 	}
 }
 
@@ -279,7 +279,7 @@ func (h *hub) handleAgentTerminalLink(w http.ResponseWriter, r *http.Request, ma
 	if err != nil {
 		cancel()
 		link.Close("terminal link setup failed")
-		log.Printf("無法確認這台機器是否仍可使用終端：連線已關閉；請修復資料庫：%v", err)
+		log.Printf("cannot verify whether this machine may still use the terminal: connection closed; please repair the database: %v", err)
 		return
 	}
 	if !attached {
@@ -392,14 +392,14 @@ func (h *hub) agentTerminalCredentialLoop(ctx context.Context, link *wsLink, mac
 		}
 		if err != nil {
 			if !reported {
-				log.Printf("無法確認終端連線的 agent token 是否仍有效：連線保留；請修復資料庫：%v", err)
+				log.Printf("cannot verify whether agent token for terminal connection is still valid: connection retained; please repair the database: %v", err)
 				reported = true
 			}
 			continue
 		}
 		reported = false
 		if !current {
-			log.Printf("終端連線已關閉：這台機器的 agent token 已更換或機器已退役 machine=%s", machineID)
+			log.Printf("terminal connection closed: agent token for this machine has changed or machine was retired machine=%s", machineID)
 			link.closeWithStatus(websocket.StatusPolicyViolation, "agent token is no longer current")
 			return
 		}

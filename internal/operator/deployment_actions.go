@@ -1076,6 +1076,6 @@ func (s *Service) recordDeploymentActionFallback(action store.AuditAction, subje
 		entry.Detail = store.OperatorIdempotencyReplayPrefix + "原判決：" + entry.Detail
 	}
 	if auditErr := s.store.RecordAudit(entry); auditErr != nil {
-		log.Printf("operator deployment audit 寫入失敗 action=%s subject=%s: %v", action, subject, auditErr)
+		log.Printf("operator deployment audit write failed action=%s subject=%s: %v", action, subject, auditErr)
 	}
 }

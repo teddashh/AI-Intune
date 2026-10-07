@@ -113,7 +113,7 @@ SELECT c.machine_id, c.agent_started_at, COUNT(*), MIN(c.received_at), MAX(c.rec
  GROUP BY c.machine_id, c.agent_started_at
  ORDER BY c.machine_id ASC, MIN(c.received_at) ASC`, since)
 	if err != nil {
-		return nil, fmt.Errorf("store: 讀 agent 啟動區間: %w", err)
+		return nil, fmt.Errorf("store: read agent run intervals: %w", err)
 	}
 	defer rows.Close()
 
@@ -122,7 +122,7 @@ SELECT c.machine_id, c.agent_started_at, COUNT(*), MIN(c.received_at), MAX(c.rec
 		var id, started, first, last string
 		var n int
 		if err := rows.Scan(&id, &started, &n, &first, &last); err != nil {
-			return nil, fmt.Errorf("store: scan agent 啟動區間: %w", err)
+			return nil, fmt.Errorf("store: scan agent run intervals: %w", err)
 		}
 		out = append(out, AgentRun{
 			MachineID: id, StartedAt: parseTime(started),
@@ -130,7 +130,7 @@ SELECT c.machine_id, c.agent_started_at, COUNT(*), MIN(c.received_at), MAX(c.rec
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: 讀 agent 啟動區間: %w", err)
+		return nil, fmt.Errorf("store: read agent run intervals: %w", err)
 	}
 	return out, nil
 }
@@ -183,14 +183,14 @@ func (s *Store) DoubleAgents(now time.Time) ([]DoubleAgent, error) {
 func (s *Store) displayNames() (map[string]string, error) {
 	rows, err := s.rdb.Query(`SELECT machine_id, COALESCE(display_name, '') FROM machine_registry`)
 	if err != nil {
-		return nil, fmt.Errorf("store: 讀機器名字: %w", err)
+		return nil, fmt.Errorf("store: read machine names: %w", err)
 	}
 	defer rows.Close()
 	out := map[string]string{}
 	for rows.Next() {
 		var id, name string
 		if err := rows.Scan(&id, &name); err != nil {
-			return nil, fmt.Errorf("store: scan 機器名字: %w", err)
+			return nil, fmt.Errorf("store: scan machine names: %w", err)
 		}
 		out[id] = name
 	}

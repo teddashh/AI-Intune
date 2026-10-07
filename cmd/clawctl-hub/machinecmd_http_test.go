@@ -55,8 +55,8 @@ func TestMachineRenameCLIHTTPPreviewApplyAndReplayNeverTouchDB(t *testing.T) {
 		"rename", "--hub-url", base, "--machine", f.machine.id,
 		"--set", "cnode-renamed-cli", "--preview",
 	}, &humanPreview, &errOut, deps); err != nil ||
-		!strings.Contains(humanPreview.String(), "名稱型 expectations 改用新名稱") ||
-		!strings.Contains(humanPreview.String(), "machine ID、agent 與機器上的 hostname 不變") {
+		!strings.Contains(humanPreview.String(), "name-based expectations will use the new name") ||
+		!strings.Contains(humanPreview.String(), "machine ID, agent, and hostname on the machine remain unchanged") {
 		t.Fatalf("human preview=%q err=%v stderr=%s", humanPreview.String(), err, errOut.String())
 	}
 	args := []string{
@@ -225,7 +225,7 @@ func TestMachineNotesCLIRequiresExplicitSetBeforeNetwork(t *testing.T) {
 	err := runMachineCommandWithDeps(t.Context(), []string{
 		"notes", "--hub-url", "http://100.64.0.9:8787", "--machine", "machine-1", "--preview",
 	}, &out, &errOut, deps)
-	if err == nil || !strings.Contains(err.Error(), "--set 必填") || hits != 0 {
+	if err == nil || !strings.Contains(err.Error(), "--set are required") || hits != 0 {
 		t.Fatalf("err=%v hits=%d stderr=%s", err, hits, errOut.String())
 	}
 }
@@ -539,7 +539,7 @@ func TestMachineChannelCLIRequiresOperatorSuppliedConfirmation(t *testing.T) {
 	err := runMachineCommandWithDeps(t.Context(), []string{
 		"channel", "--hub-url", base, "--machine", f.machine.id, "--set", "canary",
 	}, &out, &errOut, deps)
-	if err == nil || !strings.Contains(err.Error(), "--confirm-name 必填") {
+	if err == nil || !strings.Contains(err.Error(), "--confirm-name is required") {
 		t.Fatalf("missing confirmation error=%v", err)
 	}
 	m, getErr := f.store.GetMachine(f.machine.id)
@@ -610,10 +610,10 @@ func TestMachineChannelCLIReplayedRejectionSaysItIsTheOldVerdict(t *testing.T) {
 		if !errors.As(err, &apiErr) || apiErr.Code != "CONFIRMATION_MISMATCH" {
 			t.Fatalf("attempt %d error=%T %v API=%+v", attempt, err, err, apiErr)
 		}
-		if attempt == 1 && (apiErr.Replayed || strings.Contains(err.Error(), "這是原判決")) {
+		if attempt == 1 && (apiErr.Replayed || strings.Contains(err.Error(), "this is the original verdict")) {
 			t.Fatalf("first rejection mislabeled as replay: %v", err)
 		}
-		if attempt == 2 && (!apiErr.Replayed || !strings.Contains(err.Error(), "這是原判決")) {
+		if attempt == 2 && (!apiErr.Replayed || !strings.Contains(err.Error(), "this is the original verdict")) {
 			t.Fatalf("replayed rejection not identified as old verdict: %v API=%+v", err, apiErr)
 		}
 	}
@@ -630,7 +630,7 @@ func TestMachineChannelCLIRetryInputsMustBePaired(t *testing.T) {
 	} {
 		var out, errOut bytes.Buffer
 		err := runMachineCommand(t.Context(), args, &out, &errOut)
-		if err == nil || !strings.Contains(err.Error(), "必須一起提供") {
+		if err == nil || !strings.Contains(err.Error(), "must be provided together") {
 			t.Errorf("unpaired retry args=%v error=%v", args, err)
 		}
 	}
@@ -670,7 +670,7 @@ func TestMachineCLIUnknownOrMissingSubcommandIsNotSuccess(t *testing.T) {
 		if err == nil || errors.Is(err, flag.ErrHelp) {
 			t.Errorf("argv=%v returned success/help for invalid invocation: %v", argv, err)
 		}
-		if !strings.Contains(errOut.String(), "用法") {
+		if !strings.Contains(errOut.String(), "Usage:") {
 			t.Errorf("argv=%v omitted usage: %q", argv, errOut.String())
 		}
 	}

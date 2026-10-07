@@ -78,7 +78,7 @@ func (s *Server) changesPage(w http.ResponseWriter, r *http.Request) {
 	result, err := s.operator.ListChangesContext(r.Context(), request, now)
 	if err != nil {
 		if !writeChangePageReadError(w, err) {
-			log.Printf("讀取 Changes page 失敗: %v", err)
+			log.Printf("failed to read Changes page: %v", err)
 			http.Error(w, "讀取變更記錄失敗", http.StatusInternalServerError)
 		}
 		return

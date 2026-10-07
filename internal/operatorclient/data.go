@@ -72,18 +72,18 @@ func (c *Client) MachineData(ctx context.Context, machineID string) (operator.Ma
 func validateDataDisclosure(disclosure operator.DataDisclosure) error {
 	if disclosure.SchemaVersion != operator.DataDisclosureSchemaVersion ||
 		disclosure.EvaluatedAt.IsZero() || disclosure.EvaluatedAt.Location() != time.UTC {
-		return errors.New("operator client: data disclosure identity 不一致")
+		return errors.New("operator client: data disclosure identity is inconsistent")
 	}
 	keys := operator.DataCategoryKeys()
 	if len(disclosure.Categories) != len(keys) {
-		return fmt.Errorf("operator client: data disclosure 有 %d 類，這個版本認得 %d 類",
+		return fmt.Errorf("operator client: data disclosure has %d categories, this version recognizes %d categories",
 			len(disclosure.Categories), len(keys))
 	}
 	tables, timed := 0, 0
 	seen := map[string]operator.DataCategoryKey{}
 	for index, category := range disclosure.Categories {
 		if category.Key != keys[index] {
-			return fmt.Errorf("operator client: 第 %d 類是 %q，canonical 順序是 %q",
+			return fmt.Errorf("operator client: category %d is %q, canonical order is %q",
 				index, category.Key, keys[index])
 		}
 		if err := validateDataCategory(category); err != nil {
@@ -91,7 +91,7 @@ func validateDataDisclosure(disclosure operator.DataDisclosure) error {
 		}
 		for _, table := range category.Tables {
 			if previous, repeated := seen[table]; repeated {
-				return fmt.Errorf("operator client: %q 同時被 %q 與 %q 講了",
+				return fmt.Errorf("operator client: %q is covered by both %q and %q",
 					table, previous, category.Key)
 			}
 			seen[table] = category.Key
@@ -102,7 +102,7 @@ func validateDataDisclosure(disclosure operator.DataDisclosure) error {
 		}
 	}
 	if disclosure.Tables != tables || disclosure.Timed != timed {
-		return fmt.Errorf("operator client: data disclosure 說涵蓋 %d 張表、%d 類會被清，逐類加起來是 %d／%d",
+		return fmt.Errorf("operator client: data disclosure reports %d tables, %d categories timed, category totals sum to %d/%d",
 			disclosure.Tables, disclosure.Timed, tables, timed)
 	}
 	return nil
@@ -126,16 +126,16 @@ func validateDataCategory(category operator.DataCategory) error {
 	}
 	if strings.TrimSpace(category.Title) == "" || strings.TrimSpace(category.Holds) == "" ||
 		len(category.Tables) == 0 || !strings.HasPrefix(category.Path, "/") {
-		return fmt.Errorf("operator client: data category %q 沒有交代自己是什麼", category.Key)
+		return fmt.Errorf("operator client: data category %q lacks description", category.Key)
 	}
 	if category.Capability != "view" {
-		return fmt.Errorf("operator client: data category %q 說要 %q 權限，讀取面只要 view",
+		return fmt.Errorf("operator client: data category %q requires %q capability, but read surface requires view",
 			category.Key, category.Capability)
 	}
 	switch category.Source {
 	case operator.DataSourceMachine, operator.DataSourceHub, operator.DataSourceOperator:
 	default:
-		return fmt.Errorf("operator client: data category %q 的來源是 %q", category.Key, category.Source)
+		return fmt.Errorf("operator client: data category %q source is %q", category.Key, category.Source)
 	}
 	if err := validateDataRetention(category.Key, category.Retention); err != nil {
 		return err
@@ -145,7 +145,7 @@ func validateDataCategory(category operator.DataCategory) error {
 		category.RetentionSentence != operator.DataRetentionSentence(category.Retention) ||
 		category.RetirementSentence != operator.DataRetirementSentence(category.Retention) ||
 		category.FreeTextSentence != operator.DataFreeTextSentence(category.FreeText) {
-		return fmt.Errorf("operator client: data category %q 的交代跟它自己的欄位對不起來", category.Key)
+		return fmt.Errorf("operator client: data category %q description does not match its fields", category.Key)
 	}
 	return nil
 }
@@ -154,19 +154,19 @@ func validateDataRetention(key operator.DataCategoryKey, retention operator.Data
 	switch retention.Kind {
 	case operator.DataRetentionTimed:
 		if retention.Days < 1 || retention.Class == "" {
-			return fmt.Errorf("operator client: data category %q 說會被時間清，卻沒有講清多久（%+v）",
+			return fmt.Errorf("operator client: data category %q indicates time-based retention, but specifies no retention duration (%+v)",
 				key, retention)
 		}
 	case operator.DataRetentionKept:
 		if retention.Days != 0 || retention.Class != "" {
-			return fmt.Errorf("operator client: data category %q 說不按時間清，卻給了一個保留期（%+v）",
+			return fmt.Errorf("operator client: data category %q indicates non-timed retention, but specifies a retention duration (%+v)",
 				key, retention)
 		}
 	default:
-		return fmt.Errorf("operator client: data category %q 的保留期種類是 %q", key, retention.Kind)
+		return fmt.Errorf("operator client: data category %q retention kind is %q", key, retention.Kind)
 	}
 	if (retention.RingRows > 0) != (retention.RingSubject != "") {
-		return fmt.Errorf("operator client: data category %q 的固定筆數上限只講了一半（%+v）",
+		return fmt.Errorf("operator client: data category %q fixed row limit is incomplete (%+v)",
 			key, retention)
 	}
 	return nil
@@ -176,23 +176,23 @@ func validateMachineData(result operator.MachineDataResult, machineID string) er
 	if result.SchemaVersion != operator.DataDisclosureSchemaVersion || result.MachineID != machineID ||
 		strings.TrimSpace(result.DisplayName) == "" ||
 		result.EvaluatedAt.IsZero() || result.EvaluatedAt.Location() != time.UTC {
-		return errors.New("operator client: machine data identity 不一致")
+		return errors.New("operator client: machine data identity is inconsistent")
 	}
 	if err := validateMachineClientText("machine data display_name", result.DisplayName, 256); err != nil {
 		return err
 	}
 	if result.Retired != (result.RetiredAt != nil) {
-		return errors.New("operator client: machine data 說退役了卻沒有退役時刻")
+		return errors.New("operator client: machine data indicates retired but lacks retired_at timestamp")
 	}
 	keys := operator.DataCategoryKeys()
 	if len(result.Categories) != len(keys) {
-		return fmt.Errorf("operator client: machine data 有 %d 類，這個版本認得 %d 類",
+		return fmt.Errorf("operator client: machine data has %d categories, this version recognizes %d categories",
 			len(result.Categories), len(keys))
 	}
 	var rows, undated int64
 	for index, measured := range result.Categories {
 		if measured.Category.Key != keys[index] {
-			return fmt.Errorf("operator client: 第 %d 類是 %q，canonical 順序是 %q",
+			return fmt.Errorf("operator client: category %d is %q, canonical order is %q",
 				index, measured.Category.Key, keys[index])
 		}
 		if err := validateDataCategory(measured.Category); err != nil {
@@ -205,7 +205,7 @@ func validateMachineData(result operator.MachineDataResult, machineID string) er
 		undated += measured.Undated
 	}
 	if result.Rows != rows || result.Undated != undated {
-		return fmt.Errorf("operator client: machine data 說有 %d 列（%d 列沒有時刻），逐類加起來是 %d／%d",
+		return fmt.Errorf("operator client: machine data reports %d rows (%d rows without timestamp), category totals sum to %d/%d",
 			result.Rows, result.Undated, rows, undated)
 	}
 	return nil
@@ -214,31 +214,31 @@ func validateMachineData(result operator.MachineDataResult, machineID string) er
 func validateMachineDataCategory(measured operator.MachineDataCategory, evaluatedAt time.Time) error {
 	key := measured.Category.Key
 	if measured.Rows < 0 || measured.Undated < 0 || measured.Undated > measured.Rows {
-		return fmt.Errorf("operator client: data category %q 的列數 %d／%d 站不住",
+		return fmt.Errorf("operator client: data category %q row counts %d/%d are invalid",
 			key, measured.Undated, measured.Rows)
 	}
 	if measured.Rows == 0 && (measured.Oldest != nil || measured.Newest != nil) {
-		return fmt.Errorf("operator client: data category %q 一列都沒有，卻給了時刻", key)
+		return fmt.Errorf("operator client: data category %q has no rows, but provides timestamps", key)
 	}
 	if (measured.Oldest == nil) != (measured.Newest == nil) {
-		return fmt.Errorf("operator client: data category %q 只給了一半的時間範圍", key)
+		return fmt.Errorf("operator client: data category %q provides only partial time range", key)
 	}
 	if measured.Oldest != nil {
 		if measured.Oldest.After(*measured.Newest) {
-			return fmt.Errorf("operator client: data category %q 的最舊比最新還晚", key)
+			return fmt.Errorf("operator client: data category %q oldest timestamp is after newest", key)
 		}
 		if measured.Newest.After(evaluatedAt) {
-			return fmt.Errorf("operator client: data category %q 的最新在這次讀取之後", key)
+			return fmt.Errorf("operator client: data category %q newest timestamp is after read time", key)
 		}
 	}
 	timed := measured.Category.Retention.Kind == operator.DataRetentionTimed
 	if timed != (measured.CutoffAt != nil) {
-		return fmt.Errorf("operator client: data category %q 的清除界線跟它的保留期對不起來", key)
+		return fmt.Errorf("operator client: data category %q prune boundary does not match retention period", key)
 	}
 	if timed {
 		want := evaluatedAt.Add(-time.Duration(measured.Category.Retention.Days) * 24 * time.Hour)
 		if !measured.CutoffAt.Equal(want) {
-			return fmt.Errorf("operator client: data category %q 的清除界線是 %v，保留期算出來是 %v",
+			return fmt.Errorf("operator client: data category %q prune boundary is %v, retention period calculates to %v",
 				key, measured.CutoffAt, want)
 		}
 	}

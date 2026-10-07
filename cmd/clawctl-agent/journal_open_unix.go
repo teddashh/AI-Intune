@@ -20,7 +20,7 @@ func openJournal(path string) (*os.File, error) {
 	file := os.NewFile(uintptr(fd), path)
 	if file == nil {
 		_ = unix.Close(fd)
-		return nil, errors.New("無法開啟水位日誌")
+		return nil, errors.New("cannot open journal")
 	}
 	return finishOpenJournal(file)
 }

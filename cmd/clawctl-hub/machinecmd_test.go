@@ -37,7 +37,7 @@ func TestMachineChannelCLIReportsNonterminalJobWithoutMovingMachine(t *testing.T
 	err = runMachineChannel(f.store, machineChannelInputs{
 		Machine: "cnode-cli-busy", Set: "stable", ConfirmName: "cnode-cli-busy",
 	}, &out)
-	if !errors.Is(err, store.ErrMachineActiveJob) || !strings.Contains(err.Error(), "設定 channel 失敗") ||
+	if !errors.Is(err, store.ErrMachineActiveJob) || !strings.Contains(err.Error(), "set channel failed") ||
 		!strings.Contains(err.Error(), "未終態 job") {
 		t.Fatalf("CLI active-job error=%v", err)
 	}
@@ -133,10 +133,10 @@ func TestMachineChannelDirectCLIShowsSuccessAndRejectionReplays(t *testing.T) {
 			if !errors.As(err, &requestErr) || requestErr.Code != store.OperatorCodeConfirmationMismatch {
 				t.Fatalf("attempt %d error=%T %v request=%+v", attempt, err, err, requestErr)
 			}
-			if attempt == 1 && strings.Contains(err.Error(), "這是原判決") {
+			if attempt == 1 && strings.Contains(err.Error(), "this is the original verdict") {
 				t.Fatalf("first rejection mislabeled as replay: %v", err)
 			}
-			if attempt == 2 && (!requestErr.Replayed || !strings.Contains(err.Error(), "這是原判決")) {
+			if attempt == 2 && (!requestErr.Replayed || !strings.Contains(err.Error(), "this is the original verdict")) {
 				t.Fatalf("rejected replay not identified as old verdict: %v request=%+v", err, requestErr)
 			}
 		}

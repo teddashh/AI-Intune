@@ -54,7 +54,7 @@ func (c *Client) Artifacts(ctx context.Context, request operator.ArtifactListReq
 // Artifact performs the server's full byte verification for one catalog item.
 func (c *Client) Artifact(ctx context.Context, artifactID string) (operator.ArtifactDetailResult, error) {
 	if !validArtifactClientID(artifactID) {
-		return operator.ArtifactDetailResult{}, errors.New("operator client: artifact_id 必須是 canonical catalog identity")
+		return operator.ArtifactDetailResult{}, errors.New("operator client: artifact_id must be a canonical catalog identity")
 	}
 	req, err := c.newOperatorRequest(ctx, http.MethodGet,
 		"/v1/operator/artifacts/"+url.PathEscape(artifactID), nil)
@@ -93,7 +93,7 @@ func encodeArtifactListQuery(request operator.ArtifactListRequest) (url.Values, 
 	}
 	if request.Version != "" {
 		if !validArtifactClientText(request.Version, 128) {
-			return nil, 0, errors.New("operator client: artifact version 不合法")
+			return nil, 0, errors.New("operator client: invalid artifact version")
 		}
 		query.Set("version", request.Version)
 	}
@@ -107,7 +107,7 @@ func encodeArtifactListQuery(request operator.ArtifactListRequest) (url.Values, 
 	}
 	if request.Cursor != "" {
 		if !validArtifactClientText(request.Cursor, 2048) {
-			return nil, 0, errors.New("operator client: artifact cursor 不合法")
+			return nil, 0, errors.New("operator client: invalid artifact cursor")
 		}
 		query.Set("cursor", request.Cursor)
 	}

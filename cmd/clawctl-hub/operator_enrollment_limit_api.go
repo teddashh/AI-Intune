@@ -34,7 +34,7 @@ func (h *hub) handleGetOperatorEnrollmentLimit(w http.ResponseWriter, r *http.Re
 	}
 	result, err := h.operatorReportService().EnrollmentLimit(time.Now().UTC())
 	if err != nil {
-		log.Printf("讀取 operator enrollment limit 失敗: %v", err)
+		log.Printf("failed to read operator enrollment limit: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取註冊上限失敗")
 		return
 	}
@@ -63,7 +63,7 @@ func (h *hub) handlePreviewOperatorEnrollmentLimit(w http.ResponseWriter, r *htt
 	if err != nil {
 		status, code, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator enrollment limit preview 失敗: %v", err)
+			log.Printf("operator enrollment limit preview failed: %v", err)
 		}
 		writeErr(w, status, code, detail)
 		return
@@ -109,7 +109,7 @@ func (h *hub) handleSetOperatorEnrollmentLimit(w http.ResponseWriter, r *http.Re
 			w.Header().Set("Idempotency-Replayed", "true")
 		}
 		if status == http.StatusInternalServerError {
-			log.Printf("operator enrollment limit apply 失敗: %v", err)
+			log.Printf("operator enrollment limit apply failed: %v", err)
 		}
 		writeErr(w, status, code, detail)
 		return

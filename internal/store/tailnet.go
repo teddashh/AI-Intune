@@ -18,7 +18,7 @@ import (
 func (s *Store) IgnorePeer(hostname, note string) error {
 	h := strings.ToLower(strings.TrimSpace(hostname))
 	if h == "" {
-		return errors.New("store: 要忽略哪一台？hostname 是空的")
+		return errors.New("store: which peer to ignore? hostname is empty")
 	}
 	_, err := s.execWrite(context.Background(), "ignore_peer", `INSERT INTO tailnet_ignored (hostname, note, created_at) VALUES (?,?,?)
 		 ON CONFLICT(hostname) DO UPDATE SET note = excluded.note`,

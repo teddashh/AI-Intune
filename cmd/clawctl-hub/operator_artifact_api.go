@@ -26,7 +26,7 @@ func (h *hub) handleListOperatorArtifacts(w http.ResponseWriter, r *http.Request
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "artifact filter 或 cursor 不合法")
 			return
 		}
-		log.Printf("讀取 operator artifact list 失敗: %v", err)
+		log.Printf("failed to read operator artifact list: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 artifact list 失敗")
 		return
 	}
@@ -48,7 +48,7 @@ func (h *hub) handleGetOperatorArtifact(w http.ResponseWriter, r *http.Request) 
 		case errors.Is(err, operator.ErrInvalidArtifactRead):
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "artifact identity 不合法")
 		default:
-			log.Printf("讀取 operator artifact detail 失敗 artifact=%q: %v", r.PathValue("sha256"), err)
+			log.Printf("failed to read operator artifact detail artifact=%q: %v", r.PathValue("sha256"), err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 artifact detail 失敗")
 		}
 		return

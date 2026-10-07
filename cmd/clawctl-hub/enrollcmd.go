@@ -32,53 +32,53 @@ func runEnrollTokenCommandWithDeps(ctx context.Context, argv []string, out, errO
 	fs := flag.NewFlagSet("enroll-token", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub enroll-token [--ttl 24h] [--reason 原因] [--preview] [--hub-url URL | --db PATH] <顯示名稱>")
-		fmt.Fprintln(errOut, "      clawctl-hub enroll-token revoke [--reason 原因] [--preview] [--hub-url URL | --db PATH] <machine-id>")
-		fmt.Fprintln(errOut, "  顯示名稱若剛好是 revoke，請用 `clawctl-hub enroll-token [flags] -- revoke` 明確分隔。")
-		fmt.Fprintln(errOut, "  正常模式走 HTTP operator API：先取得 expiry/impact preview，再建立只顯示一次的 token。")
-		fmt.Fprintln(errOut, "  --db 是明示的 stopped-service direct DB break-glass；要求既有 canonical ledger、upgrade+writer locks，且受控 Hub unit 完全停止。")
-		fmt.Fprintln(errOut, "  ambiguous response 後只可重用原本的 name、TTL、reason、--idempotency-key 與 --preview-digest；replay 不會重顯 secret。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub enroll-token [--ttl 24h] [--reason REASON] [--preview] [--hub-url URL | --db PATH] <display-name>")
+		fmt.Fprintln(errOut, "      clawctl-hub enroll-token revoke [--reason REASON] [--preview] [--hub-url URL | --db PATH] <machine-id>")
+		fmt.Fprintln(errOut, "  If display name happens to be revoke, separate explicitly with `clawctl-hub enroll-token [flags] -- revoke`.")
+		fmt.Fprintln(errOut, "  Normal mode uses HTTP operator API: fetch expiry/impact preview first, then create single-use token.")
+		fmt.Fprintln(errOut, "  --db is explicit stopped-service direct DB break-glass; requires existing canonical ledger, upgrade+writer locks, and stopped Hub unit.")
+		fmt.Fprintln(errOut, "  After ambiguous response, only original name, TTL, reason, --idempotency-key, and --preview-digest may be reused; replay will not redisplay secret.")
 		fs.PrintDefaults()
 	}
-	dbPath := fs.String("db", "", "stopped-service direct DB break-glass 的既有 SQLite 檔位置")
-	hubURL := fs.String("hub-url", "", "HTTP operator API base URL（省略時自動發現）")
-	ttl := fs.Duration("ttl", defaultEnrollTokenTTL, "這張票多久過期（1m 到 24h，整秒）")
-	reason := fs.String("reason", "", "為什麼要納管（進 audit，選填）")
-	previewOnly := fs.Bool("preview", false, "只顯示到期時間與分母影響，不開票")
-	idempotencyKey := fs.String("idempotency-key", "", "明示原 request key；必須與 --preview-digest 成對重用")
-	previewDigest := fs.String("preview-digest", "", "明示原 preview digest；必須與 --idempotency-key 成對重用")
+	dbPath := fs.String("db", "", "existing SQLite file location for stopped-service direct DB break-glass")
+	hubURL := fs.String("hub-url", "", "HTTP operator API base URL (auto-discovered if omitted)")
+	ttl := fs.Duration("ttl", defaultEnrollTokenTTL, "token validity duration (1m to 24h, whole seconds)")
+	reason := fs.String("reason", "", "enrollment reason (recorded in audit, optional)")
+	previewOnly := fs.Bool("preview", false, "preview expiry and denominator impact without generating token")
+	idempotencyKey := fs.String("idempotency-key", "", "original request key; must be reused with --preview-digest")
+	previewDigest := fs.String("preview-digest", "", "original preview digest; must be reused with --idempotency-key")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
 		fs.Usage()
-		return errors.New("enroll-token: 必須指定一個顯示名稱")
+		return errors.New("enroll-token: exactly one display name must be specified")
 	}
 	seen := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
 	if seen["hub-url"] && seen["db"] {
-		return errors.New("enroll-token: --hub-url（HTTP mode）與 --db（direct mode）不可同時明示")
+		return errors.New("enroll-token: --hub-url (HTTP mode) and --db (direct mode) cannot both be specified explicitly")
 	}
 	if seen["hub-url"] && strings.TrimSpace(*hubURL) == "" {
-		return errors.New("enroll-token: --hub-url 不可為空")
+		return errors.New("enroll-token: --hub-url cannot be empty")
 	}
 	if seen["db"] && strings.TrimSpace(*dbPath) == "" {
-		return errors.New("enroll-token: --db 不可為空")
+		return errors.New("enroll-token: --db cannot be empty")
 	}
 	if strings.TrimSpace(*idempotencyKey) == "" && seen["idempotency-key"] {
-		return errors.New("enroll-token: --idempotency-key 不可為空")
+		return errors.New("enroll-token: --idempotency-key cannot be empty")
 	}
 	if strings.TrimSpace(*previewDigest) == "" && seen["preview-digest"] {
-		return errors.New("enroll-token: --preview-digest 不可為空")
+		return errors.New("enroll-token: --preview-digest cannot be empty")
 	}
 	if seen["preview-digest"] != seen["idempotency-key"] {
-		return errors.New("enroll-token: --idempotency-key 與 --preview-digest 必須成對提供；省略兩者才會建立新的 request")
+		return errors.New("enroll-token: --idempotency-key and --preview-digest must be provided together; omit both to create new request")
 	}
 	if *previewOnly && (seen["idempotency-key"] || seen["preview-digest"] || seen["reason"]) {
-		return errors.New("enroll-token: --preview 不接受 --idempotency-key、--preview-digest 或 --reason；它不建立 state")
+		return errors.New("enroll-token: --preview does not accept --idempotency-key, --preview-digest, or --reason; it does not create state")
 	}
 	if *ttl%time.Second != 0 {
-		return errors.New("enroll-token: --ttl 必須是整秒")
+		return errors.New("enroll-token: --ttl must be in whole seconds")
 	}
 	inputs := enrollTokenInputs{
 		DisplayName: strings.TrimSpace(fs.Arg(0)), TTLSeconds: int64(*ttl / time.Second),
@@ -88,7 +88,7 @@ func runEnrollTokenCommandWithDeps(ctx context.Context, argv []string, out, errO
 	// Do not silently canonicalize a name whose request identity would differ
 	// from what the operator typed. The domain service enforces the same rule.
 	if inputs.DisplayName != fs.Arg(0) {
-		return errors.New("enroll-token: 顯示名稱開頭或結尾不可有空白")
+		return errors.New("enroll-token: display name cannot have leading or trailing whitespace")
 	}
 
 	if seen["db"] {
@@ -102,20 +102,20 @@ func runEnrollTokenCommandWithDeps(ctx context.Context, argv []string, out, errO
 	if !seen["hub-url"] {
 		mode = "discovered HTTP operator API"
 		if deps.discoverHubURL == nil {
-			return errors.New("enroll-token: Hub discovery 未初始化")
+			return errors.New("enroll-token: Hub discovery not initialized")
 		}
 		var err error
 		selectedURL, err = deps.discoverHubURL()
 		if err != nil {
-			return fmt.Errorf("enroll-token: 無法發現 Hub：%w", err)
+			return fmt.Errorf("enroll-token: unable to discover Hub: %w", err)
 		}
 	}
 	if deps.newOperatorClient == nil {
-		return fmt.Errorf("enroll-token: %s client 未初始化", mode)
+		return fmt.Errorf("enroll-token: %s client not initialized", mode)
 	}
 	client, err := deps.newOperatorClient(selectedURL)
 	if err != nil {
-		return fmt.Errorf("enroll-token: 設定 %s 失敗：%w", mode, err)
+		return fmt.Errorf("enroll-token: failed to configure %s: %w", mode, err)
 	}
 	return runEnrollTokenHTTP(ctx, client, selectedURL, inputs, out, errOut)
 }
@@ -138,7 +138,7 @@ func runEnrollTokenHTTP(ctx context.Context, client *operatorclient.Client, hubU
 			DisplayName: inputs.DisplayName, TTLSeconds: inputs.TTLSeconds,
 		})
 		if err != nil {
-			return fmt.Errorf("enroll-token preview（HTTP operator API）失敗：%w", err)
+			return fmt.Errorf("enroll-token preview (HTTP operator API) failed: %w", err)
 		}
 		previewCopy := enrollTokenPreviewCopy{
 			DisplayName: preview.DisplayName, TTLSeconds: preview.TTLSeconds,
@@ -156,14 +156,14 @@ func runEnrollTokenHTTP(ctx context.Context, client *operatorclient.Client, hubU
 	}
 	key, err := enrollTokenRequestKey(inputs.IdempotencyKey)
 	if err != nil {
-		return fmt.Errorf("enroll-token：%w", err)
+		return fmt.Errorf("enroll-token: %w", err)
 	}
 	result, err := client.CreateEnrollToken(ctx, key, operatorclient.EnrollmentTokenCreateRequest{
 		DisplayName: inputs.DisplayName, TTLSeconds: inputs.TTLSeconds,
 		PreviewDigest: digest, Reason: inputs.Reason,
 	})
 	if err != nil {
-		return fmt.Errorf("enroll-token create（HTTP operator API；idempotency-key=%q preview-digest=%q%s）失敗：%w",
+		return fmt.Errorf("enroll-token create (HTTP operator API; idempotency-key=%q preview-digest=%q%s) failed: %w",
 			key, digest, operatorRejectionReplayNote(err), err)
 	}
 	return finishEnrollToken(result.MachineID, result.DisplayName, result.EnrollmentToken,
@@ -179,7 +179,7 @@ func runEnrollTokenDirect(st *store.Store, inputs enrollTokenInputs, out, errOut
 			DisplayName: inputs.DisplayName, TTLSeconds: inputs.TTLSeconds,
 		})
 		if err != nil {
-			return fmt.Errorf("enroll-token preview（direct DB operator service）失敗：%w", err)
+			return fmt.Errorf("enroll-token preview (direct DB operator service) failed: %w", err)
 		}
 		previewCopy := enrollTokenPreviewCopy{
 			DisplayName: preview.DisplayName, TTLSeconds: preview.TTLSeconds,
@@ -197,7 +197,7 @@ func runEnrollTokenDirect(st *store.Store, inputs enrollTokenInputs, out, errOut
 	}
 	key, err := enrollTokenRequestKey(inputs.IdempotencyKey)
 	if err != nil {
-		return fmt.Errorf("enroll-token：%w", err)
+		return fmt.Errorf("enroll-token: %w", err)
 	}
 	result, err := service.CreateEnrollToken(operator.EnrollTokenCreateRequest{
 		DisplayName: inputs.DisplayName, TTLSeconds: inputs.TTLSeconds,
@@ -209,7 +209,7 @@ func runEnrollTokenDirect(st *store.Store, inputs enrollTokenInputs, out, errOut
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("enroll-token create（direct DB operator service；idempotency-key=%q preview-digest=%q%s）失敗：%w",
+		return fmt.Errorf("enroll-token create (direct DB operator service; idempotency-key=%q preview-digest=%q%s) failed: %w",
 			key, digest, operatorRejectionReplayNote(err), err)
 	}
 	return finishEnrollToken(result.MachineID, result.DisplayName, result.EnrollmentToken,
@@ -244,13 +244,13 @@ type enrollTokenPreviewCopy struct {
 func writeEnrollTokenPreview(w io.Writer, preview enrollTokenPreviewCopy) error {
 	if preview.AtLimit {
 		_, err := fmt.Fprintf(w,
-			"preview: %s 現在建立不了：名冊上已有 %d 台（已退役的不算），上限 %d 台；"+
-				"要再納管就先退役不用的機器，或把上限調高；preview-digest=%s\n",
+			"preview: %s cannot be created now: %d machines already on roster (retired excluded), limit %d machines; "+
+				"to enroll more, retire unused machines first or raise the limit; preview-digest=%s\n",
 			preview.DisplayName, preview.InDenominator, preview.LimitMaxMachines, preview.Digest)
 		return err
 	}
 	_, err := fmt.Fprintf(w,
-		"preview: %s 會新增一台 expected machine 並立即進分母；若現在建立，%d 秒後（%s）過期；撤票不移除名冊列；preview-digest=%s\n",
+		"preview: %s will add one expected machine and enter denominator immediately; if created now, expires in %d seconds (%s); revocation does not remove roster row; preview-digest=%s\n",
 		preview.DisplayName, preview.TTLSeconds, preview.ExpiresAt.UTC().Format(time.RFC3339),
 		preview.Digest)
 	return err
@@ -260,22 +260,22 @@ func finishEnrollToken(machineID, displayName, token string, secretAvailable, re
 	recoveryRequired bool, expiresAt time.Time, key, hubURL string, out, errOut io.Writer,
 ) error {
 	if replayed || recoveryRequired || !secretAvailable || token == "" {
-		return fmt.Errorf("enroll-token 已完成；token 不可重顯；machine_id=%s；idempotency-key=%q；撤銷：clawctl-hub enroll-token revoke %s",
+		return fmt.Errorf("enroll-token completed; token cannot be redisplayed; machine_id=%s; idempotency-key=%q; revoke: clawctl-hub enroll-token revoke %s",
 			machineID, key, machineID)
 	}
 	// stdout has exactly one secret-bearing write. In particular, do not repeat
 	// token in the example command or an error string.
 	if _, err := fmt.Fprintln(out, token); err != nil {
-		return fmt.Errorf("token delivery 失敗；machine_id=%s；idempotency-key=%q；撤銷：clawctl-hub enroll-token revoke %s：%w",
+		return fmt.Errorf("token delivery failed; machine_id=%s; idempotency-key=%q; revoke: clawctl-hub enroll-token revoke %s: %w",
 			machineID, key, machineID, err)
 	}
 	base := hubURL
 	if base == "" {
-		base = "http://<Hub 的 literal Tailscale IP>:<CLAWCTL_LISTEN 的埠>"
+		base = "http://<Hub literal Tailscale IP>:<CLAWCTL_LISTEN port>"
 	}
 	_, err := fmt.Fprintf(errOut,
-		"\n%s 已加入名冊（machine_id %s）。\n"+
-			"token 在 %s 過期，只能使用一次。\n"+
+		"\n%s added to roster (machine_id %s).\n"+
+			"token expires at %s and can only be used once.\n"+
 			"./install-agent.sh --hub %s\n"+
 			"./install-agent-macos.sh --hub %s\n"+
 			".\\install-agent-windows.ps1 --hub %s\n"+

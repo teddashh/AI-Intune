@@ -62,7 +62,7 @@ func hubLoopGaps(wall, mono, took time.Duration) []hubGap {
 // 寫不了自己的日誌而停下來 —— 那會讓「記不了」變成「不在了」。
 func (h *hub) journal(kind, detail string, at time.Time) {
 	if err := h.store.RecordHubEvent(kind, detail, at.UTC()); err != nil {
-		log.Printf("寫不進 Hub 自己的日誌（%s）：%v", kind, err)
+		log.Printf("failed to write hub journal (%s): %v", kind, err)
 	}
 }
 

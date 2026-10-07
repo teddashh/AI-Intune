@@ -237,7 +237,7 @@ func TestAuditCLIRejectsInvalidArgumentsBeforeIO(t *testing.T) {
 	if err := runAuditCommandWithDeps(t.Context(), []string{"--help"}, &out, &help, deps); !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("help error=%v", err)
 	}
-	for _, want := range []string{"audit [list]", "--hub-url", "--db", "--denials", "最新 50 筆"} {
+	for _, want := range []string{"audit [list]", "--hub-url", "--db", "--denials", "latest 50"} {
 		if !strings.Contains(help.String(), want) {
 			t.Fatalf("audit help missing %q: %s", want, help.String())
 		}
@@ -263,7 +263,7 @@ func TestAuditCLIHumanOutputIsTerminalSafeAndExplicitAboutUnknownEvidence(t *tes
 	}
 	if strings.ContainsAny(out.String(), "\x1b\r\a") || !strings.Contains(out.String(), `\x1b`) ||
 		!strings.Contains(out.String(), `\r\n`) || !strings.Contains(out.String(), "unknown (invalid ledger time)") ||
-		!strings.Contains(out.String(), "結果無法判讀 1") || !strings.Contains(out.String(), "省略 1") ||
+		!strings.Contains(out.String(), "unknown outcome 1") || !strings.Contains(out.String(), "omitted 1") ||
 		!strings.Contains(out.String(), operator.AuditReadConsistency) {
 		t.Fatalf("unsafe or ambiguous audit output=%q", out.String())
 	}
@@ -310,7 +310,7 @@ func TestTheAuditCLINamesTheStateWhenARowHasNoReadableSubject(t *testing.T) {
 	if err := writeAuditList(&out, result, false, "HTTP operator API"); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := out.String(), "對象無法判讀"; !strings.Contains(got, want) {
+	if got, want := out.String(), "undecodable subject"; !strings.Contains(got, want) {
 		t.Errorf("got audit output %q, expected it to contain %q；審計表把沒有對象的那一列印成一個空欄，讀表的人分不出「這列沒有對象」與「這格漏印了」，他會去查一個其實不存在的對象。", got, want)
 	}
 	if got := out.String(); !strings.Contains(got, readableSubject) {

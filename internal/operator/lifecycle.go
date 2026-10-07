@@ -106,7 +106,7 @@ func (s *Service) ChangeMachineLifecycle(req MachineLifecycleRequest) (MachineLi
 	}
 	if !alreadyAudited {
 		if auditErr := s.store.RecordAudit(entry); auditErr != nil {
-			log.Printf("operator lifecycle audit 寫入失敗 subject=%s: %v", entry.Subject, auditErr)
+			log.Printf("operator lifecycle audit write failed subject=%s: %v", entry.Subject, auditErr)
 		}
 	}
 	s.endClosedTerminalSessions(err, result.ClosedSessionIDs)

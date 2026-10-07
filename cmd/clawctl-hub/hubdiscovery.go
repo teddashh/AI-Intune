@@ -41,24 +41,24 @@ const (
 func discoverOperatorHubURL() (string, error) {
 	if raw, present := os.LookupEnv(operatorHubURLEnv); present {
 		if raw == "" || strings.TrimSpace(raw) == "" {
-			return "", fmt.Errorf("%s 已設定但為空", operatorHubURLEnv)
+			return "", fmt.Errorf("%s is set but empty", operatorHubURLEnv)
 		}
 		return validateDiscoveredOperatorURL(raw, operatorHubURLEnv)
 	}
 
 	path, err := operatorConfigPath()
 	if err != nil {
-		return "", fmt.Errorf("找不到 operator Hub URL；設定 %s 或明示 --hub-url：%w",
+		return "", fmt.Errorf("cannot find operator Hub URL; set %s or specify --hub-url: %w",
 			operatorHubURLEnv, err)
 	}
 	raw, err := readOwnedRegularFile(path, maxOperatorConfigSize)
 	if err != nil {
-		return "", fmt.Errorf("讀取 operator discovery config %s 失敗；設定 %s 或明示 --hub-url：%w",
+		return "", fmt.Errorf("failed to read operator discovery config %s; set %s or specify --hub-url: %w",
 			path, operatorHubURLEnv, err)
 	}
 	hubURL, err := decodeOperatorConfig(raw)
 	if err != nil {
-		return "", fmt.Errorf("operator discovery config %s 不合法：%w", path, err)
+		return "", fmt.Errorf("invalid operator discovery config %s: %w", path, err)
 	}
 	return validateDiscoveredOperatorURL(hubURL, path)
 }
@@ -68,7 +68,7 @@ func validateDiscoveredOperatorURL(raw, source string) (string, error) {
 	if err != nil {
 		// Do not echo raw: a malformed URL can contain userinfo even though this
 		// contract rejects it, and discovery errors routinely reach shell logs.
-		return "", fmt.Errorf("%s 的 operator Hub URL 不合法：%w", source, err)
+		return "", fmt.Errorf("invalid operator Hub URL in %s: %w", source, err)
 	}
 	return endpoint.BaseURL(), nil
 }
@@ -76,10 +76,10 @@ func validateDiscoveredOperatorURL(raw, source string) (string, error) {
 func operatorConfigPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
-		return "", fmt.Errorf("取得 user config directory：%w", err)
+		return "", fmt.Errorf("get user config directory: %w", err)
 	}
 	if !filepath.IsAbs(dir) {
-		return "", errors.New("user config directory 不是 absolute path")
+		return "", errors.New("user config directory is not an absolute path")
 	}
 	return filepath.Join(dir, "clawctl", operatorConfigFilename), nil
 }
@@ -91,52 +91,52 @@ func decodeOperatorConfig(raw []byte) (string, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	first, err := dec.Token()
 	if err != nil {
-		return "", errors.New("JSON 無法解析")
+		return "", errors.New("failed to parse JSON")
 	}
 	delim, ok := first.(json.Delim)
 	if !ok || delim != '{' {
-		return "", errors.New("頂層必須是 JSON object")
+		return "", errors.New("top-level must be a JSON object")
 	}
 	seen := false
 	var hubURL string
 	for dec.More() {
 		token, err := dec.Token()
 		if err != nil {
-			return "", errors.New("JSON object 欄位無法解析")
+			return "", errors.New("failed to parse JSON object field")
 		}
 		name, ok := token.(string)
 		if !ok {
-			return "", errors.New("JSON object 欄位名稱不是 string")
+			return "", errors.New("JSON object field name is not a string")
 		}
 		if name != "hub_url" {
-			return "", fmt.Errorf("不接受未知欄位 %q", name)
+			return "", fmt.Errorf("unknown field %q not allowed", name)
 		}
 		if seen {
-			return "", errors.New("hub_url 欄位重複")
+			return "", errors.New("duplicate hub_url field")
 		}
 		seen = true
 		if err := dec.Decode(&hubURL); err != nil {
-			return "", errors.New("hub_url 必須是 string")
+			return "", errors.New("hub_url must be a string")
 		}
 	}
 	last, err := dec.Token()
 	if err != nil {
-		return "", errors.New("JSON object 沒有正確結束")
+		return "", errors.New("JSON object did not terminate properly")
 	}
 	if delim, ok := last.(json.Delim); !ok || delim != '}' {
-		return "", errors.New("JSON object 沒有正確結束")
+		return "", errors.New("JSON object did not terminate properly")
 	}
 	if token, err := dec.Token(); !errors.Is(err, io.EOF) {
 		if err == nil {
 			_ = token
 		}
-		return "", errors.New("JSON object 後面還有 trailing value")
+		return "", errors.New("trailing value after JSON object")
 	}
 	if !seen {
-		return "", errors.New("缺少 hub_url")
+		return "", errors.New("missing hub_url")
 	}
 	if hubURL == "" || strings.TrimSpace(hubURL) == "" {
-		return "", errors.New("hub_url 不可為空")
+		return "", errors.New("hub_url cannot be empty")
 	}
 	return hubURL, nil
 }
@@ -147,12 +147,12 @@ func decodeOperatorConfig(raw []byte) (string, error) {
 // hardlink, or redirect the selected file.
 func readOwnedRegularFile(path string, limit int64) ([]byte, error) {
 	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
-		return nil, errors.New("config path 不是 canonical absolute path")
+		return nil, errors.New("config path is not a canonical absolute path")
 	}
 	parentPath := filepath.Dir(path)
 	resolvedParent, err := filepath.EvalSymlinks(parentPath)
 	if err != nil {
-		return nil, fmt.Errorf("resolve config parent：%w", err)
+		return nil, fmt.Errorf("resolve config parent: %w", err)
 	}
 	parentFD, err := unix.Open(resolvedParent, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
@@ -170,32 +170,32 @@ func readOwnedRegularFile(path string, limit int64) ([]byte, error) {
 	f := os.NewFile(uintptr(fd), path)
 	if f == nil {
 		_ = unix.Close(fd)
-		return nil, errors.New("無法建立 config file handle")
+		return nil, errors.New("unable to create config file handle")
 	}
 	defer f.Close()
 	var stat unix.Stat_t
 	if err := unix.Fstat(fd, &stat); err != nil {
-		return nil, errors.New("無法確認 config owner/link count")
+		return nil, errors.New("unable to verify config owner/link count")
 	}
 	if err := validateDiscoveryFile(&stat); err != nil {
 		return nil, err
 	}
 	if stat.Size > limit {
-		return nil, fmt.Errorf("config 超過 %d bytes", limit)
+		return nil, fmt.Errorf("config exceeds %d bytes", limit)
 	}
 	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, err
 	}
 	if int64(len(raw)) > limit {
-		return nil, fmt.Errorf("config 超過 %d bytes", limit)
+		return nil, fmt.Errorf("config exceeds %d bytes", limit)
 	}
 	var pathStat, afterStat unix.Stat_t
 	if err := unix.Fstatat(parentFD, filepath.Base(path), &pathStat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
-		return nil, fmt.Errorf("config path 在讀取時改變：%w", err)
+		return nil, fmt.Errorf("config path changed during read: %w", err)
 	}
 	if err := unix.Fstat(fd, &afterStat); err != nil {
-		return nil, fmt.Errorf("重驗 config fd：%w", err)
+		return nil, fmt.Errorf("re-stat config fd: %w", err)
 	}
 	if err := validateDiscoveryFile(&pathStat); err != nil {
 		return nil, err
@@ -208,7 +208,7 @@ func readOwnedRegularFile(path string, limit int64) ([]byte, error) {
 		stat.Mode != afterStat.Mode || stat.Uid != afterStat.Uid || stat.Gid != afterStat.Gid ||
 		stat.Nlink != afterStat.Nlink || stat.Size != afterStat.Size ||
 		stat.Mtim != afterStat.Mtim || stat.Ctim != afterStat.Ctim {
-		return nil, errors.New("config path/fd identity 在讀取時改變")
+		return nil, errors.New("config path/fd identity changed during read")
 	}
 	if err := validateDiscoveryParent(resolvedParent, parentFD); err != nil {
 		return nil, err
@@ -219,37 +219,37 @@ func readOwnedRegularFile(path string, limit int64) ([]byte, error) {
 func validateDiscoveryParent(path string, fd int) error {
 	var pathStat, fdStat unix.Stat_t
 	if err := unix.Lstat(path, &pathStat); err != nil {
-		return fmt.Errorf("lstat config parent：%w", err)
+		return fmt.Errorf("lstat config parent: %w", err)
 	}
 	if err := unix.Fstat(fd, &fdStat); err != nil {
-		return fmt.Errorf("fstat config parent：%w", err)
+		return fmt.Errorf("fstat config parent: %w", err)
 	}
 	for _, stat := range []*unix.Stat_t{&pathStat, &fdStat} {
 		if stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Uid != uint32(os.Geteuid()) {
-			return errors.New("config parent 必須是目前使用者持有的 directory")
+			return errors.New("config parent must be a directory owned by current user")
 		}
 		if stat.Mode&0o022 != 0 {
-			return errors.New("config parent 不可讓 group/other 寫入")
+			return errors.New("config parent must not be writable by group/other")
 		}
 	}
 	if pathStat.Dev != fdStat.Dev || pathStat.Ino != fdStat.Ino {
-		return errors.New("config parent path/fd identity 改變")
+		return errors.New("config parent path/fd identity changed")
 	}
 	return nil
 }
 
 func validateDiscoveryFile(stat *unix.Stat_t) error {
 	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
-		return errors.New("config 不是 regular file")
+		return errors.New("config is not a regular file")
 	}
 	if stat.Uid != uint32(os.Geteuid()) {
-		return errors.New("config 不是目前使用者持有")
+		return errors.New("config is not owned by current user")
 	}
 	if stat.Nlink != 1 {
-		return errors.New("config link count 不是 1")
+		return errors.New("config link count is not 1")
 	}
 	if stat.Mode&0o022 != 0 {
-		return fmt.Errorf("config 權限是 %04o；group/other 不可寫", stat.Mode&0o777)
+		return fmt.Errorf("config permissions are %04o; group/other must not be writable", stat.Mode&0o777)
 	}
 	return nil
 }
@@ -260,17 +260,17 @@ type managedHubCgroupCheck func(string) error
 func verifyManagedHubStopped(ctx context.Context, dbPath string) error {
 	binary, err := managedHubBinaryPath()
 	if err != nil {
-		return fmt.Errorf("無法確認受控 Hub binary 路徑：%w", err)
+		return fmt.Errorf("unable to determine managed Hub binary path: %w", err)
 	}
 	if err := verifyCurrentExecutableMatches(binary); err != nil {
-		return fmt.Errorf("direct DB CLI 不是受控 Hub unit 會啟動的同一個 lock-capable binary：%w", err)
+		return fmt.Errorf("direct DB CLI is not the same lock-capable binary started by managed Hub unit: %w", err)
 	}
 	return verifyManagedHubStoppedWithChecks(ctx, dbPath, queryManagedHubStatus, verifyManagedHubCgroupEmpty)
 }
 
 func queryManagedHubStatus(ctx context.Context) ([]byte, error) {
 	if ctx == nil {
-		return nil, errors.New("context 是 nil")
+		return nil, errors.New("context is nil")
 	}
 	checkCtx, cancel := context.WithTimeout(ctx, managedHubCheckTimeout)
 	defer cancel()
@@ -289,26 +289,26 @@ func queryManagedHubStatus(ctx context.Context) ([]byte, error) {
 		"-p", "MountImages", "-p", "ExtensionImages")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("建立 %s status pipe：%w", managedHubUnit, err)
+		return nil, fmt.Errorf("create %s status pipe: %w", managedHubUnit, err)
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("啟動 %s status query：%w", managedHubUnit, err)
+		return nil, fmt.Errorf("start %s status query: %w", managedHubUnit, err)
 	}
 	raw, readErr := io.ReadAll(io.LimitReader(stdout, maxManagedHubStatus+1))
 	if readErr != nil || len(raw) > maxManagedHubStatus {
 		cancel()
 		_ = cmd.Wait()
 		if readErr != nil {
-			return nil, fmt.Errorf("讀取 %s 狀態：%w", managedHubUnit, readErr)
+			return nil, fmt.Errorf("read %s status: %w", managedHubUnit, readErr)
 		}
-		return nil, fmt.Errorf("%s 狀態超過 %d bytes", managedHubUnit, maxManagedHubStatus)
+		return nil, fmt.Errorf("%s status exceeds %d bytes", managedHubUnit, maxManagedHubStatus)
 	}
 	err = cmd.Wait()
 	if err != nil {
 		if checkCtx.Err() != nil {
-			return nil, fmt.Errorf("確認 %s 是否停止逾時：%w", managedHubUnit, checkCtx.Err())
+			return nil, fmt.Errorf("timeout verifying if %s is stopped: %w", managedHubUnit, checkCtx.Err())
 		}
-		return nil, fmt.Errorf("無法讀取 %s 狀態：%w", managedHubUnit, err)
+		return nil, fmt.Errorf("unable to read %s status: %w", managedHubUnit, err)
 	}
 	return raw, nil
 }
@@ -319,13 +319,13 @@ func verifyManagedHubStoppedWithQuery(ctx context.Context, dbPath string, query 
 
 func verifyManagedHubStoppedWithChecks(ctx context.Context, dbPath string, query managedHubStatusQuery, checkCgroup managedHubCgroupCheck) error {
 	if ctx == nil {
-		return errors.New("無法確認 Hub 狀態：context 是 nil")
+		return errors.New("unable to verify Hub status: context is nil")
 	}
 	if query == nil {
-		return errors.New("無法確認 Hub 狀態：systemd query 未初始化")
+		return errors.New("unable to verify Hub status: systemd query not initialized")
 	}
 	if checkCgroup == nil {
-		return errors.New("無法確認 Hub 狀態：cgroup checker 未初始化")
+		return errors.New("unable to verify Hub status: cgroup checker not initialized")
 	}
 	raw, err := query(ctx)
 	if err != nil {
@@ -333,18 +333,18 @@ func verifyManagedHubStoppedWithChecks(ctx context.Context, dbPath string, query
 	}
 	fragment, err := managedHubFragmentPath()
 	if err != nil {
-		return fmt.Errorf("無法確認受控 Hub unit 路徑：%w", err)
+		return fmt.Errorf("unable to determine managed Hub unit path: %w", err)
 	}
 	binary, err := managedHubBinaryPath()
 	if err != nil {
-		return fmt.Errorf("無法確認受控 Hub binary 路徑：%w", err)
+		return fmt.Errorf("unable to determine managed Hub binary path: %w", err)
 	}
 	cgroup, err := stoppedHubUnitContract(string(raw), dbPath, fragment, binary)
 	if err != nil {
 		return err
 	}
 	if err := checkCgroup(cgroup); err != nil {
-		return fmt.Errorf("%s cgroup 不是空的：%w", managedHubUnit, err)
+		return fmt.Errorf("%s cgroup is not empty: %w", managedHubUnit, err)
 	}
 	return nil
 }
@@ -359,7 +359,7 @@ func managedHubFragmentPath() (string, error) {
 		return "", err
 	}
 	if !filepath.IsAbs(home) {
-		return "", errors.New("user home 不是 absolute path")
+		return "", errors.New("user home is not an absolute path")
 	}
 	return filepath.Join(home, ".config", "systemd", "user", managedHubUnit), nil
 }
@@ -370,7 +370,7 @@ func managedHubBinaryPath() (string, error) {
 		return "", err
 	}
 	if !filepath.IsAbs(home) {
-		return "", errors.New("user home 不是 absolute path")
+		return "", errors.New("user home is not an absolute path")
 	}
 	return filepath.Join(home, ".local", "bin", "clawctl-hub"), nil
 }
@@ -403,7 +403,7 @@ func stoppedHubUnitContract(raw, dbPath, expectedFragment, expectedBinary string
 	for _, line := range strings.Split(strings.TrimSuffix(raw, "\n"), "\n") {
 		name, value, ok := strings.Cut(line, "=")
 		if !ok || name == "" {
-			return "", errors.New("systemd Hub 狀態格式不完整")
+			return "", errors.New("systemd Hub status format is incomplete")
 		}
 		recognized := false
 		for _, allowed := range wanted {
@@ -413,10 +413,10 @@ func stoppedHubUnitContract(raw, dbPath, expectedFragment, expectedBinary string
 			}
 		}
 		if !recognized {
-			return "", fmt.Errorf("systemd Hub 狀態含未知欄位 %q", name)
+			return "", fmt.Errorf("systemd Hub status contains unknown field %q", name)
 		}
 		if _, duplicate := properties[name]; duplicate {
-			return "", fmt.Errorf("systemd Hub 狀態欄位 %s 重複", name)
+			return "", fmt.Errorf("duplicate field %s in systemd Hub status", name)
 		}
 		properties[name] = value
 	}
@@ -425,24 +425,24 @@ func stoppedHubUnitContract(raw, dbPath, expectedFragment, expectedBinary string
 			continue
 		}
 		if _, ok := properties[name]; !ok {
-			return "", fmt.Errorf("systemd Hub 狀態缺少 %s", name)
+			return "", fmt.Errorf("systemd Hub status missing %s", name)
 		}
 	}
 	if properties["LoadState"] != "loaded" {
-		return "", fmt.Errorf("%s LoadState=%s；managed unit 驗證失敗", managedHubUnit, properties["LoadState"])
+		return "", fmt.Errorf("%s LoadState=%s; managed unit verification failed", managedHubUnit, properties["LoadState"])
 	}
 	if properties["FragmentPath"] != expectedFragment {
-		return "", fmt.Errorf("%s FragmentPath 不是受控的 %s", managedHubUnit, expectedFragment)
+		return "", fmt.Errorf("%s FragmentPath is not managed %s", managedHubUnit, expectedFragment)
 	}
 	if properties["DropInPaths"] != "" {
-		return "", fmt.Errorf("%s 有未納入證明的 drop-in", managedHubUnit)
+		return "", fmt.Errorf("%s has unproven drop-in", managedHubUnit)
 	}
 	if properties["NeedDaemonReload"] != "no" {
-		return "", fmt.Errorf("%s NeedDaemonReload=%s；執行 systemctl --user daemon-reload", managedHubUnit, properties["NeedDaemonReload"])
+		return "", fmt.Errorf("%s NeedDaemonReload=%s; run systemctl --user daemon-reload", managedHubUnit, properties["NeedDaemonReload"])
 	}
 	for _, property := range []string{"ExecCondition", "ExecStartPre", "ExecStartPost", "ExecStop", "ExecStopPost"} {
 		if properties[property] != "" {
-			return "", fmt.Errorf("%s 有未納入 stopped proof 的 %s", managedHubUnit, property)
+			return "", fmt.Errorf("%s has %s not included in stopped proof", managedHubUnit, property)
 		}
 	}
 	for property, expected := range map[string]string{
@@ -457,54 +457,54 @@ func stoppedHubUnitContract(raw, dbPath, expectedFragment, expectedBinary string
 		"MountImages": "", "ExtensionImages": "",
 	} {
 		if properties[property] != expected {
-			return "", fmt.Errorf("%s %s=%s；不是受控的 stopped-service 契約", managedHubUnit, property, properties[property])
+			return "", fmt.Errorf("%s %s=%s; does not conform to managed stopped-service contract", managedHubUnit, property, properties[property])
 		}
 	}
 	pid, err := strconv.ParseUint(properties["MainPID"], 10, 64)
 	if err != nil || pid != 0 {
-		return "", fmt.Errorf("%s MainPID=%s；writer 仍在執行", managedHubUnit, properties["MainPID"])
+		return "", fmt.Errorf("%s MainPID=%s; writer is still running", managedHubUnit, properties["MainPID"])
 	}
 	if properties["ActiveState"] != "inactive" || properties["SubState"] != "dead" {
-		return "", fmt.Errorf("%s 是 %s/%s；先用 systemctl --user stop %s，再明示 --db 進 break-glass",
+		return "", fmt.Errorf("%s is %s/%s; use systemctl --user stop %s first, then specify --db for break-glass",
 			managedHubUnit, properties["ActiveState"], properties["SubState"], managedHubUnit)
 	}
 	if properties["ReadWritePaths"] != filepath.Dir(dbPath) {
-		return "", fmt.Errorf("%s ReadWritePaths=%q；必須唯一釘住 DB parent %q，讓 Hub 與 direct CLI 看見同一個 writer lock inode",
+		return "", fmt.Errorf("%s ReadWritePaths=%q; must uniquely pin DB parent %q so Hub and direct CLI see the same writer lock inode",
 			managedHubUnit, properties["ReadWritePaths"], filepath.Dir(dbPath))
 	}
 	if err := execStartPinsManagedHub(properties["ExecStart"], expectedBinary, dbPath); err != nil {
-		return "", fmt.Errorf("%s 沒有釘住受控 binary 與同一個 direct DB：%w", managedHubUnit, err)
+		return "", fmt.Errorf("%s does not pin managed binary and the same direct DB: %w", managedHubUnit, err)
 	}
 	wantedCgroup := fmt.Sprintf("/user.slice/user-%d.slice/user@%d.service/app.slice/%s", os.Geteuid(), os.Geteuid(), managedHubUnit)
 	if properties["ControlGroup"] != "" && properties["ControlGroup"] != wantedCgroup {
-		return "", fmt.Errorf("%s ControlGroup=%q；預期空值或 %q", managedHubUnit, properties["ControlGroup"], wantedCgroup)
+		return "", fmt.Errorf("%s ControlGroup=%q; expected empty or %q", managedHubUnit, properties["ControlGroup"], wantedCgroup)
 	}
 	return wantedCgroup, nil
 }
 
 func execStartPinsManagedHub(execStart, expectedBinary, dbPath string) error {
 	if dbPath == "" || !filepath.IsAbs(dbPath) || filepath.Clean(dbPath) != dbPath {
-		return errors.New("DB path 不是 canonical absolute path")
+		return errors.New("DB path is not a canonical absolute path")
 	}
 	if expectedBinary == "" || !filepath.IsAbs(expectedBinary) || filepath.Clean(expectedBinary) != expectedBinary {
-		return errors.New("managed binary path 不是 canonical absolute path")
+		return errors.New("managed binary path is not a canonical absolute path")
 	}
 	if strings.ContainsAny(dbPath+expectedBinary, " \t\r\n;\\\"'") {
-		return errors.New("DB 或 managed binary path 含 systemd property 無法無歧義證明的字元")
+		return errors.New("DB or managed binary path contains characters that systemd properties cannot unambiguously prove")
 	}
 	expectedPrefix := "{ path=" + expectedBinary + " ; argv[]="
 	if !strings.HasPrefix(execStart, expectedPrefix) || strings.Count(execStart, "{ path=") != 1 {
-		return fmt.Errorf("ExecStart path 不是受控 binary %q", expectedBinary)
+		return fmt.Errorf("ExecStart path is not managed binary %q", expectedBinary)
 	}
 	const marker = "argv[]="
 	start := strings.Index(execStart, marker)
 	if start < 0 || strings.Index(execStart[start+len(marker):], marker) >= 0 {
-		return errors.New("ExecStart 沒有唯一 argv[]")
+		return errors.New("ExecStart does not have unique argv[]")
 	}
 	argvTail := execStart[start+len(marker):]
 	end := strings.Index(argvTail, " ;")
 	if end < 0 {
-		return errors.New("ExecStart argv[] 格式不完整")
+		return errors.New("ExecStart argv[] format is incomplete")
 	}
 	fields := strings.Fields(argvTail[:end])
 	want := []string{
@@ -515,11 +515,11 @@ func execStartPinsManagedHub(execStart, expectedBinary, dbPath string) error {
 		"--report-stamp", "${CLAWCTL_REPORT_STAMP}",
 	}
 	if len(fields) != len(want) {
-		return errors.New("ExecStart argv 不是受控 Hub serve 命令")
+		return errors.New("ExecStart argv is not a managed Hub serve command")
 	}
 	for i := range want {
 		if fields[i] != want[i] {
-			return fmt.Errorf("ExecStart argv[%d]=%q；預期 %q", i, fields[i], want[i])
+			return fmt.Errorf("ExecStart argv[%d]=%q; expected %q", i, fields[i], want[i])
 		}
 	}
 	return nil
@@ -527,20 +527,20 @@ func execStartPinsManagedHub(execStart, expectedBinary, dbPath string) error {
 
 func verifyCurrentExecutableMatches(expectedBinary string) error {
 	if expectedBinary == "" || !filepath.IsAbs(expectedBinary) || filepath.Clean(expectedBinary) != expectedBinary {
-		return errors.New("managed binary path 不是 canonical absolute path")
+		return errors.New("managed binary path is not a canonical absolute path")
 	}
 	var expected, running unix.Stat_t
 	if err := unix.Lstat(expectedBinary, &expected); err != nil {
-		return fmt.Errorf("lstat managed binary：%w", err)
+		return fmt.Errorf("lstat managed binary: %w", err)
 	}
 	if expected.Mode&unix.S_IFMT != unix.S_IFREG || expected.Uid != uint32(os.Geteuid()) || expected.Nlink != 1 {
-		return errors.New("managed binary 必須是目前使用者持有、link count=1 的 regular file")
+		return errors.New("managed binary must be a regular file owned by current user with link count=1")
 	}
 	if err := unix.Stat("/proc/self/exe", &running); err != nil {
-		return fmt.Errorf("stat running executable：%w", err)
+		return fmt.Errorf("stat running executable: %w", err)
 	}
 	if expected.Dev != running.Dev || expected.Ino != running.Ino {
-		return errors.New("目前 CLI executable 與 managed Hub binary 不是同一個 inode")
+		return errors.New("current CLI executable and managed Hub binary are not the same inode")
 	}
 	return nil
 }
@@ -548,20 +548,20 @@ func verifyCurrentExecutableMatches(expectedBinary string) error {
 func verifyManagedHubCgroupEmpty(controlGroup string) error {
 	var fs unix.Statfs_t
 	if err := unix.Statfs(managedCgroupRoot, &fs); err != nil {
-		return fmt.Errorf("無法確認 %s 是 unified cgroup v2：%w", managedCgroupRoot, err)
+		return fmt.Errorf("unable to verify %s is unified cgroup v2: %w", managedCgroupRoot, err)
 	}
 	if fs.Type != unix.CGROUP2_SUPER_MAGIC {
-		return fmt.Errorf("%s 不是 unified cgroup v2；不能把缺少 cgroup.events 當成 unit 已清空", managedCgroupRoot)
+		return fmt.Errorf("%s is not unified cgroup v2; cannot treat missing cgroup.events as unit drained", managedCgroupRoot)
 	}
 	return verifyManagedHubCgroupEmptyAt(managedCgroupRoot, controlGroup)
 }
 
 func verifyManagedHubCgroupEmptyAt(root, controlGroup string) error {
 	if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
-		return errors.New("cgroup root 不是 canonical absolute path")
+		return errors.New("cgroup root is not a canonical absolute path")
 	}
 	if controlGroup == "" || !strings.HasPrefix(controlGroup, "/") || filepath.Clean(controlGroup) != controlGroup || controlGroup == "/" {
-		return errors.New("ControlGroup 不是 canonical absolute cgroup path")
+		return errors.New("ControlGroup is not a canonical absolute cgroup path")
 	}
 	cgroupPath := filepath.Join(root, strings.TrimPrefix(controlGroup, "/"))
 	eventsPath := filepath.Join(cgroupPath, "cgroup.events")
@@ -575,18 +575,18 @@ func verifyManagedHubCgroupEmptyAt(root, controlGroup string) error {
 			return nil
 		}
 		if statErr != nil {
-			return fmt.Errorf("確認 %s 是否已移除：%w", cgroupPath, statErr)
+			return fmt.Errorf("verify whether %s is removed: %w", cgroupPath, statErr)
 		}
 		if !info.IsDir() {
-			return fmt.Errorf("%s 存在但不是 cgroup directory", cgroupPath)
+			return fmt.Errorf("%s exists but is not a cgroup directory", cgroupPath)
 		}
-		return fmt.Errorf("%s 仍存在且缺少 cgroup.events；unit process 狀態不可用", cgroupPath)
+		return fmt.Errorf("%s still exists and is missing cgroup.events; unit process state unavailable", cgroupPath)
 	}
 	if err != nil {
-		return fmt.Errorf("讀取 %s：%w", eventsPath, err)
+		return fmt.Errorf("read %s: %w", eventsPath, err)
 	}
 	if len(raw) > maxCgroupEventsSize {
-		return fmt.Errorf("%s 超過 %d bytes", eventsPath, maxCgroupEventsSize)
+		return fmt.Errorf("%s exceeds %d bytes", eventsPath, maxCgroupEventsSize)
 	}
 	return validateCgroupEvents(eventsPath, raw)
 }
@@ -596,21 +596,21 @@ func validateCgroupEvents(eventsPath string, raw []byte) error {
 	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
 		name, value, ok := strings.Cut(line, " ")
 		if !ok || name == "" || value == "" {
-			return fmt.Errorf("%s 格式不完整", eventsPath)
+			return fmt.Errorf("%s format is incomplete", eventsPath)
 		}
 		if name != "populated" {
 			continue
 		}
 		if seenPopulated {
-			return fmt.Errorf("%s populated 欄位重複", eventsPath)
+			return fmt.Errorf("%s duplicate populated field", eventsPath)
 		}
 		seenPopulated = true
 		if value != "0" {
-			return fmt.Errorf("%s populated=%s，仍有 unit process", eventsPath, value)
+			return fmt.Errorf("%s populated=%s, unit processes still present", eventsPath, value)
 		}
 	}
 	if !seenPopulated {
-		return fmt.Errorf("%s 缺少 populated", eventsPath)
+		return fmt.Errorf("%s missing populated", eventsPath)
 	}
 	return nil
 }

@@ -26,35 +26,35 @@ func createUpgradeMaintenanceMarker(dbPath string) error {
 	f, err := os.OpenFile(marker, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
-			return fmt.Errorf("Hub 升級維護中；marker=%s", marker)
+			return fmt.Errorf("Hub upgrade maintenance in progress; marker=%s", marker)
 		}
-		return fmt.Errorf("建立 Hub 升級維護 marker：%w", err)
+		return fmt.Errorf("create Hub upgrade maintenance marker: %w", err)
 	}
 	if err := f.Chmod(0o600); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("設定 Hub 升級維護 marker 權限失敗；marker=%s：%w", marker, err)
+		return fmt.Errorf("failed to chmod Hub upgrade maintenance marker; marker=%s: %w", marker, err)
 	}
 	if _, err := f.WriteString(upgradeMaintenanceContents); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("寫入 Hub 升級維護 marker 失敗；marker=%s：%w", marker, err)
+		return fmt.Errorf("failed to write Hub upgrade maintenance marker; marker=%s: %w", marker, err)
 	}
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("sync Hub 升級維護 marker 失敗；marker=%s：%w", marker, err)
+		return fmt.Errorf("failed to sync Hub upgrade maintenance marker; marker=%s: %w", marker, err)
 	}
 	if err := f.Close(); err != nil {
-		return fmt.Errorf("關閉 Hub 升級維護 marker 失敗；marker=%s：%w", marker, err)
+		return fmt.Errorf("failed to close Hub upgrade maintenance marker; marker=%s: %w", marker, err)
 	}
 	dir, err := os.Open(filepath.Dir(marker))
 	if err != nil {
-		return fmt.Errorf("開啟 Hub 升級維護 marker 目錄失敗；marker=%s：%w", marker, err)
+		return fmt.Errorf("failed to open Hub upgrade maintenance marker directory; marker=%s: %w", marker, err)
 	}
 	if err := dir.Sync(); err != nil {
 		_ = dir.Close()
-		return fmt.Errorf("sync Hub 升級維護 marker 目錄失敗；marker=%s：%w", marker, err)
+		return fmt.Errorf("failed to sync Hub upgrade maintenance marker directory; marker=%s: %w", marker, err)
 	}
 	if err := dir.Close(); err != nil {
-		return fmt.Errorf("關閉 Hub 升級維護 marker 目錄失敗；marker=%s：%w", marker, err)
+		return fmt.Errorf("failed to close Hub upgrade maintenance marker directory; marker=%s: %w", marker, err)
 	}
 	return nil
 }
@@ -68,64 +68,64 @@ func validateUpgradeMaintenanceMarker(dbPath string) error {
 	marker := upgradeMaintenanceMarker(dbPath)
 	before, err := os.Lstat(marker)
 	if err != nil {
-		return fmt.Errorf("讀取既有 Hub 升級維護 marker：%w", err)
+		return fmt.Errorf("read existing Hub upgrade maintenance marker: %w", err)
 	}
 	if err := validateUpgradeMaintenanceMarkerInfo(before); err != nil {
-		return fmt.Errorf("既有 Hub 升級維護 marker 不安全：%w", err)
+		return fmt.Errorf("existing Hub upgrade maintenance marker is unsafe: %w", err)
 	}
 	fd, err := unix.Open(marker, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {
-		return fmt.Errorf("開啟既有 Hub 升級維護 marker：%w", err)
+		return fmt.Errorf("open existing Hub upgrade maintenance marker: %w", err)
 	}
 	f := os.NewFile(uintptr(fd), marker)
 	if f == nil {
 		_ = unix.Close(fd)
-		return errors.New("採用既有 Hub 升級維護 marker fd 失敗")
+		return errors.New("failed to adopt existing Hub upgrade maintenance marker fd")
 	}
 	defer f.Close()
 	opened, err := f.Stat()
 	if err != nil {
-		return fmt.Errorf("確認既有 Hub 升級維護 marker fd：%w", err)
+		return fmt.Errorf("stat existing Hub upgrade maintenance marker fd: %w", err)
 	}
 	if err := validateUpgradeMaintenanceMarkerInfo(opened); err != nil {
-		return fmt.Errorf("既有 Hub 升級維護 marker fd 不安全：%w", err)
+		return fmt.Errorf("existing Hub upgrade maintenance marker fd is unsafe: %w", err)
 	}
 	if !os.SameFile(before, opened) {
-		return errors.New("既有 Hub 升級維護 marker path/fd identity 已改變")
+		return errors.New("existing Hub upgrade maintenance marker path/fd identity changed")
 	}
 	contents, err := io.ReadAll(io.LimitReader(f, int64(len(upgradeMaintenanceContents)+1)))
 	if err != nil {
-		return fmt.Errorf("讀取既有 Hub 升級維護 marker 內容：%w", err)
+		return fmt.Errorf("read existing Hub upgrade maintenance marker contents: %w", err)
 	}
 	if string(contents) != upgradeMaintenanceContents {
-		return errors.New("既有 Hub 升級維護 marker 內容不符")
+		return errors.New("existing Hub upgrade maintenance marker contents mismatch")
 	}
 	after, err := os.Lstat(marker)
 	if err != nil {
-		return fmt.Errorf("重查既有 Hub 升級維護 marker：%w", err)
+		return fmt.Errorf("re-stat existing Hub upgrade maintenance marker: %w", err)
 	}
 	if err := validateUpgradeMaintenanceMarkerInfo(after); err != nil {
-		return fmt.Errorf("重查既有 Hub 升級維護 marker 不安全：%w", err)
+		return fmt.Errorf("re-stat existing Hub upgrade maintenance marker is unsafe: %w", err)
 	}
 	if !os.SameFile(opened, after) {
-		return errors.New("既有 Hub 升級維護 marker 在讀取後被替換")
+		return errors.New("existing Hub upgrade maintenance marker was replaced after read")
 	}
 	return nil
 }
 
 func validateUpgradeMaintenanceMarkerInfo(info fs.FileInfo) error {
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("必須是 regular file（實際 %s）", info.Mode().Type())
+		return fmt.Errorf("must be a regular file (got %s)", info.Mode().Type())
 	}
 	if info.Mode().Perm() != 0o600 {
-		return fmt.Errorf("權限必須是 0600（實際 %#o）", info.Mode().Perm())
+		return fmt.Errorf("permissions must be 0600 (got %#o)", info.Mode().Perm())
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
-		return errors.New("無法取得 inode owner/link count")
+		return errors.New("unable to get inode owner/link count")
 	}
 	if stat.Uid != uint32(os.Geteuid()) || stat.Nlink != 1 {
-		return fmt.Errorf("必須由目前使用者持有且 link count=1（uid=%d links=%d）", stat.Uid, stat.Nlink)
+		return fmt.Errorf("must be owned by current user with link count=1 (uid=%d links=%d)", stat.Uid, stat.Nlink)
 	}
 	return nil
 }
@@ -155,9 +155,9 @@ func rejectCLIWhileUpgradeMaintenance(argv []string) error {
 	for _, path := range paths {
 		marker := upgradeMaintenanceMarker(path)
 		if _, err := os.Lstat(marker); err == nil {
-			return fmt.Errorf("Hub 升級維護中；一般 CLI 停用；marker=%s", marker)
+			return fmt.Errorf("Hub upgrade maintenance in progress; normal CLI disabled; marker=%s", marker)
 		} else if !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("Hub 升級維護 marker 狀態未知：%w", err)
+			return fmt.Errorf("Hub upgrade maintenance marker status unknown: %w", err)
 		}
 	}
 	return nil
@@ -205,9 +205,9 @@ func rejectTopLevelCLIWhileUpgradeMaintenance(command string, argv []string) err
 func rejectDBWhileUpgradeMaintenance(dbPath string) error {
 	marker := upgradeMaintenanceMarker(dbPath)
 	if _, err := os.Lstat(marker); err == nil {
-		return fmt.Errorf("Hub 升級維護中；direct DB 停用；marker=%s", marker)
+		return fmt.Errorf("Hub upgrade maintenance in progress; direct DB disabled; marker=%s", marker)
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("Hub 升級維護 marker 狀態未知：%w", err)
+		return fmt.Errorf("Hub upgrade maintenance marker status unknown: %w", err)
 	}
 	return nil
 }

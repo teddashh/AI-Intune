@@ -210,7 +210,7 @@ func recordOperatorFallbackAudit(st *store.Store, entry store.AuditEntry, audite
 		return
 	}
 	if auditErr := st.RecordAudit(entry); auditErr != nil {
-		log.Printf("operator audit 寫入失敗 action=%s subject=%s: %v",
+		log.Printf("operator audit write failed action=%s subject=%s: %v",
 			entry.Action, entry.Subject, auditErr)
 	}
 }

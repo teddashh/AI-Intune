@@ -37,7 +37,7 @@ func TestEnrollmentLimitCLIPrintsWhatTheLimitCountsAndWhatItBlocks(t *testing.T)
 	if err != nil {
 		t.Fatalf("err=%v\n%s", err, text)
 	}
-	for _, want := range []string{"沒有設註冊上限", "名冊上", "已退役", "退役才會"} {
+	for _, want := range []string{"沒有設註冊上限", "roster", "已退役", "only retirement does"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("輸出少了 %q：\n%s", want, text)
 		}
@@ -69,7 +69,7 @@ func TestEnrollmentLimitCLIPreviewChangesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err=%v\n%s", err, text)
 	}
-	if !strings.Contains(text, "沒有套用") {
+	if !strings.Contains(text, "Not applied") {
 		t.Fatalf("預覽沒講出它沒有套用：\n%s", text)
 	}
 	after, err := runEnrollmentLimitCLI(t, base, deps)
@@ -126,7 +126,7 @@ func TestEnrollmentLimitCLIClearSaysWhoRemovedIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err=%v\n%s", err, text)
 	}
-	for _, want := range []string{"沒有設註冊上限", "不再限制台數", "上次是"} {
+	for _, want := range []string{"沒有設註冊上限", "不再限制台數", "Last updated"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("取消之後少了 %q：\n%s", want, text)
 		}

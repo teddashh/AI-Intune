@@ -51,15 +51,15 @@ func (c *Client) AssignVerification(ctx context.Context, verifierID, idempotency
 ) (store.OperatorVerificationAssignmentResult, error) {
 	if strings.TrimSpace(idempotencyKey) == "" {
 		return store.OperatorVerificationAssignmentResult{}, errors.New(
-			"operator client: Idempotency-Key 不可省略")
+			"operator client: Idempotency-Key cannot be omitted")
 	}
 	if !validSHA256Digest(body.PreviewDigest) {
 		return store.OperatorVerificationAssignmentResult{}, errors.New(
-			"operator client: verification assignment 必須帶 canonical preview_digest")
+			"operator client: verification assignment must include canonical preview_digest")
 	}
 	if strings.TrimSpace(body.ConfirmVerifierName) == "" {
 		return store.OperatorVerificationAssignmentResult{}, errors.New(
-			"operator client: verification assignment 必須帶 confirm_verifier_name")
+			"operator client: verification assignment must include confirm_verifier_name")
 	}
 	path, err := verifierPath(verifierID, "/assignments")
 	if err != nil {

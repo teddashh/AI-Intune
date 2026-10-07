@@ -38,16 +38,16 @@ func TestAntigravityExecutorGate(t *testing.T) {
 		code   deploy.RejectionCode
 		detail string
 	}{
-		{name: "unknown field", spec: []byte(strings.TrimSuffix(string(valid), "}") + `,"extra":true}`), digest: digest, detail: "不是合法 JSON"},
-		{name: "trailing", spec: append(append([]byte{}, valid...), []byte(`{"nope":1}`)...), digest: digest, detail: "尾隨資料"},
-		{name: "kind", spec: agyRawSpec(t, "grok", version, "linux", "amd64"), digest: digest, detail: "必須是 antigravity"},
-		{name: "id", spec: valid, id: "grok", digest: digest, detail: "identity 不合法"},
-		{name: "target", spec: agyJobSpec(t, version, "darwin", "arm64", model.AntigravityBundleLayoutV1, agyArtifactRef(strings.Repeat("a", 64), 32)), digest: digest, detail: "平台不一致"},
-		{name: "layout", spec: agyJobSpec(t, version, "linux", "amd64", "grok-bundle:v1", agyArtifactRef(strings.Repeat("a", 64), 32)), digest: digest, detail: "bundle contract 不合法"},
-		{name: "sha", spec: agyJobSpec(t, version, "linux", "amd64", model.AntigravityBundleLayoutV1, agyArtifactRef(strings.Repeat("A", 64), 32)), digest: "sha256:" + strings.Repeat("A", 64), detail: "小寫十六進位"},
+		{name: "unknown field", spec: []byte(strings.TrimSuffix(string(valid), "}") + `,"extra":true}`), digest: digest, detail: "is not valid JSON"},
+		{name: "trailing", spec: append(append([]byte{}, valid...), []byte(`{"nope":1}`)...), digest: digest, detail: "trailing data"},
+		{name: "kind", spec: agyRawSpec(t, "grok", version, "linux", "amd64"), digest: digest, detail: "must be antigravity"},
+		{name: "id", spec: valid, id: "grok", digest: digest, detail: "invalid Antigravity identity"},
+		{name: "target", spec: agyJobSpec(t, version, "darwin", "arm64", model.AntigravityBundleLayoutV1, agyArtifactRef(strings.Repeat("a", 64), 32)), digest: digest, detail: "does not match agent platform"},
+		{name: "layout", spec: agyJobSpec(t, version, "linux", "amd64", "grok-bundle:v1", agyArtifactRef(strings.Repeat("a", 64), 32)), digest: digest, detail: "invalid Antigravity bundle contract"},
+		{name: "sha", spec: agyJobSpec(t, version, "linux", "amd64", model.AntigravityBundleLayoutV1, agyArtifactRef(strings.Repeat("A", 64), 32)), digest: "sha256:" + strings.Repeat("A", 64), detail: "lowercase hex"},
 		{name: "size", spec: agyJobSpec(t, version, "linux", "amd64", model.AntigravityBundleLayoutV1, agyArtifactRef(strings.Repeat("a", 64), 0)), digest: digest, detail: "artifact.size"},
-		{name: "url", spec: agyJobSpec(t, version, "linux", "amd64", model.AntigravityBundleLayoutV1, &model.ArtifactRef{SHA256: strings.Repeat("a", 64), Size: 32, URL: "/v1/artifacts/nope"}), digest: digest, detail: "artifact contract 不合法"},
-		{name: "digest", spec: valid, digest: "sha256:" + strings.Repeat("b", 64), code: deploy.ArtifactHashMismatch, detail: "digest 與 spec 不一致"},
+		{name: "url", spec: agyJobSpec(t, version, "linux", "amd64", model.AntigravityBundleLayoutV1, &model.ArtifactRef{SHA256: strings.Repeat("a", 64), Size: 32, URL: "/v1/artifacts/nope"}), digest: digest, detail: "invalid Antigravity artifact contract"},
+		{name: "digest", spec: valid, digest: "sha256:" + strings.Repeat("b", 64), code: deploy.ArtifactHashMismatch, detail: "does not match spec"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -232,10 +232,10 @@ func TestAntigravityExecutorRejectsInnerArchive(t *testing.T) {
 		entries []tarEntry
 		excerpt string
 	}{
-		{name: "extra", entries: []tarEntry{{name: "antigravity", body: []byte("one")}, {name: "other", body: []byte("two")}}, excerpt: "必須只有一個執行檔"},
-		{name: "directory", entries: []tarEntry{{name: "antigravity/", dir: true}}, excerpt: "必須只有一個執行檔"},
-		{name: "symlink", entries: []tarEntry{{name: "antigravity", link: "other"}}, excerpt: "必須只有一個執行檔"},
-		{name: "name", entries: []tarEntry{{name: "agy", body: []byte("nope")}}, excerpt: "必須只有一個執行檔"},
+		{name: "extra", entries: []tarEntry{{name: "antigravity", body: []byte("one")}, {name: "other", body: []byte("two")}}, excerpt: "must contain exactly one executable"},
+		{name: "directory", entries: []tarEntry{{name: "antigravity/", dir: true}}, excerpt: "must contain exactly one executable"},
+		{name: "symlink", entries: []tarEntry{{name: "antigravity", link: "other"}}, excerpt: "must contain exactly one executable"},
+		{name: "name", entries: []tarEntry{{name: "agy", body: []byte("nope")}}, excerpt: "must contain exactly one executable"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -253,21 +253,21 @@ func TestAntigravityExecutorRejectsInnerArchive(t *testing.T) {
 		bundle := agyExecutorBundle(t, "linux", "amd64", "cli_linux_x64.tar.gz", "linux-x64", version, agyOversizeInner(t))
 		executor, job := agyRun(t, "agy-oversize", "linux", "amd64", version, bundle)
 		rows, err := executor.Run(t.Context(), job)
-		agyExpectStage(t, rows, err, "執行檔大小不合法")
+		agyExpectStage(t, rows, err, "invalid Antigravity executable size")
 	})
 	t.Run("manifest sha", func(t *testing.T) {
 		inner := agyInnerTar(t, []tarEntry{{name: "antigravity", body: agyVersionScript(version, false)}})
 		bundle := agyExecutorBundleSHA(t, "linux", "amd64", "cli_linux_x64.tar.gz", "linux-x64", version, inner, strings.Repeat("ab", 64))
 		executor, job := agyRun(t, "agy-sha", "linux", "amd64", version, bundle)
 		rows, err := executor.Run(t.Context(), job)
-		agyExpectStage(t, rows, err, "manifest 與官方檔不一致")
+		agyExpectStage(t, rows, err, "manifest does not match official archive")
 	})
 	t.Run("manifest version", func(t *testing.T) {
 		inner := agyInnerTar(t, []tarEntry{{name: "antigravity", body: agyVersionScript(version, false)}})
 		bundle := agyExecutorBundleAt(t, "linux", "amd64", "cli_linux_x64.tar.gz", "linux-x64", version, "1.2.15", inner, "")
 		executor, job := agyRun(t, "agy-manifest-version", "linux", "amd64", version, bundle)
 		rows, err := executor.Run(t.Context(), job)
-		agyExpectStage(t, rows, err, "manifest 與官方檔不一致")
+		agyExpectStage(t, rows, err, "manifest does not match official archive")
 	})
 }
 

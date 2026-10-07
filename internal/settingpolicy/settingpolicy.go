@@ -60,24 +60,24 @@ var ErrInvalid = errors.New("settingpolicy: invalid settings")
 // message is operator copy: it says the bound and the value that broke it.
 func (s Settings) Validate() error {
 	if s.SchemaVersion != SchemaVersion {
-		return fmt.Errorf("%w: schema_version 是 %d，這個 Hub 只認得 %d",
+		return fmt.Errorf("%w: schema_version is %d, this Hub only recognizes %d",
 			ErrInvalid, s.SchemaVersion, SchemaVersion)
 	}
 	if s.CheckinIntervalSeconds < MinCheckinIntervalSeconds ||
 		s.CheckinIntervalSeconds > MaxCheckinIntervalSeconds {
-		return fmt.Errorf("%w: checkin_interval_seconds 是 %d，可用範圍是 %d–%d 秒",
+		return fmt.Errorf("%w: checkin_interval_seconds is %d, allowed range is %d-%d seconds",
 			ErrInvalid, s.CheckinIntervalSeconds, MinCheckinIntervalSeconds, MaxCheckinIntervalSeconds)
 	}
 	if s.ObservationIntervalSeconds < MinObservationIntervalSeconds ||
 		s.ObservationIntervalSeconds > MaxObservationIntervalSeconds {
-		return fmt.Errorf("%w: observation_interval_seconds 是 %d，可用範圍是 %d–%d 秒",
+		return fmt.Errorf("%w: observation_interval_seconds is %d, allowed range is %d-%d seconds",
 			ErrInvalid, s.ObservationIntervalSeconds, MinObservationIntervalSeconds, MaxObservationIntervalSeconds)
 	}
 	// ⚠ 觀測比心跳還密沒有意義：observation_age 是靠心跳帶回來的，心跳之間
 	// 多量幾次，Hub 也只會看到最後一次。允許它只會讓機器白燒 CPU。
 	if s.ObservationIntervalSeconds < s.CheckinIntervalSeconds {
-		return fmt.Errorf("%w: observation_interval_seconds (%d) 不可小於 checkin_interval_seconds (%d)；"+
-			"觀測結果是靠心跳帶回來的",
+		return fmt.Errorf("%w: observation_interval_seconds (%d) must not be less than checkin_interval_seconds (%d); "+
+			"observations are carried back by heartbeats",
 			ErrInvalid, s.ObservationIntervalSeconds, s.CheckinIntervalSeconds)
 	}
 	return nil
@@ -103,7 +103,7 @@ func Parse(raw []byte) (Settings, error) {
 		return Settings{}, fmt.Errorf("%w: %s", ErrInvalid, firstLine(err.Error()))
 	}
 	if dec.More() {
-		return Settings{}, fmt.Errorf("%w: 檔案裡有多份 JSON 文件", ErrInvalid)
+		return Settings{}, fmt.Errorf("%w: multiple JSON documents in file", ErrInvalid)
 	}
 	if err := s.Validate(); err != nil {
 		return Settings{}, err

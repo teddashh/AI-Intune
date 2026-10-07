@@ -123,7 +123,7 @@ func (c *Client) RevokeEnrollmentToken(ctx context.Context, machineID, idempoten
 	body EnrollmentTokenRevocationRequest,
 ) (EnrollmentTokenRevocationResponse, error) {
 	if strings.TrimSpace(idempotencyKey) == "" {
-		return EnrollmentTokenRevocationResponse{}, errors.New("operator client: Idempotency-Key 不可省略")
+		return EnrollmentTokenRevocationResponse{}, errors.New("operator client: Idempotency-Key is required")
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -173,7 +173,7 @@ func (c *Client) RevokeEnrollmentToken(ctx context.Context, machineID, idempoten
 
 func (c *Client) newMachineOperatorRequest(ctx context.Context, method, machineID, suffix string, body io.Reader) (*http.Request, error) {
 	if strings.TrimSpace(machineID) == "" || strings.Contains(machineID, "/") || machineID == "." || machineID == ".." {
-		return nil, errors.New("operator client: machine_id 不可為空、dot segment 或包含斜線")
+		return nil, errors.New("operator client: machine_id cannot be empty, a dot segment, or contain slashes")
 	}
 	path := "/v1/operator/machines/" + url.PathEscape(machineID) + suffix
 	return c.newOperatorRequest(ctx, method, path, body)

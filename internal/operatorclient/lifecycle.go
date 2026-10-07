@@ -173,7 +173,7 @@ func (c *Client) PutMachineLifecycle(ctx context.Context, machineID, idempotency
 	body MachineLifecycleRequest,
 ) (MachineLifecycleResponse, error) {
 	if strings.TrimSpace(idempotencyKey) == "" || len(idempotencyKey) > 200 {
-		return MachineLifecycleResponse{}, errors.New("operator client: lifecycle Idempotency-Key 不可省略且最多 200 bytes")
+		return MachineLifecycleResponse{}, errors.New("operator client: lifecycle Idempotency-Key is required and cannot exceed 200 bytes")
 	}
 	if !validLifecycleState(body.DesiredState) || body.ExpectedRevision < 0 ||
 		strings.TrimSpace(body.ConfirmDisplayName) == "" || !validSHA256Digest(body.PreviewDigest) ||

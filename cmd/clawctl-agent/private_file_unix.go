@@ -27,7 +27,7 @@ func readPrivateRegularFile(path string) ([]byte, error) {
 		return nil, err
 	}
 	if !after.Mode().IsRegular() || after.Mode().Perm()&0o077 != 0 || !os.SameFile(before, after) {
-		return nil, errors.New("credential file 在開啟時改變或不再 private")
+		return nil, errors.New("credential file changed or became non-private while opening")
 	}
 	return io.ReadAll(file)
 }

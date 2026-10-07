@@ -2204,7 +2204,7 @@ func TestNavigationLanguageIsTheOnlyUnsafeViewRoute(t *testing.T) {
 
 	refusedAsView := func(registered []string, policies map[string]operatorRoutePolicy) bool {
 		err := validateOperatorRoutePolicies(registered, policies)
-		return err != nil && strings.Contains(err.Error(), "不得分類為 view")
+		return err != nil && strings.Contains(err.Error(), "must not be classified as view")
 	}
 	unsafeRoutes := 0
 	for _, pattern := range registered {

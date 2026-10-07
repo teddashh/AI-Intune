@@ -56,19 +56,19 @@ func Load(path string) *Set {
 	if err != nil {
 		// ⚠ 檔案不存在也算錯：路徑是**明確設定**的，設了卻讀不到是設定錯誤，
 		// 不是「沒有期望」。安靜地回空集合會讓打錯的路徑長得像「一切正常」。
-		s.Err = fmt.Sprintf("讀不到期望設定 %s：%v", path, err)
+		s.Err = fmt.Sprintf("cannot read expectation config %s: %v", path, err)
 		return s
 	}
 	var f file
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.DisallowUnknownFields() // 打錯的欄位名要出聲，不要被安靜忽略
 	if err := dec.Decode(&f); err != nil {
-		s.Err = fmt.Sprintf("期望設定 %s 解析失敗：%v", path, err)
+		s.Err = fmt.Sprintf("failed to parse expectation config %s: %v", path, err)
 		return s
 	}
 	for i, r := range f.Expectations {
 		if err := validate(r); err != nil {
-			s.Err = fmt.Sprintf("期望設定 %s 第 %d 條無效：%v", path, i+1, err)
+			s.Err = fmt.Sprintf("expectation config %s rule %d is invalid: %v", path, i+1, err)
 			return s
 		}
 	}
@@ -79,26 +79,26 @@ func Load(path string) *Set {
 func validate(r model.Expectation) error {
 	switch {
 	case strings.TrimSpace(r.Machine) == "":
-		return fmt.Errorf("machine 是空的（要機器名或 \"*\"）")
+		return fmt.Errorf("machine is empty (expected machine name or \"*\")")
 	case strings.TrimSpace(r.Unit) == "":
-		return fmt.Errorf("unit 是空的")
+		return fmt.Errorf("unit is empty")
 	case strings.TrimSpace(r.Artifact) == "":
-		return fmt.Errorf("artifact 是空的")
+		return fmt.Errorf("artifact is empty")
 	case !filepath.IsAbs(r.Artifact):
 		// ⚠ 相對路徑會相對於 agent 的工作目錄解析 —— 那個目錄不是宣告的人
 		// 心裡想的那一個，而且不同機器不一樣。一個「看起來對、實際指到別處」
 		// 的路徑比一個明顯的錯誤更難查。
-		return fmt.Errorf("artifact %q 不是絕對路徑", r.Artifact)
+		return fmt.Errorf("artifact %q is not an absolute path", r.Artifact)
 	case r.MaxAgeSeconds <= 0:
-		return fmt.Errorf("max_age_seconds 要大於 0")
+		return fmt.Errorf("max_age_seconds must be greater than 0")
 	case strings.TrimSpace(r.Why) == "":
 		// ⚠ 這一條是刻意的。一條說不出「為什麼」的期望，半年後沒有人敢刪
 		// 也沒有人敢信，它會變成一個永遠紅著、而所有人都學會忽略的東西。
-		return fmt.Errorf("why 不可為空")
+		return fmt.Errorf("why cannot be empty")
 	}
 	if r.Events != nil {
 		if err := validateEvents(r.Events); err != nil {
-			return fmt.Errorf("events %w", err)
+			return fmt.Errorf("events: %w", err)
 		}
 	}
 	return nil
@@ -109,19 +109,19 @@ func validateEvents(e *model.EventSpec) error {
 	case strings.TrimSpace(e.TsField) == "":
 		// ⚠ 三個欄位名都不給預設值。猜錯欄位名的結果是「一種事件都沒讀到」——
 		// 一個乾淨、安靜、完全錯誤的答案。寧可整份設定拒絕掉。
-		return fmt.Errorf("的 ts_field 是空的（那條 JSONL 裡時間欄位的名字）")
+		return fmt.Errorf("ts_field is empty (name of the timestamp field in that JSONL)")
 	case strings.TrimSpace(e.TypeField) == "":
-		return fmt.Errorf("的 type_field 是空的（那條 JSONL 裡事件名欄位的名字）")
+		return fmt.Errorf("type_field is empty (name of the event name field in that JSONL)")
 	case e.WindowSeconds <= 0:
-		return fmt.Errorf("的 window_seconds 要大於 0")
+		return fmt.Errorf("window_seconds must be greater than 0")
 	case len(e.NotOK) == 0:
 		// ⚠ 空的 not_ok 技術上跑得動（只會列 undeclared），但那幾乎一定是
 		// 寫到一半忘了填。半套設定比沒有設定更危險 —— 讓它自己講出來。
-		return fmt.Errorf("的 not_ok 是空的 —— 沒宣告任何事件名，這條規則永遠不會讓任何東西降級")
+		return fmt.Errorf("not_ok is empty: no event names declared, this rule will never degrade anything")
 	}
 	for i, n := range e.NotOK {
 		if strings.TrimSpace(n) == "" {
-			return fmt.Errorf("的 not_ok[%d] 是空字串", i)
+			return fmt.Errorf("not_ok[%d] is an empty string", i)
 		}
 	}
 	return nil

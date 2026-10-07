@@ -50,7 +50,7 @@ func (s *Server) previewDeploymentCreate(w http.ResponseWriter, r *http.Request)
 	}
 	key, err := operator.NewIdempotencyKey("web-deployment-create")
 	if err != nil {
-		log.Printf("deployment create preview 產生 idempotency key 失敗: %v", err)
+		log.Printf("deployment create preview failed to generate idempotency key: %v", err)
 		s.renderActionStatus(w, r, http.StatusInternalServerError, "deployment create",
 			"沒有建立 deployment preview", "無法產生這次確認所需的 request key。", "/deployments?view=new")
 		return
@@ -144,7 +144,7 @@ func (s *Server) previewDeploymentControl(w http.ResponseWriter, r *http.Request
 	}
 	key, err := operator.NewIdempotencyKey("web-deployment-" + action)
 	if err != nil {
-		log.Printf("deployment %s preview 產生 idempotency key 失敗: %v", action, err)
+		log.Printf("deployment %s preview failed to generate idempotency key: %v", action, err)
 		s.renderActionStatus(w, r, http.StatusInternalServerError, id,
 			"沒有建立 deployment action preview", "無法產生這次確認所需的 request key。", "/deployments/"+id)
 		return
@@ -388,7 +388,7 @@ func (s *Server) rejectDeploymentWebForm(w http.ResponseWriter, r *http.Request,
 		Action: action, DeploymentID: subject,
 		Actor: operator.ActorFromRequest(r, operator.SourceKindWeb),
 	}); err != nil {
-		log.Printf("deployment web transport rejection audit 寫不進去 action=%s: %v", action, err)
+		log.Printf("failed to write deployment web transport rejection audit action=%s: %v", action, err)
 	}
 	s.renderActionStatus(w, r, http.StatusBadRequest, subject,
 		"沒有執行 deployment action", cause.Error(), deploymentBack(subject))
@@ -408,7 +408,7 @@ func (s *Server) renderDeploymentWebError(w http.ResponseWriter, r *http.Request
 		detail = "這是原 request 的回放判決，未重新評估目前 artifact 或 deployment 狀態：" + detail
 	}
 	if status == http.StatusInternalServerError {
-		log.Printf("deployment web %s 失敗: %v", action, err)
+		log.Printf("deployment web %s failed: %v", action, err)
 	}
 	s.renderActionStatus(w, r, status, subject, headline, detail, back)
 }

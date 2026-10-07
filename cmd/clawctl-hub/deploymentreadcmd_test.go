@@ -37,7 +37,7 @@ func TestDeploymentPromotionCLIShowsIndependentJobAndNextStep(t *testing.T) {
 	}
 	for _, want := range []string{
 		"independent=0/1", "CANARY MACHINE", "canary-one", "job-independent",
-		"release_unreported", "升級後重新指派 verifier",
+		"release_unreported", "upgrade and reassign verifier",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("promotion CLI 缺少 %q：\n%s", want, out.String())
@@ -63,7 +63,7 @@ func TestDeploymentPromotionCLIShowsEmptyJobAsDash(t *testing.T) {
 	}
 	for _, want := range []string{
 		"independent=1/2", "canary-one", "job-passed", "canary-missing",
-		"canary_not_succeeded", "修復後重跑 canary", `"-"`,
+		"canary_not_succeeded", "repair and rerun canary", `"-"`,
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("promotion CLI 缺少 %q：\n%s", want, out.String())
@@ -512,9 +512,9 @@ func TestDeploymentDetailCLIStatesIndependentEvidenceAsEvidence(t *testing.T) {
 	}
 	text := out.String()
 	for _, want := range []string{
-		"independent: 0/1 台已開單 target 有第二個 producer 回報通過", "可用 producer 2",
+		"independent: 0/1 opened targets reported passed by second producer", "live producers 2",
 		"INDEPENDENT", "digest_mismatch (2 rows / 2 live)",
-		"第二個 producer 看到的 artifact digest 與這張單的不同",
+		"artifact digest observed by second producer differs from this job",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("deployment detail CLI missing %q in:\n%s", want, text)
@@ -522,7 +522,7 @@ func TestDeploymentDetailCLIStatesIndependentEvidenceAsEvidence(t *testing.T) {
 	}
 	// Verdicts no target reached are not printed: a row of zeroes says nothing
 	// an operator can act on and hides the one verdict that does.
-	for _, absent := range []string{"absent：", "stale：", "passed："} {
+	for _, absent := range []string{"absent:", "stale:", "passed:"} {
 		if strings.Contains(text, absent) {
 			t.Errorf("deployment detail CLI printed an unreached verdict %q", absent)
 		}

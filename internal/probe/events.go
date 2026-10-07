@@ -170,7 +170,7 @@ func tailBytes(path string, max int64) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	if fi.IsDir() {
-		return nil, false, fmt.Errorf("%s 是一個目錄，不是事件流", path)
+		return nil, false, fmt.Errorf("%s is a directory, not an event stream", path)
 	}
 
 	size := fi.Size()

@@ -19,7 +19,7 @@ const (
 	windowsFileAttributeReparsePoint = 0x00000400
 )
 
-var errPrivateRegularFile = errors.New("credential file 必須是 private regular file")
+var errPrivateRegularFile = errors.New("credential file must be a private regular file")
 
 type windowsPrivateACE struct {
 	Type  uint8
@@ -37,13 +37,13 @@ type windowsPrivateACLView struct {
 
 func privateFileModeNoticeFor(goos string) string {
 	if goos == "windows" {
-		return "僅目前使用者可讀寫"
+		return "current user read/write only"
 	}
 	return "0600"
 }
 
 func enrollmentStoredNotice(machineID, path, goos string) string {
-	return "已報到。machine_id=" + machineID + "\n設定寫在 " + path + "（" + privateFileModeNoticeFor(goos) + "）\n"
+	return "Enrolled. machine_id=" + machineID + "\nConfiguration written to " + path + " (" + privateFileModeNoticeFor(goos) + ")\n"
 }
 
 func windowsCredentialFileAttributesOK(attrs uint32) bool {

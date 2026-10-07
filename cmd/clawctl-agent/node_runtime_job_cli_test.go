@@ -99,7 +99,7 @@ func assertDarwinNodeJobCLI(t *testing.T, binary, endpoint string, f darwinNodeP
 		t.Fatal("job show text omitted pinned digest or released lease")
 	}
 	for _, row := range rows {
-		if !strings.Contains(textEvidence, fmt.Sprintf("rule=%s；exit=%d；passed=%t", strconv.Quote(row.RuleID), *row.ExitCode, row.Passed)) ||
+		if !strings.Contains(textEvidence, fmt.Sprintf("rule=%s; exit=%d; passed=%t", strconv.Quote(row.RuleID), *row.ExitCode, row.Passed)) ||
 			!strings.Contains(textEvidence, "command: "+strconv.Quote(row.Command)) ||
 			!strings.Contains(textEvidence, "stdout: "+strconv.Quote(row.StdoutExcerpt)) ||
 			!strings.Contains(textEvidence, "stderr: "+strconv.Quote(row.StderrExcerpt)) {

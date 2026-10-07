@@ -58,7 +58,7 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "audit filter 或 cursor 不合法", http.StatusBadRequest)
 			return
 		}
-		log.Printf("讀取 audit page 失敗: %v", err)
+		log.Printf("failed to read audit page: %v", err)
 		http.Error(w, "讀取動作紀錄失敗", http.StatusInternalServerError)
 		return
 	}

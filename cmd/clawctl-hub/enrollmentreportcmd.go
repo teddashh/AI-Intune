@@ -36,24 +36,24 @@ func runEnrollmentReportCommandWithDeps(ctx context.Context, argv []string, out,
 	fs := flag.NewFlagSet("report enrollment", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub report enrollment [--json | --csv] [--hub-url URL]")
-		fmt.Fprintln(errOut, "  列出名冊上每一列走到哪一步：票用掉了沒有、機器報到過沒有、下一步做什麼。")
-		fmt.Fprintln(errOut, "  discovery：--hub-url、CLAWCTL_HUB_URL、operator.json。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub report enrollment [--json | --csv] [--hub-url URL]")
+		fmt.Fprintln(errOut, "  List what stage each roster row is at: whether tickets were used, whether the machine checked in, and what to do next.")
+		fmt.Fprintln(errOut, "  discovery: --hub-url, CLAWCTL_HUB_URL, operator.json.")
 		fs.PrintDefaults()
 	}
 	var hubURL auditStringFlag
 	var jsonOutput, csvOutput auditBoolFlag
-	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL（省略時自動發現）")
-	fs.Var(&jsonOutput, "json", "輸出 stable operator JSON DTO")
-	fs.Var(&csvOutput, "csv", "輸出安全的 UTF-8 CSV")
+	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL (auto-discovered when omitted)")
+	fs.Var(&jsonOutput, "json", "output stable operator JSON DTO")
+	fs.Var(&csvOutput, "csv", "output safe UTF-8 CSV")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("report enrollment: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("report enrollment: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	if jsonOutput.value && csvOutput.value {
-		return errors.New("report enrollment: --json 與 --csv 不可同時使用")
+		return errors.New("report enrollment: --json and --csv cannot be used together")
 	}
 	if hubURL.set {
 		if err := validateReportChangeCLIText("hub-url", hubURL.value, 2048); err != nil {
@@ -66,7 +66,7 @@ func runEnrollmentReportCommandWithDeps(ctx context.Context, argv []string, out,
 	}
 	report, err := client.EnrollmentReport(ctx)
 	if err != nil {
-		return fmt.Errorf("讀取註冊報告失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read enrollment report (HTTP operator API): %w", err)
 	}
 	if jsonOutput.value {
 		return writeOperatorJSON(out, report)
@@ -74,7 +74,7 @@ func runEnrollmentReportCommandWithDeps(ctx context.Context, argv []string, out,
 	if csvOutput.value {
 		body, err := operator.ReportCSV(operator.EnrollmentReportCSV(report))
 		if err != nil {
-			return fmt.Errorf("產生註冊報告 CSV 失敗：%w", err)
+			return fmt.Errorf("failed to generate enrollment report CSV: %w", err)
 		}
 		_, err = io.WriteString(out, body)
 		return err
@@ -83,12 +83,12 @@ func runEnrollmentReportCommandWithDeps(ctx context.Context, argv []string, out,
 }
 
 func writeEnrollmentReport(out io.Writer, report operator.EnrollmentReport) error {
-	arrival := "有機器從來沒有報到過"
+	arrival := "some machines have never checked in"
 	if report.Arrived == report.Denominator {
-		arrival = "分母裡每一台都報到過"
+		arrival = "every machine in denominator has checked in"
 	}
 	if _, err := fmt.Fprintf(out,
-		"名冊上 %d 列，分母 %d 台（已退役 %d 台不算）；已到 %d、還沒到 %d——%s。\n",
+		"%d on roster, denominator %d machines (%d retired excluded); %d arrived, %d owed -- %s\n",
 		report.Registered, report.Denominator, report.Retired,
 		report.Arrived, report.Owed, arrival); err != nil {
 		return err
@@ -100,7 +100,7 @@ func writeEnrollmentReport(out io.Writer, report operator.EnrollmentReport) erro
 		return err
 	}
 	_, err := fmt.Fprintln(out,
-		"離開分母只有一條路：退役。撤票、票過期都不會讓一列名冊消失。")
+		"There is only one way to leave the denominator: retirement. Revoking tickets or letting them expire will not remove a roster entry.")
 	return err
 }
 
@@ -112,11 +112,11 @@ func writeEnrollmentOwed(out io.Writer, report operator.EnrollmentReport) error 
 	if report.Owed == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintf(out, "\n還沒到的 %d 台\n", report.Owed); err != nil {
+	if _, err := fmt.Fprintf(out, "\n%d machines owed\n", report.Owed); err != nil {
 		return err
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "機器\t走到哪一步\t宣告納管\t票到期\t下一步")
+	fmt.Fprintln(table, "machine\tstage\tenrolled\tticket expires\tnext step")
 	for _, row := range report.Rows {
 		if !row.InDenominator || operator.EnrollmentStageArrived(row.Stage) {
 			continue
@@ -129,11 +129,11 @@ func writeEnrollmentOwed(out io.Writer, report operator.EnrollmentReport) error 
 }
 
 func writeEnrollmentRegister(out io.Writer, report operator.EnrollmentReport) error {
-	if _, err := fmt.Fprintf(out, "\n名冊 %d 列\n", report.Registered); err != nil {
+	if _, err := fmt.Fprintf(out, "\n%d roster entries\n", report.Registered); err != nil {
 		return err
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "機器\t走到哪一步\t宣告納管\t票到期\t最後一次報到\t")
+	fmt.Fprintln(table, "machine\tstage\tenrolled\tticket expires\tlast check-in\t")
 	for _, row := range report.Rows {
 		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t\n",
 			row.DisplayName, row.StageTitle,
@@ -152,7 +152,7 @@ func enrollmentMoment(value *time.Time) string {
 
 func enrollmentCheckinMoment(value *time.Time) string {
 	if value == nil || value.IsZero() {
-		return "從未報到"
+		return "never checked in"
 	}
 	return value.UTC().Format("2006-01-02T15:04:05Z")
 }

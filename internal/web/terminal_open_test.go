@@ -245,7 +245,7 @@ func TestTerminalOpenUnexpectedFailureStaysOnTheMachinePage(t *testing.T) {
 		}
 	}
 	logged := logs.String()
-	if !strings.Contains(logged, "operator terminal open 失敗 machine="+machineID) {
+	if !strings.Contains(logged, "operator terminal open failed machine="+machineID) {
 		t.Fatalf("failure was not logged: %q", logged)
 	}
 	for _, leaked := range []string{sessionID, key} {

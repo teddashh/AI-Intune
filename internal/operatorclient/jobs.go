@@ -53,7 +53,7 @@ func (c *Client) Job(ctx context.Context, jobID string) (operator.JobDetailResul
 	if err := validateJobReadIdentifier("job_id", jobID, 256); err != nil ||
 		strings.Contains(jobID, "/") || jobID == "." || jobID == ".." {
 		return operator.JobDetailResult{}, errors.New(
-			"operator client: job_id 不可為空、含控制字元、dot segment 或斜線")
+			"operator client: job_id cannot be empty, contain control characters, dot segments, or slashes")
 	}
 	path := "/v1/operator/jobs/" + url.PathEscape(jobID)
 	req, err := c.newOperatorRequest(ctx, http.MethodGet, path, nil)
@@ -127,11 +127,11 @@ func encodeJobListQuery(request operator.JobListRequest) (url.Values, int, error
 
 func validateJobReadIdentifier(name, value string, maxBytes int) error {
 	if value == "" || value != strings.TrimSpace(value) || len(value) > maxBytes {
-		return fmt.Errorf("operator client: %s 不可為空、過長或含首尾空白", name)
+		return fmt.Errorf("operator client: %s cannot be empty, too long, or contain leading/trailing whitespace", name)
 	}
 	for _, char := range value {
 		if unicode.IsControl(char) || unicode.Is(unicode.Cf, char) {
-			return fmt.Errorf("operator client: %s 不可含控制或隱形格式字元", name)
+			return fmt.Errorf("operator client: %s cannot contain control or invisible formatting characters", name)
 		}
 	}
 	return nil

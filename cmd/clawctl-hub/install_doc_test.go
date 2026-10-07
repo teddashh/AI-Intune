@@ -105,7 +105,7 @@ func TestInstallDocsAndScriptRequireOperatorAuthInputs(t *testing.T) {
 	for _, want := range []string{
 		"CLAWCTL_OPERATOR_CAPABILITY_PREFIX",
 		"GET / HTTP/1.0",
-		"operator 首頁",
+		"operator homepage",
 		"docs/OPERATOR-AUTH.md",
 	} {
 		if !strings.Contains(script, want) {

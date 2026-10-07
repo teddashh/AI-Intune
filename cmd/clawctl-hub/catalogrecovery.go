@@ -130,7 +130,7 @@ func catalogRecoveryReceiptDigest(document catalogMutationRecovery) string {
 func marshalCatalogRecovery(document catalogMutationRecovery) ([]byte, error) {
 	raw, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
-		return nil, errors.New("catalog recovery file 無法編碼")
+		return nil, errors.New("failed to encode catalog recovery file")
 	}
 	return append(raw, '\n'), nil
 }
@@ -140,14 +140,14 @@ func decodeCatalogRecovery(raw []byte) (catalogMutationRecovery, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&document); err != nil {
-		return document, errors.New("catalog recovery file JSON 不合法")
+		return document, errors.New("invalid catalog recovery file JSON")
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		return document, errors.New("catalog recovery file 含 trailing JSON")
+		return document, errors.New("catalog recovery file contains trailing JSON")
 	}
 	canonical, err := marshalCatalogRecovery(document)
 	if err != nil || !bytes.Equal(raw, canonical) {
-		return document, errors.New("catalog recovery file 不是 canonical JSON")
+		return document, errors.New("catalog recovery file is not canonical JSON")
 	}
 	if err := validateCatalogRecovery(document); err != nil {
 		return document, err
@@ -157,14 +157,14 @@ func decodeCatalogRecovery(raw []byte) (catalogMutationRecovery, error) {
 
 func validateCatalogRecovery(document catalogMutationRecovery) error {
 	if document.SchemaVersion != catalogRecoverySchemaVersion {
-		return errors.New("catalog recovery file schema 不支援")
+		return errors.New("catalog recovery file schema not supported")
 	}
 	endpoint, err := operatorendpoint.ParseBaseURL(document.HubURL)
 	if err != nil || endpoint.BaseURL() != document.HubURL {
-		return errors.New("catalog recovery file Hub URL 不合法")
+		return errors.New("invalid catalog recovery file Hub URL")
 	}
 	if err := validateDeploymentIdempotencyKey(document.IdempotencyKey); err != nil {
-		return errors.New("catalog recovery file request key 不合法")
+		return errors.New("invalid catalog recovery file request key")
 	}
 	present := 0
 	for _, ok := range []bool{document.Package != nil, document.Profile != nil, document.Assignment != nil} {
@@ -173,7 +173,7 @@ func validateCatalogRecovery(document catalogMutationRecovery) error {
 		}
 	}
 	if present != 1 {
-		return errors.New("catalog recovery file request shape 不合法")
+		return errors.New("invalid catalog recovery file request shape")
 	}
 	var wanted string
 	switch document.Action {
@@ -182,7 +182,7 @@ func validateCatalogRecovery(document catalogMutationRecovery) error {
 			document.Package.ConfirmPackageID != document.Package.Manifest.ID ||
 			document.Package.ConfirmVersion != document.Package.Manifest.Version ||
 			!validCatalogRecoveryDigest(document.Package.PreviewDigest) || validateCatalogReason(document.Package.Reason) != nil {
-			return errors.New("catalog recovery package request 不合法")
+			return errors.New("invalid catalog recovery package request")
 		}
 		wanted = operator.CatalogManifestPublishSemanticDigest(operator.CatalogManifestPublishRequest{
 			Manifest: document.Package.Manifest, ConfirmPackageID: document.Package.ConfirmPackageID,
@@ -194,7 +194,7 @@ func validateCatalogRecovery(document catalogMutationRecovery) error {
 			document.Profile.ConfirmProfileID != document.Profile.Profile.ID ||
 			document.Profile.ConfirmRevision != document.Profile.Profile.Revision ||
 			!validCatalogRecoveryDigest(document.Profile.PreviewDigest) || validateCatalogReason(document.Profile.Reason) != nil {
-			return errors.New("catalog recovery profile request 不合法")
+			return errors.New("invalid catalog recovery profile request")
 		}
 		wanted = operator.MachineProfilePublishSemanticDigest(operator.MachineProfilePublishRequest{
 			Profile: document.Profile.Profile, ConfirmProfileID: document.Profile.ConfirmProfileID,
@@ -208,7 +208,7 @@ func validateCatalogRecovery(document catalogMutationRecovery) error {
 			document.Assignment.ProfileRevision <= 0 ||
 			validateDeploymentReadCLIValue("confirm-name", document.Assignment.ConfirmDisplayName, 200) != nil ||
 			!validCatalogRecoveryDigest(document.Assignment.PreviewDigest) || validateCatalogReason(document.Assignment.Reason) != nil {
-			return errors.New("catalog recovery assignment request 不合法")
+			return errors.New("invalid catalog recovery assignment request")
 		}
 		wanted = operator.MachineProfileAssignmentSemanticDigest(operator.MachineProfileAssignmentRequest{
 			MachineID: document.Assignment.MachineID, ProfileID: document.Assignment.ProfileID,
@@ -216,10 +216,10 @@ func validateCatalogRecovery(document catalogMutationRecovery) error {
 			PreviewDigest: document.Assignment.PreviewDigest, Reason: document.Assignment.Reason,
 		})
 	default:
-		return errors.New("catalog recovery file action 不合法")
+		return errors.New("invalid catalog recovery file action")
 	}
 	if document.RequestDigest != wanted || document.ReceiptDigest != catalogRecoveryReceiptDigest(document) {
-		return errors.New("catalog recovery file digest 不符")
+		return errors.New("catalog recovery file digest mismatch")
 	}
 	return nil
 }
@@ -232,7 +232,7 @@ func applyCatalogMutationWithRecovery(document catalogMutationRecovery, requeste
 	errOut io.Writer, apply func() (any, error), writeResult func(any) error,
 ) error {
 	if apply == nil || writeResult == nil {
-		return errors.New("catalog mutation 未初始化")
+		return errors.New("catalog mutation not initialized")
 	}
 	path := requestedPath
 	var err error
@@ -259,7 +259,7 @@ func applyCatalogMutationWithRecovery(document catalogMutationRecovery, requeste
 		return applyErr
 	}
 	if err := writeResult(result); err != nil {
-		return fmt.Errorf("操作已完成，結果輸出失敗；請使用 recovery 檔重試：%w", err)
+		return fmt.Errorf("operation succeeded but failed to output result; retry with recovery file: %w", err)
 	}
 	if err := removeCatalogRecovery(path, document); err != nil {
 		return err
@@ -273,28 +273,28 @@ func runCatalogRecover(ctx context.Context, argv []string, out, errOut io.Writer
 	fs := flag.NewFlagSet("catalog recover", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	path := fs.String("recovery-file", "", "private canonical replay receipt path")
-	jsonOutput := fs.Bool("json", false, "輸出 stable operator JSON DTO")
+	jsonOutput := fs.Bool("json", false, "output stable operator JSON DTO")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 || !validDeploymentRecoveryAbsolutePath(*path) {
-		return errors.New("catalog recover: --recovery-file 必須是 canonical absolute path")
+		return errors.New("catalog recover: --recovery-file must be a canonical absolute path")
 	}
 	document, err := loadCatalogRecovery(*path)
 	if err != nil {
 		return err
 	}
 	if deps.newOperatorClient == nil {
-		return errors.New("catalog recover: operator HTTP client 未初始化")
+		return errors.New("catalog recover: operator HTTP client not initialized")
 	}
 	client, err := deps.newOperatorClient(document.HubURL)
 	if err != nil {
-		return fmt.Errorf("catalog recover: 連接 Hub 失敗：%w", err)
+		return fmt.Errorf("catalog recover: failed to connect to Hub: %w", err)
 	}
 	return applyCatalogMutationWithRecovery(document, *path, errOut, func() (any, error) {
 		result, err := replayCatalogRecovery(ctx, client, document)
 		if err != nil {
-			return nil, fmt.Errorf("catalog recover 失敗：%w", err)
+			return nil, fmt.Errorf("catalog recover failed: %w", err)
 		}
 		return result, nil
 	}, func(result any) error {
@@ -312,7 +312,7 @@ func runCatalogRecover(ctx context.Context, argv []string, out, errOut io.Writer
 		case operator.MachineProfileAssignmentResult:
 			err = writeCatalogAssignmentResult(out, value)
 		default:
-			return errors.New("catalog recover 回應型別不符")
+			return errors.New("unexpected response type from catalog recover")
 		}
 		return err
 	})
@@ -341,17 +341,17 @@ func replayCatalogRecovery(ctx context.Context, client *operatorclient.Client,
 			ConfirmDisplayName: request.ConfirmDisplayName, PreviewDigest: request.PreviewDigest, Reason: request.Reason,
 		})
 	default:
-		return nil, errors.New("catalog recovery action 不合法")
+		return nil, errors.New("invalid catalog recovery action")
 	}
 }
 
 func loadCatalogRecovery(path string) (catalogMutationRecovery, error) {
 	if !validDeploymentRecoveryAbsolutePath(path) {
-		return catalogMutationRecovery{}, errors.New("catalog recovery path 不合法")
+		return catalogMutationRecovery{}, errors.New("invalid catalog recovery path")
 	}
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() {
-		return catalogMutationRecovery{}, errors.New("catalog recovery file 不存在或不是 regular file")
+		return catalogMutationRecovery{}, errors.New("catalog recovery file does not exist or is not a regular file")
 	}
 	raw, err := readPrivateDeploymentRecovery(path)
 	if err != nil {
@@ -372,7 +372,7 @@ func ensureCatalogRecovery(path string, document catalogMutationRecovery) error 
 		if reflect.DeepEqual(existing, document) {
 			return nil
 		}
-		return errors.New("catalog recovery file 已存在且 request 不同")
+		return errors.New("catalog recovery file already exists with a different request")
 	} else if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
 		return loadErr
 	}
@@ -381,7 +381,7 @@ func ensureCatalogRecovery(path string, document catalogMutationRecovery) error 
 
 func writeCatalogRecoveryNoClobber(path string, raw []byte) error {
 	if !validDeploymentRecoveryAbsolutePath(path) || len(raw) > catalogRecoveryMaxBytes {
-		return errors.New("catalog recovery file path 或大小不合法")
+		return errors.New("invalid catalog recovery file path or size")
 	}
 	parentPath, parentFD, err := openDeploymentRecoveryParent(path, true)
 	if err != nil {
@@ -401,31 +401,31 @@ func writeCatalogRecoveryNoClobber(path string, raw []byte) error {
 	file := os.NewFile(uintptr(fd), "catalog-recovery-temp")
 	if file == nil {
 		_ = unix.Close(fd)
-		return errors.New("catalog recovery temp handle 無法建立")
+		return errors.New("failed to create catalog recovery temporary handle")
 	}
 	if _, err := file.Write(raw); err != nil {
 		_ = file.Close()
-		return errors.New("catalog recovery temp file 無法寫入")
+		return errors.New("failed to write catalog recovery temporary file")
 	}
 	if err := file.Sync(); err != nil {
 		_ = file.Close()
-		return errors.New("catalog recovery temp file 無法 sync")
+		return errors.New("failed to sync catalog recovery temporary file")
 	}
 	if err := file.Close(); err != nil {
-		return errors.New("catalog recovery temp file 無法關閉")
+		return errors.New("failed to close catalog recovery temporary file")
 	}
 	if err := unix.Linkat(parentFD, tmpName, parentFD, filepath.Base(path), 0); err != nil {
 		if errors.Is(err, unix.EEXIST) {
-			return errors.New("catalog recovery file 已存在且 request 不同")
+			return errors.New("catalog recovery file already exists with a different request")
 		}
-		return errors.New("catalog recovery file 無法發布")
+		return errors.New("failed to publish catalog recovery file")
 	}
 	if err := unix.Unlinkat(parentFD, tmpName, 0); err != nil {
-		return errors.New("catalog recovery temp file 無法清除")
+		return errors.New("failed to clean up catalog recovery temporary file")
 	}
 	tmpExists = false
 	if err := unix.Fsync(parentFD); err != nil || validateDiscoveryParent(parentPath, parentFD) != nil {
-		return errors.New("catalog recovery file 無法確認落盤")
+		return errors.New("failed to confirm catalog recovery file durability")
 	}
 	return nil
 }
@@ -433,26 +433,26 @@ func writeCatalogRecoveryNoClobber(path string, raw []byte) error {
 func removeCatalogRecovery(path string, expected catalogMutationRecovery) error {
 	parentPath, parentFD, err := openDeploymentRecoveryParent(path, false)
 	if err != nil {
-		return errors.New("catalog mutation 已完成；recovery parent 無法開啟")
+		return errors.New("catalog mutation completed; failed to open recovery parent")
 	}
 	defer unix.Close(parentFD)
 	name := filepath.Base(path)
 	raw, verifiedStat, err := readPrivateDeploymentRecoveryAt(parentPath, parentFD, name, nil)
 	if err != nil {
-		return errors.New("catalog mutation 已完成；recovery file 無法核對")
+		return errors.New("catalog mutation completed; failed to verify recovery file")
 	}
 	document, err := decodeCatalogRecovery(raw)
 	if err != nil || !reflect.DeepEqual(document, expected) {
-		return errors.New("catalog mutation 已完成；recovery request 不符")
+		return errors.New("catalog mutation completed; recovery request does not match")
 	}
 	var currentStat unix.Stat_t
 	if err := unix.Fstatat(parentFD, name, &currentStat, unix.AT_SYMLINK_NOFOLLOW); err != nil ||
 		validateDeploymentRecoveryStat(&currentStat) != nil || !sameDeploymentRecoveryStat(verifiedStat, currentStat) ||
 		validateDiscoveryParent(parentPath, parentFD) != nil {
-		return errors.New("catalog mutation 已完成；recovery file identity 已改變")
+		return errors.New("catalog mutation completed; recovery file identity has changed")
 	}
 	if err := unix.Unlinkat(parentFD, name, 0); err != nil || unix.Fsync(parentFD) != nil {
-		return errors.New("catalog mutation 已完成；recovery file 無法清除")
+		return errors.New("catalog mutation completed; failed to clean up recovery file")
 	}
 	return nil
 }

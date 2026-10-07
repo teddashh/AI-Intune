@@ -20,17 +20,17 @@ func countedToolRuntimes(where string, states []operator.ToolRuntimeCount,
 ) (map[operator.ToolRuntime]int, error) {
 	runtimes := operator.ToolRuntimes()
 	if len(states) != len(runtimes) {
-		return nil, fmt.Errorf("operator client: %s 有 %d 種「版號講的是哪一份」，這個版本認得 %d 種",
+		return nil, fmt.Errorf("operator client: %s has %d runtime attribution states, this version recognizes %d",
 			where, len(states), len(runtimes))
 	}
 	counted := map[operator.ToolRuntime]int{}
 	for index, stateCount := range states {
 		if stateCount.State != runtimes[index] {
-			return nil, fmt.Errorf("operator client: %s 第 %d 種「版號講的是哪一份」是 %q，"+
-				"這個版本這裡是 %q", where, index, stateCount.State, runtimes[index])
+			return nil, fmt.Errorf("operator client: %s runtime attribution state %d is %q, "+
+				"this version expects %q", where, index, stateCount.State, runtimes[index])
 		}
 		if stateCount.Count < 0 {
-			return nil, fmt.Errorf("operator client: tool runtime %q 的格數是負的", stateCount.State)
+			return nil, fmt.Errorf("operator client: tool runtime %q count is negative", stateCount.State)
 		}
 		if err := validateToolRuntimeSentences(stateCount.State, stateCount.Title,
 			stateCount.Meaning, stateCount.NextStep); err != nil {
@@ -52,12 +52,12 @@ func validateToolRuntimeSentences(stateValue operator.ToolRuntime,
 	// ⚠ 逐格的比對只對得到這個版本認得的那幾種，一格落在認不得的狀態上會從那個比對
 	// 裡整個消失。
 	if operator.ToolRuntimeTitle(stateValue) == "" {
-		return fmt.Errorf("operator client: tool runtime %q 這個版本不認得", stateValue)
+		return fmt.Errorf("operator client: tool runtime %q is unrecognized by this version", stateValue)
 	}
 	if title != operator.ToolRuntimeTitle(stateValue) ||
 		meaning != operator.ToolRuntimeMeaning(stateValue) ||
 		nextStep != operator.ToolRuntimeNextStep(stateValue) {
-		return fmt.Errorf("operator client: tool runtime %q 的句子跟這個版本不一樣", stateValue)
+		return fmt.Errorf("operator client: tool runtime %q sentences do not match this version", stateValue)
 	}
 	return nil
 }
@@ -84,17 +84,17 @@ func validateToolRuntimeFinding(where string, finding operator.ToolRuntimeFindin
 	// 要留白。一句「正在跑的是另一個檔案」不講是哪一個，讀的人沒辦法知道要去收掉哪一
 	// 份；一格留白卻被算成一個發現，人會去找一個這份報告從來沒量到的檔案。
 	if named != (finding.RunningFile != "") {
-		return fmt.Errorf("operator client: %s 是 %q，正在跑的那個檔案卻 %s",
+		return fmt.Errorf("operator client: %s is %q, but running file is %s",
 			where, finding.State, toolRuntimePresence(finding.RunningFile != ""))
 	}
 	if finding.State == operator.ToolRuntimeSameFile && finding.MeasuredFile == "" {
-		return fmt.Errorf("operator client: %s 說量的就是跑的，卻沒講量的是哪一個檔案", where)
+		return fmt.Errorf("operator client: %s claims measured is running, but did not specify measured file", where)
 	}
 	// ⚠⚠ 「正在跑的是另一個檔案」必須真的是另一個檔案。同一個路徑寫在兩邊，那句
 	// 「把另一份收掉」指的就是唯一那一份。
 	if finding.State == operator.ToolRuntimeOtherFile &&
 		operator.SameToolFile(finding.MeasuredFile, finding.RunningFile) {
-		return fmt.Errorf("operator client: %s 說正在跑的是另一個檔案，兩邊都是 %s",
+		return fmt.Errorf("operator client: %s claims running file is another file, but both are %s",
 			where, finding.RunningFile)
 	}
 	return nil
@@ -102,7 +102,7 @@ func validateToolRuntimeFinding(where string, finding operator.ToolRuntimeFindin
 
 func toolRuntimePresence(present bool) string {
 	if present {
-		return "講了"
+		return "present"
 	}
-	return "留白"
+	return "omitted"
 }

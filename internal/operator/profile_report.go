@@ -360,7 +360,7 @@ func (s *Service) ProfileReport(evaluatedAt time.Time) (ProfileReport, error) {
 	summaries := machineSummariesFrom(overview, evaluatedAt)
 	if len(summaries) > MaxProfileReportMachines {
 		return ProfileReport{}, fmt.Errorf(
-			"%w: 名冊上有 %d 台，超過這份報告一次讀得了的 %d 台",
+			"%w: registry has %d machines, exceeding the %d machines this report can read at once",
 			ErrInvalidProfileReport, len(summaries), MaxProfileReportMachines)
 	}
 	// ⚠ 名冊上的每一台都要有名字與退役與否，連退役的都要：一份「只有退役機器還穿
@@ -383,7 +383,7 @@ func (s *Service) ProfileReport(evaluatedAt time.Time) (ProfileReport, error) {
 	}
 	if len(profiles) > MaxProfileReportProfiles {
 		return ProfileReport{}, fmt.Errorf(
-			"%w: 發佈了 %d 版 profile，超過這份報告一次讀得了的 %d 版",
+			"%w: published %d profile revisions, exceeding the %d revisions this report can read at once",
 			ErrInvalidProfileReport, len(profiles), MaxProfileReportProfiles)
 	}
 	assignments, err := s.store.FleetProfileAssignments()

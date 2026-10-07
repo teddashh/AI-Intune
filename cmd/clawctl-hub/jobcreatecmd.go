@@ -34,48 +34,48 @@ func runJobCreateCommandWithDeps(ctx context.Context, argv []string, out, errOut
 	fs := flag.NewFlagSet("job create", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub job create --kind noop --machine <name|id> [--timeout 600] (--preview | --reason REASON --confirm-name NAME) [--json] [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub job create --kind noop --machine <name|id> [--timeout 600] (--preview | --reason REASON --confirm-name NAME) [--json] [--hub-url URL | --db PATH]")
 		fs.PrintDefaults()
 	}
 	hubURL := fs.String("hub-url", "", "Hub URL")
-	dbPath := fs.String("db", "", "已停止 Hub 的 ledger 路徑")
-	machine := fs.String("machine", "", "machine ID；--db 可用顯示名稱")
-	kind := fs.String("kind", "", "工作單類型：noop")
-	timeout := fs.Int("timeout", store.OperatorDiagnosticNoopDefaultTimeout, "執行逾時秒數")
-	confirmName := fs.String("confirm-name", "", "確認機器顯示名稱")
-	reason := fs.String("reason", "", "操作理由")
-	previewOnly := fs.Bool("preview", false, "預覽")
-	jsonOutput := fs.Bool("json", false, "輸出 JSON")
-	idempotencyKey := fs.String("idempotency-key", "", "重試使用的 request key")
-	previewDigest := fs.String("preview-digest", "", "重試使用的 preview digest")
+	dbPath := fs.String("db", "", "path to SQLite ledger for stopped Hub")
+	machine := fs.String("machine", "", "machine ID; --db accepts display name")
+	kind := fs.String("kind", "", "job type: noop")
+	timeout := fs.Int("timeout", store.OperatorDiagnosticNoopDefaultTimeout, "execution timeout in seconds")
+	confirmName := fs.String("confirm-name", "", "confirm machine display name")
+	reason := fs.String("reason", "", "operation reason")
+	previewOnly := fs.Bool("preview", false, "preview only")
+	jsonOutput := fs.Bool("json", false, "output JSON")
+	idempotencyKey := fs.String("idempotency-key", "", "request key for retry")
+	previewDigest := fs.String("preview-digest", "", "preview digest for retry")
 	if name := removedJobCreateFlag(argv); name != "" {
 		if name == "version" || name == "artifact" {
-			return fmt.Errorf("job create: --%s 不適用；請使用 deployment create", name)
+			return fmt.Errorf("job create: --%s is not supported; use deployment create", name)
 		}
-		return fmt.Errorf("job create: --%s 不適用", name)
+		return fmt.Errorf("job create: --%s is not supported", name)
 	}
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("job create: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("job create: positional arguments not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	seen := map[string]bool{}
 	fs.Visit(func(item *flag.Flag) { seen[item.Name] = true })
 	if seen["hub-url"] && seen["db"] {
-		return errors.New("job create: --hub-url（HTTP mode）與 --db（direct mode）不可同時明示")
+		return errors.New("job create: --hub-url (HTTP mode) and --db (direct mode) cannot both be specified")
 	}
 	if (seen["hub-url"] && strings.TrimSpace(*hubURL) == "") || (seen["db"] && strings.TrimSpace(*dbPath) == "") {
-		return errors.New("job create: 明示的 --hub-url / --db 不可為空")
+		return errors.New("job create: specified --hub-url / --db cannot be empty")
 	}
 	if strings.TrimSpace(*machine) == "" {
-		return errors.New("job create: --machine 必填")
+		return errors.New("job create: --machine is required")
 	}
 	if *kind == "openclaw" {
-		return errors.New("job create: OpenClaw 請使用 deployment create")
+		return errors.New("job create: use deployment create for OpenClaw")
 	}
 	if *kind != store.OperatorDiagnosticNoopKind {
-		return errors.New("job create: --kind 只接受 noop")
+		return errors.New("job create: --kind only accepts noop")
 	}
 	privateCount := 0
 	for _, name := range []string{"idempotency-key", "preview-digest"} {
@@ -84,25 +84,25 @@ func runJobCreateCommandWithDeps(ctx context.Context, argv []string, out, errOut
 		}
 	}
 	if privateCount == 1 {
-		return errors.New("job create: retry 必須同時提供原 --idempotency-key 與 --preview-digest")
+		return errors.New("job create: retry requires both original --idempotency-key and --preview-digest")
 	}
 	if *previewOnly && privateCount != 0 {
-		return errors.New("job create: --preview 不接受 apply retry key/digest")
+		return errors.New("job create: --preview does not accept apply retry key/digest")
 	}
 	if *previewOnly && (seen["confirm-name"] || seen["reason"]) {
-		return errors.New("job create: --preview 不接受 --confirm-name 或 --reason")
+		return errors.New("job create: --preview does not accept --confirm-name or --reason")
 	}
 	if !*previewOnly {
 		if strings.TrimSpace(*confirmName) == "" {
-			return errors.New("job create: --confirm-name 必填")
+			return errors.New("job create: --confirm-name is required")
 		}
 		if strings.TrimSpace(*reason) == "" {
-			return errors.New("job create: apply 的 --reason 必填")
+			return errors.New("job create: --reason is required for apply")
 		}
 	}
 	if privateCount == 2 && (strings.TrimSpace(*idempotencyKey) == "" || len(*idempotencyKey) > 200 ||
 		!validLifecycleRetryDigest(strings.TrimSpace(*previewDigest))) {
-		return errors.New("job create: retry key 不可為空且最多 200 bytes；preview digest 必須是 canonical sha256")
+		return errors.New("job create: retry key cannot be empty and must be at most 200 bytes; preview digest must be canonical sha256")
 	}
 	inputs := jobCreateInputs{
 		Machine: *machine, Timeout: *timeout, ConfirmName: *confirmName, Reason: *reason,
@@ -140,7 +140,7 @@ func removedJobCreateFlag(argv []string) string {
 
 func runJobCreateHTTP(ctx context.Context, client *operatorclient.Client, inputs jobCreateInputs, out, errOut io.Writer) error {
 	if strings.TrimSpace(inputs.Machine) == "" {
-		return errors.New("job create（HTTP operator API）：--machine 必須是 machine_id")
+		return errors.New("job create (HTTP operator API): --machine must be machine_id")
 	}
 	digest := inputs.PreviewDigest
 	if digest == "" {
@@ -148,7 +148,7 @@ func runJobCreateHTTP(ctx context.Context, client *operatorclient.Client, inputs
 			ExecutionTimeoutSeconds: inputs.Timeout,
 		})
 		if err != nil {
-			return fmt.Errorf("job create preview（HTTP operator API）失敗：%w", err)
+			return fmt.Errorf("job create preview (HTTP operator API) failed: %w", err)
 		}
 		if inputs.Preview {
 			return writeJobCreateJSONOrPreview(out, inputs.JSON, preview)
@@ -172,7 +172,7 @@ func runJobCreateHTTP(ctx context.Context, client *operatorclient.Client, inputs
 		PreviewDigest: digest, Reason: inputs.Reason,
 	})
 	if err != nil {
-		return fmt.Errorf("job create（HTTP operator API；idempotency-key=%q preview-digest=%q%s）失敗：%w",
+		return fmt.Errorf("job create (HTTP operator API; idempotency-key=%q preview-digest=%q%s) failed: %w",
 			key, digest, operatorRejectionReplayNote(err), err)
 	}
 	if inputs.JSON {
@@ -186,7 +186,7 @@ func runJobCreateHTTP(ctx context.Context, client *operatorclient.Client, inputs
 func runJobCreateDirect(st *store.Store, inputs jobCreateInputs, out, errOut io.Writer) error {
 	machine, err := resolveMachine(st, inputs.Machine, true)
 	if err != nil {
-		return fmt.Errorf("job create（direct DB operator service）解析機器失敗：%w", err)
+		return fmt.Errorf("job create (direct DB operator service) failed to resolve machine: %w", err)
 	}
 	service := operator.New(st)
 	digest := inputs.PreviewDigest
@@ -195,7 +195,7 @@ func runJobCreateDirect(st *store.Store, inputs jobCreateInputs, out, errOut io.
 			MachineID: machine.MachineID, ExecutionTimeoutSeconds: inputs.Timeout,
 		})
 		if err != nil {
-			return fmt.Errorf("job create preview（direct DB operator service）失敗：%w", err)
+			return fmt.Errorf("job create preview (direct DB operator service) failed: %w", err)
 		}
 		if inputs.Preview {
 			return writeJobCreateJSONOrPreview(out, inputs.JSON, preview)
@@ -223,7 +223,7 @@ func runJobCreateDirect(st *store.Store, inputs jobCreateInputs, out, errOut io.
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("job create（direct DB operator service；idempotency-key=%q preview-digest=%q%s）失敗：%w",
+		return fmt.Errorf("job create (direct DB operator service; idempotency-key=%q preview-digest=%q%s) failed: %w",
 			key, digest, operatorRejectionReplayNote(err), err)
 	}
 	if inputs.JSON {

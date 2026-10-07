@@ -27,12 +27,12 @@ func (h *hub) serveRemoteArtifact(w http.ResponseWriter, r *http.Request, digest
 	}
 	body, obj, err := h.blobs.Open(r.Context(), digest)
 	if err != nil {
-		log.Printf("遠端 artifact %s 讀取失敗", digest)
+		log.Printf("failed to read remote artifact %s", digest)
 		return false
 	}
 	defer body.Close()
 	if obj.Digest != digest || obj.Key != row.ObjectKey || obj.Size != row.SizeBytes {
-		log.Printf("遠端 artifact %s 與帳本不一致", digest)
+		log.Printf("remote artifact %s does not match ledger", digest)
 		return false
 	}
 	w.Header().Set("Content-Length", strconv.FormatInt(obj.Size, 10))
@@ -43,7 +43,7 @@ func (h *hub) serveRemoteArtifact(w http.ResponseWriter, r *http.Request, digest
 		return true
 	}
 	if _, err := io.Copy(w, io.LimitReader(body, obj.Size)); err != nil {
-		log.Printf("串流遠端 artifact %s 失敗", digest)
+		log.Printf("failed to stream remote artifact %s", digest)
 	}
 	return true
 }

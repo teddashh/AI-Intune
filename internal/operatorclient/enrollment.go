@@ -44,25 +44,25 @@ func (c *Client) EnrollmentReport(ctx context.Context) (operator.EnrollmentRepor
 func validateEnrollmentReport(report operator.EnrollmentReport) error {
 	if report.SchemaVersion != operator.EnrollmentReportSchemaVersion ||
 		report.EvaluatedAt.IsZero() || report.EvaluatedAt.Location() != time.UTC {
-		return errors.New("operator client: enrollment report identity 不一致")
+		return errors.New("operator client: enrollment report identity is inconsistent")
 	}
 	if report.Registered < 0 || report.Denominator < 0 || report.Arrived < 0 ||
 		report.Owed < 0 || report.Retired < 0 {
-		return errors.New("operator client: enrollment report 有負數")
+		return errors.New("operator client: enrollment report has negative values")
 	}
 	stages := operator.EnrollmentStages()
 	if len(report.Stages) != len(stages) {
-		return fmt.Errorf("operator client: enrollment report 有 %d 個階段，這個版本認得 %d 個",
+		return fmt.Errorf("operator client: enrollment report has %d stages, this version recognizes %d stages",
 			len(report.Stages), len(stages))
 	}
 	counted := map[operator.EnrollmentStage]int{}
 	for index, stage := range report.Stages {
 		if stage.Stage != stages[index] {
-			return fmt.Errorf("operator client: enrollment report 第 %d 個階段是 %q，這個版本這裡是 %q",
+			return fmt.Errorf("operator client: enrollment report stage %d is %q, this version expects %q",
 				index, stage.Stage, stages[index])
 		}
 		if stage.Count < 0 {
-			return fmt.Errorf("operator client: enrollment stage %q 的台數是負的", stage.Stage)
+			return fmt.Errorf("operator client: enrollment stage %q count is negative", stage.Stage)
 		}
 		if err := validateEnrollmentStageSentences(stage.Stage, stage.Title,
 			stage.Meaning, stage.NextStep); err != nil {
@@ -78,7 +78,7 @@ func validateEnrollmentReport(report operator.EnrollmentReport) error {
 			return err
 		}
 		if ids[row.MachineID] {
-			return fmt.Errorf("operator client: enrollment report 有兩列 %s", row.MachineID)
+			return fmt.Errorf("operator client: enrollment report has duplicate rows for %s", row.MachineID)
 		}
 		ids[row.MachineID] = true
 		seen[row.Stage]++
@@ -99,14 +99,14 @@ func validateEnrollmentReport(report operator.EnrollmentReport) error {
 		tally.Arrived != report.Arrived || tally.Owed != report.Owed ||
 		tally.Retired != report.Retired {
 		return fmt.Errorf(
-			"operator client: enrollment report 的摘要說已到 %d、還沒到 %d、分母 %d、退役 %d、名冊 %d，"+
-				"逐列數出已到 %d、還沒到 %d、分母 %d、退役 %d、名冊 %d",
+			"operator client: enrollment report summary reports arrived %d, owed %d, denominator %d, retired %d, total %d, "+
+				"counted by row arrived %d, owed %d, denominator %d, retired %d, total %d",
 			report.Arrived, report.Owed, report.Denominator, report.Retired, report.Registered,
 			tally.Arrived, tally.Owed, tally.Denominator, tally.Retired, tally.Registered)
 	}
 	for stage, want := range counted {
 		if seen[stage] != want {
-			return fmt.Errorf("operator client: %q 的摘要說 %d 台，逐列數出 %d 台",
+			return fmt.Errorf("operator client: %q summary reports %d machines, counted by row %d machines",
 				stage, want, seen[stage])
 		}
 	}
@@ -125,20 +125,20 @@ func validateEnrollmentRow(row operator.EnrollmentRow) error {
 		return err
 	}
 	if row.InDenominator != operator.EnrollmentStageInDenominator(row.Stage) {
-		return fmt.Errorf("operator client: %s 的分母旗標跟階段 %q 對不上", row.MachineID, row.Stage)
+		return fmt.Errorf("operator client: %s denominator flag does not match stage %q", row.MachineID, row.Stage)
 	}
 	if (row.RetiredAt != nil) == row.InDenominator {
-		return fmt.Errorf("operator client: %s 退役=%v 卻說算分母=%v",
+		return fmt.Errorf("operator client: %s retired=%v but in_denominator=%v",
 			row.MachineID, row.RetiredAt != nil, row.InDenominator)
 	}
 	if row.DeclaredAt.IsZero() || row.DeclaredAt.Location() != time.UTC {
-		return fmt.Errorf("operator client: %s 沒有可用的宣告時刻", row.MachineID)
+		return fmt.Errorf("operator client: %s lacks usable declared timestamp", row.MachineID)
 	}
 	if row.PendingTickets < 0 || row.WaitedFor < 0 {
-		return fmt.Errorf("operator client: %s 的票數或等待時間是負的", row.MachineID)
+		return fmt.Errorf("operator client: %s ticket count or wait duration is negative", row.MachineID)
 	}
 	if row.PendingTickets == 0 && (row.TicketIssuedAt != nil || row.TicketExpiresAt != nil) {
-		return fmt.Errorf("operator client: %s 說沒有未用票，卻給了票的時刻", row.MachineID)
+		return fmt.Errorf("operator client: %s indicates no pending tickets, but provides ticket timestamp", row.MachineID)
 	}
 	for name, value := range map[string]*time.Time{
 		"enrolled_at": row.EnrolledAt, "retired_at": row.RetiredAt,
@@ -146,7 +146,7 @@ func validateEnrollmentRow(row operator.EnrollmentRow) error {
 		"ticket_issued_at":         row.TicketIssuedAt, "ticket_expires_at": row.TicketExpiresAt,
 	} {
 		if value != nil && (value.IsZero() || value.Location() != time.UTC) {
-			return fmt.Errorf("operator client: %s 的 %s 不是可用的 UTC 時刻", row.MachineID, name)
+			return fmt.Errorf("operator client: %s %s is not a usable UTC timestamp", row.MachineID, name)
 		}
 	}
 	return nil
@@ -162,12 +162,12 @@ func validateEnrollmentStageSentences(stage operator.EnrollmentStage,
 	// ⚠ 這一句擋的是「名冊上有一列，它的階段這個版本不認得」。逐階段的台數只對得到
 	// 這個版本認得的那幾個，一列落在認不得的階段上就會從那個比對裡整個消失。
 	if operator.EnrollmentStageTitle(stage) == "" {
-		return fmt.Errorf("operator client: enrollment stage %q 這個版本不認得", stage)
+		return fmt.Errorf("operator client: enrollment stage %q is unrecognized by this version", stage)
 	}
 	if title != operator.EnrollmentStageTitle(stage) ||
 		meaning != operator.EnrollmentStageMeaning(stage) ||
 		nextStep != operator.EnrollmentStageNextStep(stage) {
-		return fmt.Errorf("operator client: enrollment stage %q 的句子跟這個版本不一樣", stage)
+		return fmt.Errorf("operator client: enrollment stage %q sentences do not match this version", stage)
 	}
 	return nil
 }

@@ -38,8 +38,8 @@ func TestComplianceCLIPublishesAssignsAndPrintsTheEvidence(t *testing.T) {
 	const reason = "PRIVATE_COMPLIANCE_CLI_REASON"
 
 	empty := runComplianceCLI(t, deps, "list")
-	if !strings.Contains(empty, "判決時間：") ||
-		!strings.Contains(empty, "（尚未發佈任何合規性原則）") ||
+	if !strings.Contains(empty, "evaluated at: ") ||
+		!strings.Contains(empty, "(no compliance policies published yet)") ||
 		!strings.Contains(empty, "未指派合規性原則") {
 		t.Fatalf("空盤面=%q", empty)
 	}
@@ -48,13 +48,13 @@ func TestComplianceCLIPublishesAssignsAndPrintsTheEvidence(t *testing.T) {
 		"--checkin-max-age", "15m", "--settings-applied", "--preview")
 	if !strings.Contains(preview, "revision 0 → 1") ||
 		!strings.Contains(preview, "checkin_max_age(最久 900 秒)") ||
-		!strings.Contains(preview, "影響 0 台") || !strings.Contains(preview, "去掉 --preview") {
+		!strings.Contains(preview, "affects 0 machines") || !strings.Contains(preview, "without --preview") {
 		t.Fatalf("發佈預覽=%q", preview)
 	}
 
 	published := runComplianceCLI(t, deps, "publish", "--policy", "fleet-floor",
 		"--checkin-max-age", "15m", "--settings-applied", "--reason", reason)
-	if !strings.Contains(published, "fleet-floor revision 1 已發佈") ||
+	if !strings.Contains(published, "fleet-floor revision 1 published") ||
 		!strings.Contains(published, "compliance assign --scope machine") ||
 		strings.Contains(published, reason) {
 		t.Fatalf("發佈輸出=%q", published)
@@ -63,21 +63,21 @@ func TestComplianceCLIPublishesAssignsAndPrintsTheEvidence(t *testing.T) {
 	// 同一組規則換個順序寫還是同一份規則，不會產生新 revision。
 	same := runComplianceCLI(t, deps, "publish", "--policy", "fleet-floor",
 		"--settings-applied", "--checkin-max-age", "15m", "--reason", reason)
-	if !strings.Contains(same, "仍是 revision 1") {
+	if !strings.Contains(same, "is still revision 1") {
 		t.Fatalf("重複發佈輸出=%q", same)
 	}
 
 	assignPreview := runComplianceCLI(t, deps, "assign", "--scope", "machine",
 		"--scope-id", f.machine.id, "--policy", "fleet-floor", "--revision", "1", "--preview")
-	if !strings.Contains(assignPreview, "尚未指派（不評估）") ||
+	if !strings.Contains(assignPreview, "unassigned (not evaluated)") ||
 		!strings.Contains(assignPreview, "fleet-floor@1") ||
-		!strings.Contains(assignPreview, "影響 1 台") {
+		!strings.Contains(assignPreview, "affects 1 machines") {
 		t.Fatalf("指派預覽=%q", assignPreview)
 	}
 
 	assigned := runComplianceCLI(t, deps, "assign", "--scope", "machine",
 		"--scope-id", f.machine.id, "--policy", "fleet-floor", "--revision", "1", "--reason", reason)
-	if !strings.Contains(assigned, "已指派 fleet-floor@1") ||
+	if !strings.Contains(assigned, "assigned fleet-floor@1") ||
 		!strings.Contains(assigned, "compliance list") || strings.Contains(assigned, reason) {
 		t.Fatalf("指派輸出=%q", assigned)
 	}
@@ -107,7 +107,7 @@ func TestComplianceCLIPublishesAssignsAndPrintsTheEvidence(t *testing.T) {
 	if err == nil {
 		t.Fatalf("沒有 --reason 的指派被接受了：%s", noReason.String())
 	}
-	if !strings.Contains(err.Error(), "--reason 必填") {
+	if !strings.Contains(err.Error(), "--reason is required") {
 		t.Fatalf("沒有 --reason 的錯誤沒說清楚缺什麼：%v", err)
 	}
 
@@ -126,20 +126,20 @@ func TestComplianceCLIRejectsUnusableInput(t *testing.T) {
 		want string
 	}{
 		"一條規則都沒指定": {[]string{"publish", "--policy", "p", "--reason", "r"},
-			"至少要指定一條規則"},
+			"at least one rule flag must be specified"},
 		"新鮮度不是整秒": {[]string{"publish", "--policy", "p", "--checkin-max-age", "900500ms"},
-			"--checkin-max-age 必須是正的整秒"},
+			"--checkin-max-age must be positive whole seconds"},
 		"scope 不認得": {[]string{"assign", "--scope", "tenant", "--scope-id", "x",
-			"--policy", "p", "--revision", "1"}, "--scope 只接受 machine 或 channel"},
+			"--policy", "p", "--revision", "1"}, "--scope only accepts machine or channel"},
 		"原則不存在": {[]string{"assign", "--scope", "machine", "--scope-id", f.machine.id,
-			"--policy", "nobody", "--revision", "1", "--reason", "r"}, "預覽合規性指派失敗"},
+			"--policy", "nobody", "--revision", "1", "--reason", "r"}, "failed to preview compliance assignment"},
 		"寬限期不是整秒": {[]string{"publish", "--policy", "p", "--checkin-max-age", "900s",
-			"--block-jobs-after", "1500ms"}, "--block-jobs-after 必須是 0 到 86400s 之間的整秒"},
+			"--block-jobs-after", "1500ms"}, "--block-jobs-after must be whole seconds between 0 and 86400s"},
 		"寬限期超過一天": {[]string{"publish", "--policy", "p", "--checkin-max-age", "900s",
-			"--block-jobs-after", "25h"}, "--block-jobs-after 必須是 0 到 86400s 之間的整秒"},
-		"多餘的位置參數":         {[]string{"list", "extra"}, "不接受 positional arguments"},
-		"不認得的動作":          {[]string{"rename"}, "不認得 subcommand"},
-		"沒有指定 subcommand": {nil, "必須指定 list、publish 或 assign"},
+			"--block-jobs-after", "25h"}, "--block-jobs-after must be whole seconds between 0 and 86400s"},
+		"多餘的位置參數":         {[]string{"list", "extra"}, "positional arguments not accepted"},
+		"不認得的動作":          {[]string{"rename"}, "unrecognized subcommand"},
+		"沒有指定 subcommand": {nil, "must specify list, publish, or assign"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var out, errOut bytes.Buffer
@@ -163,8 +163,8 @@ func TestComplianceCLICarriesTheConsequenceThroughPreviewPublishAndBoard(t *test
 	preview := runComplianceCLI(t, deps, "publish", "--policy", "job-floor",
 		"--checkin-max-age", "15m", "--block-jobs-after", "1h", "--preview")
 	for _, want := range []string{
-		"動作 block_jobs(寬限 3600s)",
-		"停發工作單：不再領到新的工作單，也不會被算進新的部署，連續不符合 1 小時後生效。",
+		"actions block_jobs(grace 3600s)",
+		"停發工作單: 不再領到新的工作單，也不會被算進新的部署, 連續不符合 1 小時後生效",
 	} {
 		if !strings.Contains(preview, want) {
 			t.Fatalf("發佈預覽沒說出後果 %q：%q", want, preview)
@@ -173,20 +173,20 @@ func TestComplianceCLICarriesTheConsequenceThroughPreviewPublishAndBoard(t *test
 
 	published := runComplianceCLI(t, deps, "publish", "--policy", "job-floor",
 		"--checkin-max-age", "15m", "--block-jobs-after", "1h", "--reason", reason)
-	if !strings.Contains(published, "job-floor revision 1 已發佈") ||
-		!strings.Contains(published, "動作 block_jobs(寬限 3600s)") {
+	if !strings.Contains(published, "job-floor revision 1 published") ||
+		!strings.Contains(published, "actions block_jobs(grace 3600s)") {
 		t.Fatalf("發佈輸出=%q", published)
 	}
 
 	assigned := runComplianceCLI(t, deps, "assign", "--scope", "machine",
 		"--scope-id", f.machine.id, "--policy", "job-floor", "--revision", "1", "--reason", reason)
-	if !strings.Contains(assigned, "停發工作單：") {
+	if !strings.Contains(assigned, "停發工作單: ") {
 		t.Fatalf("指派輸出沒說出會對這台做什麼：%q", assigned)
 	}
 
 	// 從未報到不是不符合：動作欄要說未觸發。
 	silent := runComplianceCLI(t, deps, "list")
-	if !strings.Contains(silent, "block_jobs(寬限 3600s)") ||
+	if !strings.Contains(silent, "block_jobs(grace 3600s)") ||
 		!strings.Contains(silent, "停發工作單=未觸發") {
 		t.Fatalf("尚未報到的盤面=%q", silent)
 	}
@@ -210,7 +210,7 @@ func TestComplianceCLICarriesTheConsequenceThroughPreviewPublishAndBoard(t *test
 	runComplianceCLI(t, quietDeps, "assign", "--scope", "machine",
 		"--scope-id", quiet.machine.id, "--policy", "watch-floor", "--revision", "1", "--reason", reason)
 	board := runComplianceCLI(t, quietDeps, "list")
-	if !strings.Contains(board, "只回報") || strings.Contains(board, "停發工作單") {
+	if !strings.Contains(board, "report only") || strings.Contains(board, "停發工作單") {
 		t.Fatalf("只回報的盤面=%q", board)
 	}
 }

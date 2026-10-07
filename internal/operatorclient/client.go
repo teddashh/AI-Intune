@@ -54,7 +54,7 @@ func NewWithHTTPClient(baseURL string, httpClient *http.Client) (*Client, error)
 		return nil, fmt.Errorf("operator client: invalid base URL: %w", err)
 	}
 	if httpClient == nil {
-		return nil, errors.New("operator client: HTTP client 不可為 nil")
+		return nil, errors.New("operator client: HTTP client cannot be nil")
 	}
 	u, err := url.Parse(endpoint.BaseURL())
 	if err != nil {
@@ -87,7 +87,7 @@ func transportWithoutAmbientProxy(roundTripper http.RoundTripper) (http.RoundTri
 	if roundTripper == nil {
 		transport, ok := http.DefaultTransport.(*http.Transport)
 		if !ok || transport == nil {
-			return nil, errors.New("operator client: default HTTP transport 不可用")
+			return nil, errors.New("operator client: default HTTP transport is not usable")
 		}
 		clone := transport.Clone()
 		clone.Proxy = nil
@@ -95,7 +95,7 @@ func transportWithoutAmbientProxy(roundTripper http.RoundTripper) (http.RoundTri
 	}
 	if transport, ok := roundTripper.(*http.Transport); ok {
 		if transport == nil {
-			return nil, errors.New("operator client: HTTP transport 不可為 nil")
+			return nil, errors.New("operator client: HTTP transport cannot be nil")
 		}
 		clone := transport.Clone()
 		clone.Proxy = nil
@@ -208,7 +208,7 @@ func (c *Client) GetMachineChannel(ctx context.Context, machineID string) (Machi
 
 func (c *Client) PutMachineChannel(ctx context.Context, machineID, idempotencyKey string, body MachineChannelRequest) (MachineChannelResponse, error) {
 	if strings.TrimSpace(idempotencyKey) == "" {
-		return MachineChannelResponse{}, errors.New("operator client: Idempotency-Key 不可省略")
+		return MachineChannelResponse{}, errors.New("operator client: Idempotency-Key is required")
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -296,7 +296,7 @@ func (c *Client) PreviewEnrollToken(ctx context.Context, body EnrollmentTokenPre
 // network retry into a false claim that the original secret can be recovered.
 func (c *Client) CreateEnrollToken(ctx context.Context, idempotencyKey string, body EnrollmentTokenCreateRequest) (EnrollmentTokenResponse, error) {
 	if strings.TrimSpace(idempotencyKey) == "" {
-		return EnrollmentTokenResponse{}, errors.New("operator client: Idempotency-Key 不可省略")
+		return EnrollmentTokenResponse{}, errors.New("operator client: Idempotency-Key is required")
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -368,7 +368,7 @@ func canonicalRequestedChannel(channel string) (string, bool) {
 
 func (c *Client) newRequest(ctx context.Context, method, machineID string, body io.Reader) (*http.Request, error) {
 	if strings.TrimSpace(machineID) == "" || strings.Contains(machineID, "/") || machineID == "." || machineID == ".." {
-		return nil, errors.New("operator client: machine_id 不可為空、dot segment 或包含斜線")
+		return nil, errors.New("operator client: machine_id cannot be empty, a dot segment, or contain slashes")
 	}
 	// JoinPath treats percent escapes in its elements as already encoded. A
 	// machine ID such as "%61bc" could therefore be sent as "abc", mutate that
@@ -411,7 +411,7 @@ func (c *Client) doRawWithLimit(req *http.Request, limit int64, limitLabel strin
 		return operatorRawResponse{}, fmt.Errorf("operator client: read response: %w", err)
 	}
 	if int64(len(raw)) > limit {
-		return operatorRawResponse{}, fmt.Errorf("operator client: response 超過 %s", limitLabel)
+		return operatorRawResponse{}, fmt.Errorf("operator client: response exceeds %s", limitLabel)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		replayed, replayErr := responseReplayEvidence(resp)
@@ -645,11 +645,11 @@ func validateEnrollmentTokenPreviewResponse(result EnrollmentTokenPreviewRespons
 	// ⚠ 一份說「還收得下」但其實已經到上限的預覽，會讓人按下去才發現開不了票。
 	// at_limit 是這份預覽上唯一一個會讓人改變下一步的欄位，所以自己再判一次。
 	if result.InDenominator < 0 || result.Headroom < 0 || result.LimitMaxMachines < 0 {
-		return errors.New("operator client: enrollment token preview 的註冊上限有負數")
+		return errors.New("operator client: enrollment token preview enrollment limit has negative values")
 	}
 	if !result.LimitSet {
 		if result.LimitMaxMachines != 0 || result.Headroom != 0 || result.AtLimit {
-			return errors.New("operator client: enrollment token preview 說沒有上限，卻帶著上限的內容")
+			return errors.New("operator client: enrollment token preview indicates no limit, but carries limit details")
 		}
 		return nil
 	}
@@ -658,7 +658,7 @@ func validateEnrollmentTokenPreviewResponse(result EnrollmentTokenPreviewRespons
 		headroom = 0
 	}
 	if result.Headroom != headroom || result.AtLimit != (result.InDenominator >= result.LimitMaxMachines) {
-		return fmt.Errorf("operator client: 上限 %d 台、名冊上 %d 台，preview 說還可以納管 %d 台、at_limit=%t",
+		return fmt.Errorf("operator client: limit is %d machines, enrolled %d machines, preview says %d machines can still be enrolled, at_limit=%t",
 			result.LimitMaxMachines, result.InDenominator, result.Headroom, result.AtLimit)
 	}
 	return nil

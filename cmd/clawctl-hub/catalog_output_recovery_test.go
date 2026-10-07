@@ -70,7 +70,7 @@ func testCatalogAssignmentOutputRecovery(t *testing.T) {
 					assertCatalogAssignmentRecoveryGraph(t, f, node, committed)
 					if attempt < 2 {
 						if !errors.Is(err, syscall.EPIPE) || out.Len() == 0 ||
-							!strings.Contains(err.Error(), "操作已完成，結果輸出失敗") {
+							!strings.Contains(err.Error(), "operation succeeded but failed to output result") {
 							t.Errorf("partial output must propagate broken pipe: bytes=%d err=%v", out.Len(), err)
 						}
 						if !strings.Contains(errOut.String(), "replay clawctl-hub catalog recover --recovery-file ") {
@@ -191,7 +191,7 @@ func testCatalogPublishOutputRecovery(t *testing.T) {
 					err := runCatalogCommandWithDeps(t.Context(), argv, output, &errOut, deps)
 					if attempt < 2 {
 						if !errors.Is(err, syscall.EPIPE) || out.Len() == 0 ||
-							!strings.Contains(err.Error(), "操作已完成，結果輸出失敗") {
+							!strings.Contains(err.Error(), "operation succeeded but failed to output result") {
 							t.Errorf("publish output must propagate broken pipe: bytes=%d err=%v", out.Len(), err)
 						}
 						raw, readErr := os.ReadFile(path)

@@ -45,10 +45,10 @@ func (e claudeCodeExecutor) Run(ctx context.Context, job model.JobResponse) ([]m
 	root := filepath.Join(d.home, ".local", "share", "clawctl", "claude-code")
 	releases := filepath.Join(root, "releases")
 	if err := d.requireWritableAncestor(root); err != nil {
-		return nil, rejectPrecondition("Claude Code 目錄不可寫：" + err.Error())
+		return nil, rejectPrecondition("Claude Code directory is not writable: " + err.Error())
 	}
 	if err := os.MkdirAll(d.fsPath(releases), 0o700); err != nil {
-		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "stage", "建立 Claude Code releases", err)}, nil
+		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "stage", "create Claude Code releases", err)}, nil
 	}
 	release := filepath.Join(releases, spec.Version)
 	stageVerification, err := e.ensureRelease(ctx, d, job, spec, release)
@@ -60,14 +60,14 @@ func (e claudeCodeExecutor) Run(ctx context.Context, job model.JobResponse) ([]m
 	}
 	previous, currentRelease, err := readNodeRuntimeCurrent(d, root, releases)
 	if err != nil {
-		return nil, rejectPrecondition("Claude Code current 不合法：" + err.Error())
+		return nil, rejectPrecondition("invalid Claude Code current: " + err.Error())
 	}
 	if samePath(currentRelease, release) {
 		return verifyClaudeCodeRelease(ctx, d, release, spec.Version, spec.Artifact.SHA256,
 			spec.TargetOS, "claude-code-current"), nil
 	}
 	if err := setNodeRuntimeCurrent(d, root, release, job.JobID); err != nil {
-		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "activate", "切換 Claude Code current", err)}, nil
+		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "activate", "switch Claude Code current", err)}, nil
 	}
 	verifications := verifyClaudeCodeRelease(ctx, d, release, spec.Version, spec.Artifact.SHA256,
 		spec.TargetOS, "claude-code-activate")
@@ -85,42 +85,42 @@ func (e claudeCodeExecutor) gate(job model.JobResponse) (model.ClaudeCodeSpec, e
 	decoder := json.NewDecoder(strings.NewReader(string(job.Spec)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&spec); err != nil {
-		return spec, rejectPrecondition("Claude Code spec 不是合法 JSON：" + err.Error())
+		return spec, rejectPrecondition("Claude Code spec is not valid JSON: " + err.Error())
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return spec, rejectPrecondition("Claude Code spec 含有尾隨資料")
+		return spec, rejectPrecondition("Claude Code spec contains trailing data")
 	}
 	if job.ResourceKind != agentadapter.ExecutorKindClaudeCode || spec.Kind != agentadapter.ExecutorKindClaudeCode {
-		return spec, rejectPrecondition("工作單與 spec kind 必須是 claude-code")
+		return spec, rejectPrecondition("job and spec kind must be claude-code")
 	}
 	if job.ResourceID != "claude-code" || !safePathComponent(spec.Version) || !validNodeRuntimeExactVersion(spec.Version) {
-		return spec, rejectPrecondition("Claude Code identity 不合法")
+		return spec, rejectPrecondition("invalid Claude Code identity")
 	}
 	if spec.TargetOS != e.targetOS || spec.TargetArch != e.targetArch ||
 		(spec.TargetOS != "linux" && spec.TargetOS != "darwin" && spec.TargetOS != "windows") ||
 		(spec.TargetArch != "amd64" && spec.TargetArch != "arm64") {
-		return spec, rejectPrecondition("Claude Code target 與 agent 平台不一致")
+		return spec, rejectPrecondition("Claude Code target does not match agent platform")
 	}
 	if spec.BundleLayout != model.ClaudeCodeBundleLayoutV1 || spec.Artifact == nil {
-		return spec, rejectPrecondition("Claude Code bundle contract 不合法")
+		return spec, rejectPrecondition("invalid Claude Code bundle contract")
 	}
 	artifact := spec.Artifact
 	if len(artifact.SHA256) != sha256.Size*2 {
-		return spec, rejectPrecondition("artifact.sha256 不是 64 碼十六進位")
+		return spec, rejectPrecondition("artifact.sha256 is not 64 hex digits")
 	}
 	if _, err := hex.DecodeString(artifact.SHA256); err != nil || strings.ToLower(artifact.SHA256) != artifact.SHA256 {
-		return spec, rejectPrecondition("artifact.sha256 必須是小寫十六進位")
+		return spec, rejectPrecondition("artifact.sha256 must be lowercase hex")
 	}
 	if artifact.Size <= 0 || artifact.Size > maxClaudeCodeArtifactBytes {
-		return spec, rejectPrecondition("artifact.size 超出 Claude Code bundle 上限")
+		return spec, rejectPrecondition("artifact.size exceeds Claude Code bundle limit")
 	}
 	if artifact.URL != "/v1/artifacts/"+artifact.SHA256 ||
 		artifact.EnginesNode != "" || artifact.UpstreamTarball != "" || artifact.SHA512 != "" {
-		return spec, rejectPrecondition("Claude Code artifact contract 不合法")
+		return spec, rejectPrecondition("invalid Claude Code artifact contract")
 	}
 	if job.ArtifactDigest != "sha256:"+artifact.SHA256 {
-		return spec, &rejectError{Code: deploy.ArtifactHashMismatch, Detail: "工作單 artifact digest 與 spec 不一致"}
+		return spec, &rejectError{Code: deploy.ArtifactHashMismatch, Detail: "job artifact digest does not match spec"}
 	}
 	return spec, nil
 }
@@ -138,23 +138,23 @@ func (e claudeCodeExecutor) ensureRelease(ctx context.Context, d execDeps, job m
 		}
 		broken := release + ".broken-" + safeJobID(job.JobID)
 		if _, err := os.Lstat(d.fsPath(broken)); err == nil {
-			return nodeRuntimeFailure(d, "stage", "保留既有 Claude Code release", errors.New("broken 證據路徑已存在")), nil
+			return nodeRuntimeFailure(d, "stage", "preserve existing Claude Code release", errors.New("broken evidence path already exists")), nil
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return nodeRuntimeFailure(d, "stage", "檢查 Claude Code broken 證據", err), nil
+			return nodeRuntimeFailure(d, "stage", "check Claude Code broken evidence", err), nil
 		}
 		if err := os.Rename(d.fsPath(release), d.fsPath(broken)); err != nil {
-			return nodeRuntimeFailure(d, "stage", "保留既有 Claude Code release", err), nil
+			return nodeRuntimeFailure(d, "stage", "preserve existing Claude Code release", err), nil
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return nodeRuntimeFailure(d, "stage", "檢查 Claude Code release", err), nil
+		return nodeRuntimeFailure(d, "stage", "check Claude Code release", err), nil
 	}
 	staging := filepath.Join(filepath.Dir(release), ".staging-"+safeJobID(job.JobID))
 	if err := os.RemoveAll(d.fsPath(staging)); err != nil {
-		return nodeRuntimeFailure(d, "stage", "清理 Claude Code staging", err), nil
+		return nodeRuntimeFailure(d, "stage", "clean Claude Code staging", err), nil
 	}
 	defer os.RemoveAll(d.fsPath(staging))
 	if err := os.MkdirAll(d.fsPath(staging), 0o700); err != nil {
-		return nodeRuntimeFailure(d, "stage", "建立 Claude Code staging", err), nil
+		return nodeRuntimeFailure(d, "stage", "create Claude Code staging", err), nil
 	}
 	bundle := filepath.Join(staging, "claude-code.tgz")
 	actualDigest, actualSize, err := d.downloadArtifactAtMost(ctx, d.hubURL+spec.Artifact.URL, bundle, spec.Artifact.Size)
@@ -162,22 +162,22 @@ func (e claudeCodeExecutor) ensureRelease(ctx context.Context, d execDeps, job m
 		var sizeErr *artifactDownloadSizeError
 		if errors.As(err, &sizeErr) {
 			return nil, &rejectError{Code: deploy.ArtifactHashMismatch,
-				Detail: fmt.Sprintf("Claude Code artifact 超過宣告 size=%d", spec.Artifact.Size)}
+				Detail: fmt.Sprintf("Claude Code artifact exceeds declared size=%d", spec.Artifact.Size)}
 		}
-		return nodeRuntimeFailure(d, "stage", "下載 Claude Code bundle", err), nil
+		return nodeRuntimeFailure(d, "stage", "download Claude Code bundle", err), nil
 	}
 	if actualDigest != spec.Artifact.SHA256 || actualSize != spec.Artifact.Size {
 		return nil, &rejectError{Code: deploy.ArtifactHashMismatch,
-			Detail: fmt.Sprintf("Claude Code artifact 期望 sha256=%s size=%d，實得 sha256=%s size=%d",
+			Detail: fmt.Sprintf("Claude Code artifact want sha256=%s size=%d, got sha256=%s size=%d",
 				shortDigest(spec.Artifact.SHA256), spec.Artifact.Size, shortDigest(actualDigest), actualSize)}
 	}
 	payload := filepath.Join(staging, "payload")
 	if err := extractClaudeCodeBundle(d.fsPath(bundle), d.fsPath(payload), spec.TargetOS, spec.TargetArch); err != nil {
-		return nodeRuntimeFailure(d, "stage", "展開 Claude Code bundle", err), nil
+		return nodeRuntimeFailure(d, "stage", "extract Claude Code bundle", err), nil
 	}
 	marker := filepath.Join(payload, nodeRuntimeArtifactMarker)
 	if err := writePrivateFile(d.fsPath(marker), []byte("sha256:"+spec.Artifact.SHA256+"\n")); err != nil {
-		return nodeRuntimeFailure(d, "stage", "記錄 Claude Code artifact identity", err), nil
+		return nodeRuntimeFailure(d, "stage", "record Claude Code artifact identity", err), nil
 	}
 	checks := verifyClaudeCodeRelease(ctx, d, payload, spec.Version, spec.Artifact.SHA256, spec.TargetOS, "claude-code-stage")
 	if !allPassed(checks) {
@@ -191,10 +191,10 @@ func (e claudeCodeExecutor) ensureRelease(ctx context.Context, d execDeps, job m
 		return &failure, nil
 	}
 	if err := os.Rename(d.fsPath(payload), d.fsPath(release)); err != nil {
-		return nodeRuntimeFailure(d, "stage", "發佈 Claude Code release", err), nil
+		return nodeRuntimeFailure(d, "stage", "publish Claude Code release", err), nil
 	}
 	if err := syncNodeRuntimeDirectory(d.fsPath(filepath.Dir(release))); err != nil {
-		return nodeRuntimeFailure(d, "stage", "同步 Claude Code releases", err), nil
+		return nodeRuntimeFailure(d, "stage", "sync Claude Code releases", err), nil
 	}
 	return nil, nil
 }
@@ -231,12 +231,12 @@ func extractClaudeCodeBundle(bundle, destination, targetOS, targetArch string) e
 		}
 		entries++
 		if entries > 64 || header.Size < 0 || header.Size > maxClaudeCodeArtifactBytes {
-			return errors.New("Claude Code bundle 超出展開上限")
+			return errors.New("Claude Code bundle exceeds extraction limit")
 		}
 		name := path.Clean(strings.TrimSuffix(header.Name, "/"))
 		parts := strings.Split(name, "/")
 		if len(parts) == 0 || parts[0] != "claude-code" {
-			return fmt.Errorf("Claude Code bundle 路徑超出 layout：%s", header.Name)
+			return fmt.Errorf("Claude Code bundle path outside layout: %s", header.Name)
 		}
 		if len(parts) == 1 {
 			continue
@@ -249,7 +249,7 @@ func extractClaudeCodeBundle(bundle, destination, targetOS, targetArch string) e
 			continue
 		}
 		if relative != wantBinary || (header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA) {
-			return fmt.Errorf("Claude Code bundle 含非目標檔案：%s", relative)
+			return fmt.Errorf("Claude Code bundle contains non-target file: %s", relative)
 		}
 		dest := filepath.Join(destination, filepath.FromSlash(relative))
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -263,12 +263,12 @@ func extractClaudeCodeBundle(bundle, destination, targetOS, targetArch string) e
 		syncErr := file.Sync()
 		closeErr := file.Close()
 		if copyErr != nil || written != header.Size || syncErr != nil || closeErr != nil {
-			return fmt.Errorf("Claude Code bundle 檔案不完整：%s", relative)
+			return fmt.Errorf("incomplete Claude Code bundle file: %s", relative)
 		}
 		found = true
 	}
 	if !found {
-		return errors.New("Claude Code bundle 沒有目標平台 binary")
+		return errors.New("Claude Code bundle has no target platform binary")
 	}
 	return nil
 }
@@ -280,7 +280,7 @@ func verifyClaudeCodeRelease(ctx context.Context, d execDeps, release, version, 
 	marker, err := readPrivateRegularFile(d.fsPath(markerLogical))
 	markerPassed := err == nil && string(marker) == "sha256:"+artifactSHA256+"\n"
 	if err == nil && !markerPassed {
-		err = errors.New("artifact identity marker 與工作單 digest 不符")
+		err = errors.New("artifact identity marker does not match job digest")
 	}
 	results := []model.JobVerificationRequest{d.verification(rulePrefix+"-artifact", "cat "+markerLogical,
 		string(marker), errorText("", err), exitCode(err), markerPassed)}
@@ -292,14 +292,14 @@ func verifyClaudeCodeRelease(ctx context.Context, d execDeps, release, version, 
 	if info, err := os.Lstat(binaryPath); err != nil || !info.Mode().IsRegular() ||
 		(runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0) {
 		if err == nil {
-			err = errors.New(claudeCodeBinaryRelative(targetOS) + " 不是可執行 regular file")
+			err = errors.New(claudeCodeBinaryRelative(targetOS) + " is not an executable regular file")
 		}
 		return append(results, *nodeRuntimeFailure(d, rulePrefix+"-version", binaryLogical+" --version", err))
 	}
 	stdout, stderr, err := d.run(ctx, binaryPath, "--version")
 	passed := err == nil && claudeCodeVersionMatches(stdout, version)
 	if err == nil && !passed {
-		err = fmt.Errorf("Claude Code version=%q；要 %q", strings.TrimSpace(stdout), version)
+		err = fmt.Errorf("Claude Code version=%q; want %q", strings.TrimSpace(stdout), version)
 	}
 	results = append(results, d.verification(rulePrefix+"-version", binaryLogical+" --version",
 		stdout, errorText(stderr, err), exitCode(err), passed))

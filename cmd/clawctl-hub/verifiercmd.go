@@ -33,7 +33,7 @@ func runVerifierCommandWithDeps(ctx context.Context, argv []string, out, errOut 
 ) error {
 	if len(argv) == 0 {
 		writeVerifierUsage(errOut)
-		return errors.New("verifier: 必須指定 list、show、register、revoke 或 assign")
+		return errors.New("verifier: must specify list, show, register, revoke, or assign")
 	}
 	switch argv[0] {
 	case "list":
@@ -48,20 +48,20 @@ func runVerifierCommandWithDeps(ctx context.Context, argv []string, out, errOut 
 		return runVerifierAssign(ctx, argv[1:], out, errOut, deps)
 	default:
 		writeVerifierUsage(errOut)
-		return fmt.Errorf("verifier: 未知的子指令 %q", terminalSafe(argv[0]))
+		return fmt.Errorf("verifier: unknown subcommand %q", terminalSafe(argv[0]))
 	}
 }
 
 func writeVerifierUsage(errOut io.Writer) {
-	fmt.Fprintln(errOut, "用法：clawctl-hub verifier list [--json] [--hub-url URL | --db PATH]")
-	fmt.Fprintln(errOut, "      clawctl-hub verifier show [--json] [--hub-url URL | --db PATH] <verifier-id>")
-	fmt.Fprintln(errOut, "      clawctl-hub verifier register --kind KIND --name NAME --failure-domain DOMAIN (--preview | --reason REASON) [--hub-url URL | --db PATH]")
-	fmt.Fprintln(errOut, "      clawctl-hub verifier revoke (--preview | --reason REASON --confirm-name NAME) [--hub-url URL | --db PATH] <verifier-id>")
-	fmt.Fprintln(errOut, "      clawctl-hub verifier assign --job JOB-ID (--preview | --reason REASON --confirm-name NAME) [--hub-url URL | --db PATH] <verifier-id>")
-	fmt.Fprintln(errOut, "  kind：fleet_peer_agent、hub_prober、external_job_runner。")
-	fmt.Fprintln(errOut, "  register 的 credential 只在建立當下輸出一次；重放只會拿到 receipt。")
-	fmt.Fprintln(errOut, "  assign 指名一張工作單；verifier 只拿得到指派給它的單，工作單結束後才會發出。")
-	fmt.Fprintln(errOut, "  transport：HTTP；--db 用於已停止的 Hub。")
+	fmt.Fprintln(errOut, "Usage: clawctl-hub verifier list [--json] [--hub-url URL | --db PATH]")
+	fmt.Fprintln(errOut, "       clawctl-hub verifier show [--json] [--hub-url URL | --db PATH] <verifier-id>")
+	fmt.Fprintln(errOut, "       clawctl-hub verifier register --kind KIND --name NAME --failure-domain DOMAIN (--preview | --reason REASON) [--hub-url URL | --db PATH]")
+	fmt.Fprintln(errOut, "       clawctl-hub verifier revoke (--preview | --reason REASON --confirm-name NAME) [--hub-url URL | --db PATH] <verifier-id>")
+	fmt.Fprintln(errOut, "       clawctl-hub verifier assign --job JOB-ID (--preview | --reason REASON --confirm-name NAME) [--hub-url URL | --db PATH] <verifier-id>")
+	fmt.Fprintln(errOut, "  kind: fleet_peer_agent, hub_prober, external_job_runner")
+	fmt.Fprintln(errOut, "  register credentials are output only once upon creation; replay only returns a receipt")
+	fmt.Fprintln(errOut, "  assign specifies a job; the verifier only receives jobs assigned to it, delivered only after the job finishes")
+	fmt.Fprintln(errOut, "  transport: HTTP; --db is for stopped Hub")
 }
 
 // verifierTransport resolves the one transport both sides of every subcommand
@@ -80,8 +80,8 @@ func verifierFlagSet(name string, errOut io.Writer) (*flag.FlagSet, *string, *st
 		writeVerifierUsage(errOut)
 		fs.PrintDefaults()
 	}
-	dbPath := fs.String("db", "", "stopped-service direct DB break-glass 的既有 SQLite 檔位置")
-	hubURL := fs.String("hub-url", "", "HTTP operator API base URL（省略時自動發現）")
+	dbPath := fs.String("db", "", "path to existing SQLite file for stopped-service direct DB break-glass")
+	hubURL := fs.String("hub-url", "", "HTTP operator API base URL (auto-discovered when omitted)")
 	return fs, dbPath, hubURL
 }
 
@@ -89,11 +89,11 @@ func verifierTransportFrom(name string, fs *flag.FlagSet, dbPath, hubURL *string
 	seen := map[string]bool{}
 	fs.Visit(func(item *flag.Flag) { seen[item.Name] = true })
 	if seen["hub-url"] && seen["db"] {
-		return verifierTransport{}, fmt.Errorf("verifier %s: --hub-url（HTTP mode）與 --db（direct mode）不可同時明示", name)
+		return verifierTransport{}, fmt.Errorf("verifier %s: --hub-url (HTTP mode) and --db (direct mode) cannot both be specified", name)
 	}
 	if (seen["hub-url"] && strings.TrimSpace(*hubURL) == "") ||
 		(seen["db"] && strings.TrimSpace(*dbPath) == "") {
-		return verifierTransport{}, fmt.Errorf("verifier %s: 明示的 --hub-url / --db 不可為空", name)
+		return verifierTransport{}, fmt.Errorf("verifier %s: specified --hub-url / --db cannot be empty", name)
 	}
 	return verifierTransport{dbPath: *dbPath, hubURL: *hubURL, seen: seen}, nil
 }
@@ -101,38 +101,38 @@ func verifierTransportFrom(name string, fs *flag.FlagSet, dbPath, hubURL *string
 func verifierHTTPClient(transport verifierTransport, deps machineCommandDeps) (*operatorclient.Client, error) {
 	if transport.seen["hub-url"] {
 		if deps.newOperatorClient == nil {
-			return nil, errors.New("verifier: operator HTTP client 未初始化")
+			return nil, errors.New("verifier: operator HTTP client not initialized")
 		}
 		client, err := deps.newOperatorClient(transport.hubURL)
 		if err != nil {
-			return nil, fmt.Errorf("verifier: 建立 HTTP operator client 失敗：%w", err)
+			return nil, fmt.Errorf("verifier: failed to create HTTP operator client: %w", err)
 		}
 		return client, nil
 	}
 	if deps.discoverHubURL == nil {
-		return nil, errors.New("verifier: Hub discovery 未初始化")
+		return nil, errors.New("verifier: Hub discovery not initialized")
 	}
 	discovered, err := deps.discoverHubURL()
 	if err != nil {
-		return nil, fmt.Errorf("verifier: 無法發現 Hub：%w", err)
+		return nil, fmt.Errorf("verifier: failed to discover Hub: %w", err)
 	}
 	if deps.newOperatorClient == nil {
-		return nil, errors.New("verifier: operator HTTP client 未初始化")
+		return nil, errors.New("verifier: operator HTTP client not initialized")
 	}
 	client, err := deps.newOperatorClient(discovered)
 	if err != nil {
-		return nil, fmt.Errorf("verifier: 建立 HTTP operator client 失敗：%w", err)
+		return nil, fmt.Errorf("verifier: failed to create HTTP operator client: %w", err)
 	}
 	return client, nil
 }
 
 func validateVerifierCLIValue(name, value string, maxBytes int) error {
 	if value == "" || value != strings.TrimSpace(value) || len(value) > maxBytes {
-		return fmt.Errorf("verifier: --%s 不可為空、過長或含首尾空白", name)
+		return fmt.Errorf("verifier: --%s cannot be empty, too long, or contain leading/trailing whitespace", name)
 	}
 	for _, char := range value {
 		if char < 0x20 || char == 0x7f {
-			return fmt.Errorf("verifier: --%s 不可含控制字元", name)
+			return fmt.Errorf("verifier: --%s cannot contain control characters", name)
 		}
 	}
 	return nil
@@ -141,7 +141,7 @@ func validateVerifierCLIValue(name, value string, maxBytes int) error {
 func validateVerifierIDArgument(command, value string) error {
 	if value == "" || value != strings.TrimSpace(value) || len(value) > 256 ||
 		strings.Contains(value, "/") || value == "." || value == ".." {
-		return fmt.Errorf("verifier %s: verifier-id 不可為空、含首尾空白、dot segment 或斜線，且長度不可超過 256 bytes", command)
+		return fmt.Errorf("verifier %s: verifier-id cannot be empty, contain leading/trailing whitespace, dot segments, or slashes, and must not exceed 256 bytes", command)
 	}
 	return nil
 }
@@ -150,12 +150,12 @@ func runVerifierList(ctx context.Context, argv []string, out, errOut io.Writer,
 	deps machineCommandDeps,
 ) error {
 	fs, dbPath, hubURL := verifierFlagSet("list", errOut)
-	jsonOutput := fs.Bool("json", false, "輸出 stable operator JSON DTO")
+	jsonOutput := fs.Bool("json", false, "output stable operator JSON DTO")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("verifier list: 不接受 positional arguments：%q", terminalSafe(strings.Join(fs.Args(), " ")))
+		return fmt.Errorf("verifier list: positional arguments not accepted: %q", terminalSafe(strings.Join(fs.Args(), " ")))
 	}
 	transport, err := verifierTransportFrom("list", fs, dbPath, hubURL)
 	if err != nil {
@@ -165,7 +165,7 @@ func runVerifierList(ctx context.Context, argv []string, out, errOut io.Writer,
 		return withDirectOperatorStore(ctx, "verifier list", transport.dbPath, deps, func(st *store.Store) error {
 			result, err := operator.New(st).Verifiers()
 			if err != nil {
-				return fmt.Errorf("讀取 verifier list 失敗（direct DB operator service）：%w", err)
+				return fmt.Errorf("failed to read verifier list (direct DB operator service): %w", err)
 			}
 			return writeVerifierList(out, result, *jsonOutput, "direct DB operator service")
 		})
@@ -176,7 +176,7 @@ func runVerifierList(ctx context.Context, argv []string, out, errOut io.Writer,
 	}
 	result, err := client.Verifiers(ctx)
 	if err != nil {
-		return fmt.Errorf("讀取 verifier list 失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read verifier list (HTTP operator API): %w", err)
 	}
 	return writeVerifierList(out, result, *jsonOutput, "HTTP operator API")
 }
@@ -185,7 +185,7 @@ func runVerifierShow(ctx context.Context, argv []string, out, errOut io.Writer,
 	deps machineCommandDeps,
 ) error {
 	fs, dbPath, hubURL := verifierFlagSet("show", errOut)
-	jsonOutput := fs.Bool("json", false, "輸出 stable operator JSON DTO")
+	jsonOutput := fs.Bool("json", false, "output stable operator JSON DTO")
 	parseArgs := argv
 	if len(parseArgs) > 0 && !strings.HasPrefix(parseArgs[0], "-") {
 		parseArgs = append(append([]string(nil), parseArgs[1:]...), parseArgs[0])
@@ -194,7 +194,7 @@ func runVerifierShow(ctx context.Context, argv []string, out, errOut io.Writer,
 		return err
 	}
 	if fs.NArg() != 1 {
-		return errors.New("verifier show: 必須提供一個 verifier-id")
+		return errors.New("verifier show: must provide a verifier-id")
 	}
 	verifierID := fs.Arg(0)
 	if err := validateVerifierIDArgument("show", verifierID); err != nil {
@@ -208,7 +208,7 @@ func runVerifierShow(ctx context.Context, argv []string, out, errOut io.Writer,
 		return withDirectOperatorStore(ctx, "verifier show", transport.dbPath, deps, func(st *store.Store) error {
 			result, err := operator.New(st).VerifierDetail(verifierID)
 			if err != nil {
-				return fmt.Errorf("讀取 verifier detail 失敗（direct DB operator service）：%w", err)
+				return fmt.Errorf("failed to read verifier detail (direct DB operator service): %w", err)
 			}
 			return writeVerifierDetail(out, result, *jsonOutput, "direct DB operator service")
 		})
@@ -219,7 +219,7 @@ func runVerifierShow(ctx context.Context, argv []string, out, errOut io.Writer,
 	}
 	result, err := client.Verifier(ctx, verifierID)
 	if err != nil {
-		return fmt.Errorf("讀取 verifier detail 失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read verifier detail (HTTP operator API): %w", err)
 	}
 	return writeVerifierDetail(out, result, *jsonOutput, "HTTP operator API")
 }
@@ -240,20 +240,20 @@ func runVerifierRegister(ctx context.Context, argv []string, out, errOut io.Writ
 	deps machineCommandDeps,
 ) error {
 	fs, dbPath, hubURL := verifierFlagSet("register", errOut)
-	kind := fs.String("kind", "", "fleet_peer_agent、hub_prober 或 external_job_runner")
-	name := fs.String("name", "", "verifier 的 display_name；撤銷後不可重用")
-	failureDomain := fs.String("failure-domain", "", "verifier 所在的 failure domain；不可等於它要驗的機器")
-	hubHost := fs.String("hub-host", "", "direct DB 模式註冊 hub_prober 時，Hub 自己那台的 hostname")
-	reason := fs.String("reason", "", "註冊理由（套用時必填，進 audit）")
-	preview := fs.Bool("preview", false, "只顯示 policy 與影響，不建立 verifier")
-	jsonOutput := fs.Bool("json", false, "輸出 stable operator JSON DTO（preview 專用）")
-	idempotencyKey := fs.String("idempotency-key", "", "ambiguous response 重試用原 request key")
-	previewDigest := fs.String("preview-digest", "", "ambiguous response 重試用原 preview digest")
+	kind := fs.String("kind", "", "fleet_peer_agent, hub_prober, or external_job_runner")
+	name := fs.String("name", "", "verifier display_name; cannot be reused after revocation")
+	failureDomain := fs.String("failure-domain", "", "failure domain of the verifier; cannot equal the machine it verifies")
+	hubHost := fs.String("hub-host", "", "hostname of the Hub itself when registering hub_prober in direct DB mode")
+	reason := fs.String("reason", "", "registration reason (required on apply, recorded in audit)")
+	preview := fs.Bool("preview", false, "show policy and impact only, do not create verifier")
+	jsonOutput := fs.Bool("json", false, "output stable operator JSON DTO (preview only)")
+	idempotencyKey := fs.String("idempotency-key", "", "original request key for ambiguous response retry")
+	previewDigest := fs.String("preview-digest", "", "original preview digest for ambiguous response retry")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("verifier register: 不接受 positional arguments：%q", terminalSafe(strings.Join(fs.Args(), " ")))
+		return fmt.Errorf("verifier register: positional arguments not accepted: %q", terminalSafe(strings.Join(fs.Args(), " ")))
 	}
 	transport, err := verifierTransportFrom("register", fs, dbPath, hubURL)
 	if err != nil {
@@ -268,12 +268,12 @@ func runVerifierRegister(ctx context.Context, argv []string, out, errOut io.Writ
 		}
 	}
 	if seen["idempotency-key"] != seen["preview-digest"] {
-		return errors.New("verifier register: --idempotency-key 與 --preview-digest 必須成對提供；省略兩者才會建立新的 request")
+		return errors.New("verifier register: --idempotency-key and --preview-digest must be provided together; omit both to create a new request")
 	}
 	if *preview {
 		for _, name := range []string{"idempotency-key", "preview-digest", "reason"} {
 			if seen[name] {
-				return fmt.Errorf("verifier register: --preview 不接受 --%s；它不建立 state", name)
+				return fmt.Errorf("verifier register: --preview does not accept --%s; it creates no state", name)
 			}
 		}
 	} else {
@@ -281,18 +281,18 @@ func runVerifierRegister(ctx context.Context, argv []string, out, errOut io.Writ
 			return err
 		}
 		if *jsonOutput {
-			return errors.New("verifier register: --json 只用於 --preview；建立時的 credential 只以純文字輸出一次")
+			return errors.New("verifier register: --json is only for --preview; credentials on creation are output only once as plain text")
 		}
 	}
 	if seen["hub-host"] {
 		if !seen["db"] {
-			return errors.New("verifier register: --hub-host 只用於 --db；HTTP 模式由 Hub 自己解析")
+			return errors.New("verifier register: --hub-host is only for --db; HTTP mode resolves it from Hub itself")
 		}
 		if err := validateVerifierCLIValue("hub-host", *hubHost, 256); err != nil {
 			return err
 		}
 	} else if seen["db"] && *kind == store.VerifierKindHubProber {
-		return errors.New("verifier register: --db 模式註冊 hub_prober 必須指定 --hub-host")
+		return errors.New("verifier register: --hub-host is required when registering hub_prober in --db mode")
 	}
 	inputs := verifierRegisterInputs{
 		Kind: *kind, DisplayName: *name, FailureDomain: *failureDomain, HubHost: *hubHost,
@@ -320,7 +320,7 @@ func runVerifierRegisterHTTP(ctx context.Context, client *operatorclient.Client,
 			Kind: inputs.Kind, DisplayName: inputs.DisplayName, FailureDomain: inputs.FailureDomain,
 		})
 		if err != nil {
-			return fmt.Errorf("verifier register preview（HTTP operator API）失敗：%w", err)
+			return fmt.Errorf("verifier register preview (HTTP operator API) failed: %w", err)
 		}
 		if inputs.Preview {
 			return writeVerifierPreview(out, preview, inputs.JSON, "HTTP operator API")
@@ -339,7 +339,7 @@ func runVerifierRegisterHTTP(ctx context.Context, client *operatorclient.Client,
 		PreviewDigest: digest, Reason: inputs.Reason,
 	})
 	if err != nil {
-		return fmt.Errorf("verifier register（HTTP operator API；idempotency-key=%q preview-digest=%q%s）失敗：%w",
+		return fmt.Errorf("verifier register (HTTP operator API; idempotency-key=%q preview-digest=%q%s) failed: %w",
 			key, digest, operatorRejectionReplayNote(err), err)
 	}
 	return finishVerifierRegistration(result.VerifierID, result.Kind, result.DisplayName,
@@ -356,7 +356,7 @@ func runVerifierRegisterDirect(st *store.Store, inputs verifierRegisterInputs, o
 			FailureDomain: inputs.FailureDomain, HubHost: inputs.HubHost,
 		})
 		if err != nil {
-			return fmt.Errorf("verifier register preview（direct DB operator service）失敗：%w", err)
+			return fmt.Errorf("verifier register preview (direct DB operator service) failed: %w", err)
 		}
 		if inputs.Preview {
 			return writeVerifierPreview(out, preview, inputs.JSON, "direct DB operator service")
@@ -379,7 +379,7 @@ func runVerifierRegisterDirect(st *store.Store, inputs verifierRegisterInputs, o
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("verifier register（direct DB operator service；idempotency-key=%q preview-digest=%q%s）失敗：%w",
+		return fmt.Errorf("verifier register (direct DB operator service; idempotency-key=%q preview-digest=%q%s) failed: %w",
 			key, digest, operatorRejectionReplayNote(err), err)
 	}
 	return finishVerifierRegistration(result.VerifierID, result.Kind, result.DisplayName,
@@ -396,19 +396,19 @@ func finishVerifierRegistration(verifierID, kind, displayName, failureDomain, cr
 	out, errOut io.Writer,
 ) error {
 	if replayed || recoveryRequired || !secretAvailable || credential == "" {
-		return fmt.Errorf("verifier register 已完成；credential 不可重顯；verifier_id=%s；recovery_action=%s；idempotency-key=%q；撤銷：clawctl-hub verifier revoke %s",
+		return fmt.Errorf("verifier register completed; credential cannot be redisplayed; verifier_id=%s; recovery_action=%s; idempotency-key=%q; revoke: clawctl-hub verifier revoke %s",
 			terminalSafe(verifierID), terminalSafe(recoveryAction), key, terminalSafe(verifierID))
 	}
 	if _, err := fmt.Fprintln(out, credential); err != nil {
-		return fmt.Errorf("credential delivery 失敗；verifier_id=%s；idempotency-key=%q；撤銷：clawctl-hub verifier revoke %s：%w",
+		return fmt.Errorf("credential delivery failed; verifier_id=%s; idempotency-key=%q; revoke: clawctl-hub verifier revoke %s: %w",
 			terminalSafe(verifierID), key, terminalSafe(verifierID), err)
 	}
 	_, err := fmt.Fprintf(errOut,
-		"\n%s 已註冊（verifier_id %s，kind %s，failure_domain %s）。\n"+
-			"credential 只輸出這一次，用於 POST /v1/verifications。\n"+
-			"它寫的證據 evidence_role 是 %s，deployment gate 由 executor 證據決定。\n"+
-			"撤銷：clawctl-hub verifier revoke %s\n"+
-			"request key: %s；preview digest: %s\n",
+		"\n%s registered (verifier_id %s, kind %s, failure_domain %s)\n"+
+			"credential is output only this once, used for POST /v1/verifications\n"+
+			"its evidence role is %s; deployment gate is determined by executor evidence\n"+
+			"revoke: clawctl-hub verifier revoke %s\n"+
+			"request key: %s; preview digest: %s\n",
 		terminalSafe(displayName), terminalSafe(verifierID), terminalSafe(kind),
 		terminalSafe(failureDomain), store.JobVerificationRoleIndependent,
 		terminalSafe(verifierID), key, digest)
@@ -430,13 +430,13 @@ func runVerifierRevoke(ctx context.Context, argv []string, out, errOut io.Writer
 	deps machineCommandDeps,
 ) error {
 	fs, dbPath, hubURL := verifierFlagSet("revoke", errOut)
-	confirmName := fs.String("confirm-name", "", "套用時必須逐字相同的 display_name")
-	reason := fs.String("reason", "", "撤銷理由（套用時必填，進 audit）")
-	preview := fs.Bool("preview", false, "只顯示影響，不撤銷")
-	jsonOutput := fs.Bool("json", false, "輸出 stable operator JSON DTO（preview 專用）")
-	idempotencyKey := fs.String("idempotency-key", "", "ambiguous response 重試用原 request key")
-	previewDigest := fs.String("preview-digest", "", "ambiguous response 重試用原 preview digest")
-	expectedRevision := fs.Int64("expected-revision", 0, "明示 verifier revision；重試 receipt 時必填")
+	confirmName := fs.String("confirm-name", "", "verbatim matching display_name required on apply")
+	reason := fs.String("reason", "", "revocation reason (required on apply, recorded in audit)")
+	preview := fs.Bool("preview", false, "show impact only, do not revoke")
+	jsonOutput := fs.Bool("json", false, "output stable operator JSON DTO (preview only)")
+	idempotencyKey := fs.String("idempotency-key", "", "original request key for ambiguous response retry")
+	previewDigest := fs.String("preview-digest", "", "original preview digest for ambiguous response retry")
+	expectedRevision := fs.Int64("expected-revision", 0, "explicit verifier revision; required when retrying receipt")
 	parseArgs := argv
 	if len(parseArgs) > 0 && !strings.HasPrefix(parseArgs[0], "-") {
 		parseArgs = append(append([]string(nil), parseArgs[1:]...), parseArgs[0])
@@ -445,7 +445,7 @@ func runVerifierRevoke(ctx context.Context, argv []string, out, errOut io.Writer
 		return err
 	}
 	if fs.NArg() != 1 {
-		return errors.New("verifier revoke: 必須提供一個 verifier-id")
+		return errors.New("verifier revoke: must provide a verifier-id")
 	}
 	verifierID := fs.Arg(0)
 	if err := validateVerifierIDArgument("revoke", verifierID); err != nil {
@@ -457,15 +457,15 @@ func runVerifierRevoke(ctx context.Context, argv []string, out, errOut io.Writer
 	}
 	seen := transport.seen
 	if seen["idempotency-key"] != seen["preview-digest"] {
-		return errors.New("verifier revoke: --idempotency-key 與 --preview-digest 必須成對提供；省略兩者才會建立新的 request")
+		return errors.New("verifier revoke: --idempotency-key and --preview-digest must be provided together; omit both to create a new request")
 	}
 	if seen["idempotency-key"] && !seen["expected-revision"] {
-		return errors.New("verifier revoke: retry 必須同時提供原 --idempotency-key、--expected-revision 與 --preview-digest")
+		return errors.New("verifier revoke: retry requires original --idempotency-key, --expected-revision, and --preview-digest together")
 	}
 	if *preview {
 		for _, name := range []string{"idempotency-key", "preview-digest", "expected-revision", "reason", "confirm-name"} {
 			if seen[name] {
-				return fmt.Errorf("verifier revoke: --preview 不接受 --%s；它不建立 state", name)
+				return fmt.Errorf("verifier revoke: --preview does not accept --%s; it creates no state", name)
 			}
 		}
 	} else {
@@ -476,11 +476,11 @@ func runVerifierRevoke(ctx context.Context, argv []string, out, errOut io.Writer
 			return err
 		}
 		if *jsonOutput {
-			return errors.New("verifier revoke: --json 只用於 --preview")
+			return errors.New("verifier revoke: --json is only for --preview")
 		}
 	}
 	if seen["expected-revision"] && *expectedRevision < 1 {
-		return errors.New("verifier revoke: --expected-revision 必須大於 0")
+		return errors.New("verifier revoke: --expected-revision must be greater than 0")
 	}
 	inputs := verifierRevokeInputs{
 		VerifierID: verifierID, ConfirmName: *confirmName, Reason: *reason,
@@ -509,7 +509,7 @@ func runVerifierRevokeHTTP(ctx context.Context, client *operatorclient.Client,
 	if digest == "" {
 		preview, err := client.PreviewVerifierRevocation(ctx, inputs.VerifierID)
 		if err != nil {
-			return fmt.Errorf("verifier revoke preview（HTTP operator API）失敗：%w", err)
+			return fmt.Errorf("verifier revoke preview (HTTP operator API) failed: %w", err)
 		}
 		if inputs.Preview {
 			return writeVerifierRevocationPreview(out, preview, inputs.JSON, "HTTP operator API")
@@ -532,7 +532,7 @@ func runVerifierRevokeHTTP(ctx context.Context, client *operatorclient.Client,
 		PreviewDigest: digest, Reason: inputs.Reason,
 	})
 	if err != nil {
-		return fmt.Errorf("verifier revoke（HTTP operator API；idempotency-key=%q expected-revision=%s preview-digest=%q%s）失敗：%w",
+		return fmt.Errorf("verifier revoke (HTTP operator API; idempotency-key=%q expected-revision=%s preview-digest=%q%s) failed: %w",
 			key, verifierRevisionText(revision), digest, operatorRejectionReplayNote(err), err)
 	}
 	return writeVerifierRevocationReceipt(out, result, key, digest)
@@ -546,7 +546,7 @@ func runVerifierRevokeDirect(st *store.Store, inputs verifierRevokeInputs, out, 
 			VerifierID: inputs.VerifierID,
 		})
 		if err != nil {
-			return fmt.Errorf("verifier revoke preview（direct DB operator service）失敗：%w", err)
+			return fmt.Errorf("verifier revoke preview (direct DB operator service) failed: %w", err)
 		}
 		if inputs.Preview {
 			return writeVerifierRevocationPreview(out, preview, inputs.JSON, "direct DB operator service")
@@ -574,7 +574,7 @@ func runVerifierRevokeDirect(st *store.Store, inputs verifierRevokeInputs, out, 
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("verifier revoke（direct DB operator service；idempotency-key=%q expected-revision=%s preview-digest=%q%s）失敗：%w",
+		return fmt.Errorf("verifier revoke (direct DB operator service; idempotency-key=%q expected-revision=%s preview-digest=%q%s) failed: %w",
 			key, verifierRevisionText(revision), digest, operatorRejectionReplayNote(err), err)
 	}
 	return writeVerifierRevocationReceipt(out, result, key, digest)
@@ -586,7 +586,7 @@ func verifierRequestKey(supplied, prefix string) (string, error) {
 	}
 	key, err := operator.NewIdempotencyKey(prefix)
 	if err != nil {
-		return "", fmt.Errorf("產生 verifier request key：%w", err)
+		return "", fmt.Errorf("generate verifier request key: %w", err)
 	}
 	return key, nil
 }
@@ -602,7 +602,7 @@ func writeVerifierList(out io.Writer, result operator.VerifierListResult, jsonOu
 	if jsonOutput {
 		return writeJobJSON(out, result)
 	}
-	if _, err := fmt.Fprintf(out, "%s；verifiers: %d (%d active / %d revoked)；separation_rule: %s\n",
+	if _, err := fmt.Fprintf(out, "%s; verifiers: %d (%d active / %d revoked); separation_rule: %s\n",
 		terminalSafe(source), len(result.Verifiers), result.Active, result.Revoked,
 		terminalSafe(result.SeparationRule)); err != nil {
 		return err
@@ -633,7 +633,7 @@ func writeVerifierDetail(out io.Writer, result operator.VerifierDetailResult, js
 		revoked = item.RevokedAt.UTC().Format(time.RFC3339Nano)
 	}
 	_, err := fmt.Fprintf(out,
-		"%s\nverifier: %s（%s）；kind: %s；failure_domain: %s\nstate: %s；revision: %d；created_at: %s；revoked_at: %s；last_seen_at(Hub): %s\nevidence_rows: %d；jobs_with_evidence: %d\nseparation_rule: %s；evidence_role: %s；grants_deployment_gate: %t\n",
+		"%s\nverifier: %s (%s); kind: %s; failure_domain: %s\nstate: %s; revision: %d; created_at: %s; revoked_at: %s; last_seen_at(Hub): %s\nevidence_rows: %d; jobs_with_evidence: %d\nseparation_rule: %s; evidence_role: %s; grants_deployment_gate: %t\n",
 		terminalSafe(source), terminalSafe(item.DisplayName), terminalSafe(item.VerifierID),
 		terminalSafe(item.Kind), terminalSafe(item.FailureDomain), terminalSafe(item.State),
 		item.Revision, item.CreatedAt.UTC().Format(time.RFC3339Nano), revoked,
@@ -650,7 +650,7 @@ func writeVerifierPreview(out io.Writer, preview store.OperatorVerifierPreviewRe
 		return writeJobJSON(out, preview)
 	}
 	_, err := fmt.Fprintf(out,
-		"preview（%s）: %s 會成為 kind %s 的 verifier，failure_domain %s。\nseparation_rule: %s；evidence_role: %s；credential_delivery: %s\nrevocation_keeps_row: %t；grants_deployment_gate: %t\npreview-digest=%s\n",
+		"preview (%s): %s will become a verifier of kind %s, failure_domain %s\nseparation_rule: %s; evidence_role: %s; credential_delivery: %s\nrevocation_keeps_row: %t; grants_deployment_gate: %t\npreview-digest=%s\n",
 		terminalSafe(source), terminalSafe(preview.DisplayName), terminalSafe(preview.Kind),
 		terminalSafe(preview.FailureDomain), terminalSafe(preview.SeparationRule),
 		terminalSafe(preview.EvidenceRole), terminalSafe(preview.CredentialDelivery),
@@ -665,7 +665,7 @@ func writeVerifierRevocationPreview(out io.Writer, preview store.OperatorVerifie
 		return writeJobJSON(out, preview)
 	}
 	_, err := fmt.Fprintf(out,
-		"preview（%s）: 撤銷 %s（verifier_id %s，kind %s，failure_domain %s，revision %d）。\nevidence_rows: %d；jobs_losing_only_producer: %d\nregistry_row_retained: %t；evidence_retained: %t；display_name_reusable: %t；grants_deployment_gate: %t\npreview-digest=%s\n",
+		"preview (%s): revoke %s (verifier_id %s, kind %s, failure_domain %s, revision %d)\nevidence_rows: %d; jobs_losing_only_producer: %d\nregistry_row_retained: %t; evidence_retained: %t; display_name_reusable: %t; grants_deployment_gate: %t\npreview-digest=%s\n",
 		terminalSafe(source), terminalSafe(preview.DisplayName), terminalSafe(preview.VerifierID),
 		terminalSafe(preview.Kind), terminalSafe(preview.FailureDomain), preview.Revision,
 		preview.EvidenceRows, preview.JobsLosingOnlyProducer, preview.RegistryRowRetained,
@@ -682,7 +682,7 @@ func writeVerifierRevocationReceipt(out io.Writer, result store.OperatorVerifier
 		state = "replayed"
 	}
 	_, err := fmt.Fprintf(out,
-		"%s: %s（verifier_id %s，kind %s，failure_domain %s）已撤銷於 %s；revision %d → %d。\nevidence_rows: %d；jobs_losing_only_producer: %d；registry_row_retained: %t；evidence_retained: %t\nidempotency-key=%s preview-digest=%s\n",
+		"%s: %s (verifier_id %s, kind %s, failure_domain %s) revoked at %s; revision %d → %d\nevidence_rows: %d; jobs_losing_only_producer: %d; registry_row_retained: %t; evidence_retained: %t\nidempotency-key=%s preview-digest=%s\n",
 		state, terminalSafe(result.DisplayName), terminalSafe(result.VerifierID),
 		terminalSafe(result.Kind), terminalSafe(result.FailureDomain),
 		result.RevokedAt.UTC().Format(time.RFC3339Nano), result.PreviousRevision, result.Revision,

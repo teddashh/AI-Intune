@@ -79,7 +79,7 @@ func (c *Client) SettingBoard(ctx context.Context) (operator.SettingBoardResult,
 func (c *Client) PreviewSettingPolicy(ctx context.Context, body SettingPolicyPreviewRequest) (operator.SettingPolicyPreviewResult, error) {
 	var out operator.SettingPolicyPreviewResult
 	if strings.TrimSpace(body.PolicyID) != body.PolicyID || body.PolicyID == "" {
-		return out, errors.New("operator client: setting policy id 不可空白或含前後空白")
+		return out, errors.New("operator client: setting policy id cannot be blank or have leading or trailing whitespace")
 	}
 	response, err := c.postSettingJSON(ctx, "/v1/operator/setting-policies/preview", "", body)
 	if err != nil {
@@ -97,7 +97,7 @@ func (c *Client) PreviewSettingPolicy(ctx context.Context, body SettingPolicyPre
 	if out.PolicyID != body.PolicyID || !validSHA256Digest(out.Digest) ||
 		!validSHA256Digest(out.PreviewDigest) || out.CurrentRev < 0 ||
 		out.Unchanged != (out.NextRev == out.CurrentRev) {
-		return out, errors.New("operator client: setting policy preview identity 不一致")
+		return out, errors.New("operator client: setting policy preview identity is inconsistent")
 	}
 	return out, nil
 }
@@ -107,7 +107,7 @@ func (c *Client) PublishSettingPolicy(ctx context.Context, key string, body Sett
 	if !validSettingIdempotencyKey(key) || body.ExpectedRevision == nil || *body.ExpectedRevision < 0 ||
 		!validSHA256Digest(body.PreviewDigest) || body.ConfirmPolicyID == "" ||
 		strings.TrimSpace(body.Reason) != body.Reason || body.Reason == "" {
-		return out, errors.New("operator client: setting policy publish coordinates 不合法")
+		return out, errors.New("operator client: setting policy publish coordinates are invalid")
 	}
 	response, err := c.postSettingJSON(ctx, "/v1/operator/setting-policies", key, body)
 	if err != nil {
@@ -126,10 +126,10 @@ func (c *Client) PublishSettingPolicy(ctx context.Context, key string, body Sett
 	// A fresh decision is 201; a replay or an unchanged republish is 200. Any
 	// other pairing means the two sides disagree about what just happened.
 	if fresh := response.status == http.StatusCreated; fresh == (out.Replayed || out.Unchanged) {
-		return out, fmt.Errorf("operator client: setting policy publish HTTP %d 與結果不符", response.status)
+		return out, fmt.Errorf("operator client: setting policy publish HTTP %d does not match result", response.status)
 	}
 	if out.PolicyID != body.PolicyID || out.Revision <= 0 || !validSHA256Digest(out.Digest) {
-		return out, errors.New("operator client: setting policy publish identity 不一致")
+		return out, errors.New("operator client: setting policy publish identity is inconsistent")
 	}
 	return out, nil
 }
@@ -137,7 +137,7 @@ func (c *Client) PublishSettingPolicy(ctx context.Context, key string, body Sett
 func (c *Client) PreviewSettingAssignment(ctx context.Context, body SettingAssignmentPreviewRequest) (operator.SettingAssignmentPreviewResult, error) {
 	var out operator.SettingAssignmentPreviewResult
 	if body.Revision <= 0 || body.ScopeID == "" || body.PolicyID == "" {
-		return out, errors.New("operator client: setting assignment preview coordinates 不合法")
+		return out, errors.New("operator client: setting assignment preview coordinates are invalid")
 	}
 	response, err := c.postSettingJSON(ctx, "/v1/operator/setting-assignments/preview", "", body)
 	if err != nil {
@@ -154,7 +154,7 @@ func (c *Client) PreviewSettingAssignment(ctx context.Context, body SettingAssig
 	}
 	if string(out.Scope) != body.Scope || out.ScopeID != body.ScopeID || out.Revision != body.Revision ||
 		!validSHA256Digest(out.Digest) || !validSHA256Digest(out.PreviewDigest) {
-		return out, errors.New("operator client: setting assignment preview identity 不一致")
+		return out, errors.New("operator client: setting assignment preview identity is inconsistent")
 	}
 	return out, nil
 }
@@ -164,7 +164,7 @@ func (c *Client) AssignSettingPolicy(ctx context.Context, key string, body Setti
 	if !validSettingIdempotencyKey(key) || !validSHA256Digest(body.PreviewDigest) ||
 		body.ConfirmScopeID == "" || body.Revision <= 0 ||
 		strings.TrimSpace(body.Reason) != body.Reason || body.Reason == "" {
-		return out, errors.New("operator client: setting assignment coordinates 不合法")
+		return out, errors.New("operator client: setting assignment coordinates are invalid")
 	}
 	response, err := c.postSettingJSON(ctx, "/v1/operator/setting-assignments", key, body)
 	if err != nil {
@@ -181,12 +181,12 @@ func (c *Client) AssignSettingPolicy(ctx context.Context, key string, body Setti
 		return out, errors.New("operator client: setting assignment replay evidence mismatch")
 	}
 	if fresh := response.status == http.StatusCreated; fresh == (out.Replayed || out.Unchanged) {
-		return out, fmt.Errorf("operator client: setting assignment HTTP %d 與結果不符", response.status)
+		return out, fmt.Errorf("operator client: setting assignment HTTP %d does not match result", response.status)
 	}
 	if string(out.Scope) != body.Scope || out.ScopeID != body.ScopeID ||
 		out.PolicyID != body.PolicyID || out.PolicyRev != body.Revision ||
 		out.AssignmentID == "" || !validSHA256Digest(out.Digest) {
-		return out, errors.New("operator client: setting assignment identity 不一致")
+		return out, errors.New("operator client: setting assignment identity is inconsistent")
 	}
 	return out, nil
 }
@@ -239,26 +239,26 @@ func validateSettingWriteHeaders(response operatorRawResponse) (bool, error) {
 // whose totals disagree with its rows would be read as a fleet fact.
 func validateSettingBoard(board operator.SettingBoardResult) error {
 	if err := board.Defaults.Validate(); err != nil {
-		return fmt.Errorf("operator client: setting board defaults 不合法：%w", err)
+		return fmt.Errorf("operator client: setting board defaults are invalid: %w", err)
 	}
 	counted := map[settingpolicy.Verdict]int{}
 	for _, machine := range board.Machines {
 		if machine.MachineID == "" || machine.VerdictLabel == "" {
-			return errors.New("operator client: setting board row 沒有身分")
+			return errors.New("operator client: setting board row is missing identity")
 		}
 		if (machine.Source == settingpolicy.SourceDefault) != (machine.PolicyID == "") {
-			return errors.New("operator client: setting board row 的來源與原則不一致")
+			return errors.New("operator client: setting board row source is inconsistent with policy")
 		}
 		counted[machine.Verdict]++
 	}
 	for verdict, n := range board.Counts {
 		if counted[verdict] != n {
-			return fmt.Errorf("operator client: setting board 的 %s 計數與列不符", verdict)
+			return fmt.Errorf("operator client: setting board %s count does not match rows", verdict)
 		}
 	}
 	for verdict := range counted {
 		if _, ok := board.Counts[verdict]; !ok {
-			return fmt.Errorf("operator client: setting board 沒有回報 %s 的計數", verdict)
+			return fmt.Errorf("operator client: setting board did not report count for %s", verdict)
 		}
 	}
 	return nil

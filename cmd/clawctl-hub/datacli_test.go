@@ -38,7 +38,7 @@ func TestDataDisclosureCLIPrintsEveryCategoryAndEveryClause(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(text, "類資料，涵蓋") {
+	if !strings.Contains(text, "data categories across") {
 		t.Fatalf("沒有總計那一行：\n%s", text)
 	}
 }
@@ -91,8 +91,9 @@ func TestMachineDataCLIPrintsEveryCategoryAndTheCutoff(t *testing.T) {
 	}
 	text := out.String()
 	for _, want := range []string{
-		"在 Hub 裡共", "還在報到，會繼續增加", "類別", "列數", "最舊（UTC）", "留多久",
-		"名冊", "報到", "觀測", "稽核記錄", "現在會清掉",
+		"total rows in the Hub", "still checking in, will continue to increase",
+		"CATEGORY", "ROWS", "OLDEST (UTC)", "RETENTION",
+		"名冊", "報到", "觀測", "稽核記錄", "currently pruning rows received before",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("輸出少了 %q：\n%s", want, text)
@@ -127,14 +128,14 @@ func TestMachineDataCLISaysWhetherMoreRowsAreStillComing(t *testing.T) {
 		}
 		return out.String()
 	}
-	if live := render(false); !strings.Contains(live, "還在報到，會繼續增加") {
+	if live := render(false); !strings.Contains(live, "still checking in, will continue to increase") {
 		t.Errorf("還在報到的機器：\n%s", live)
 	}
 	retired := render(true)
-	if !strings.Contains(retired, "已退役，不會再有新的一列") {
+	if !strings.Contains(retired, "retired, no new rows will be added") {
 		t.Errorf("已退役的機器：\n%s", retired)
 	}
-	if strings.Contains(retired, "還在報到") {
+	if strings.Contains(retired, "still checking in") {
 		t.Errorf("已退役的機器還說自己在報到：\n%s", retired)
 	}
 }
@@ -183,7 +184,7 @@ func TestDataCLIsRefuseWhatTheyCannotRun(t *testing.T) {
 		var out, errOut bytes.Buffer
 		if err := runMachineDataSubcommand(t.Context(), argv, &out, &errOut, deps); err == nil {
 			t.Errorf("%s：應該被擋下來", name)
-		} else if name == "沒有指定機器" && err.Error() != "machine data: --machine 必填" {
+		} else if name == "沒有指定機器" && err.Error() != "machine data: --machine is required" {
 			t.Errorf("沒有指定機器的訊息是 %q", err.Error())
 		}
 	}

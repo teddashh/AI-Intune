@@ -54,12 +54,12 @@ func TestValidateRefusesValuesTheAgentCannotRun(t *testing.T) {
 		mutate func(*Settings)
 		want   string
 	}{
-		"心跳太快":        {func(s *Settings) { s.CheckinIntervalSeconds = 5 }, "30–3600"},
-		"心跳太慢":        {func(s *Settings) { s.CheckinIntervalSeconds = 99999 }, "30–3600"},
-		"觀測太快":        {func(s *Settings) { s.ObservationIntervalSeconds = 10 }, "60–86400"},
-		"觀測太慢":        {func(s *Settings) { s.ObservationIntervalSeconds = 999999 }, "60–86400"},
-		"觀測比心跳密":      {func(s *Settings) { s.CheckinIntervalSeconds, s.ObservationIntervalSeconds = 600, 120 }, "不可小於"},
-		"schema 版本不對": {func(s *Settings) { s.SchemaVersion = 99 }, "只認得"},
+		"心跳太快":        {func(s *Settings) { s.CheckinIntervalSeconds = 5 }, "30-3600"},
+		"心跳太慢":        {func(s *Settings) { s.CheckinIntervalSeconds = 99999 }, "30-3600"},
+		"觀測太快":        {func(s *Settings) { s.ObservationIntervalSeconds = 10 }, "60-86400"},
+		"觀測太慢":        {func(s *Settings) { s.ObservationIntervalSeconds = 999999 }, "60-86400"},
+		"觀測比心跳密":      {func(s *Settings) { s.CheckinIntervalSeconds, s.ObservationIntervalSeconds = 600, 120 }, "must not be less than"},
+		"schema 版本不對": {func(s *Settings) { s.SchemaVersion = 99 }, "only recognizes"},
 	} {
 		s := valid()
 		tc.mutate(&s)

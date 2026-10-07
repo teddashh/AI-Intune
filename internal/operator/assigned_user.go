@@ -109,7 +109,7 @@ func (s *Service) ChangeMachineAssignedUser(ctx context.Context, req MachineAssi
 	}
 	if !alreadyAudited {
 		if auditErr := s.store.RecordAudit(entry); auditErr != nil {
-			log.Printf("operator audit 寫入失敗 action=%s subject=%s: %v",
+			log.Printf("operator audit write failed action=%s subject=%s: %v",
 				entry.Action, entry.Subject, auditErr)
 		}
 	}

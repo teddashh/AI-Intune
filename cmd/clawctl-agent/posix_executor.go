@@ -15,7 +15,7 @@ type unsupportedPlatformExecutor struct {
 }
 
 func (e unsupportedPlatformExecutor) Run(_ context.Context, _ model.JobResponse) ([]model.JobVerificationRequest, error) {
-	return nil, fmt.Errorf("%w：%s 工作單不能在 %s 執行", errUnsupported, e.kind, e.goos)
+	return nil, fmt.Errorf("%w: %s job cannot run on %s", errUnsupported, e.kind, e.goos)
 }
 
 func executorsForGOOS(goos, hubURL, token string, now func() time.Time) (openclaw, nodeRuntime, hermes, claude, codex, grok, batServer, antigravity executor) {

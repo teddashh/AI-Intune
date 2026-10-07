@@ -28,7 +28,7 @@ func runArtifactReadCommandWithDeps(ctx context.Context, argv []string, out, err
 	deps machineCommandDeps,
 ) error {
 	if len(argv) == 0 || (argv[0] != "list" && argv[0] != "show") {
-		return errors.New("artifact read: 必須指定 list 或 show")
+		return errors.New("artifact read: must specify list or show")
 	}
 	action := argv[0]
 	args := argv[1:]
@@ -45,25 +45,25 @@ func runArtifactReadCommandWithDeps(ctx context.Context, argv []string, out, err
 	fs := flag.NewFlagSet("artifact "+action, flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub artifact list [--status STATUS] [--version VERSION] [--limit N] [--cursor CURSOR] [--json] [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "      clawctl-hub artifact show [--json] [--hub-url URL | --db PATH] <artifact-id>")
-		fmt.Fprintln(errOut, "  list 驗證 metadata；show 驗證 SHA-256。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub artifact list [--status STATUS] [--version VERSION] [--limit N] [--cursor CURSOR] [--json] [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "       clawctl-hub artifact show [--json] [--hub-url URL | --db PATH] <artifact-id>")
+		fmt.Fprintln(errOut, "  list verifies metadata; show verifies SHA-256.")
 		fs.PrintDefaults()
 	}
-	hubURL := fs.String("hub-url", "", "HTTP operator API base URL（省略時自動發現）")
-	dbPath := fs.String("db", "", "stopped-service direct DB break-glass 的既有 SQLite 檔位置")
-	status := fs.String("status", "", "只看 available_unverified、unavailable 或 invalid")
-	version := fs.String("version", "", "只看 exact artifact version")
-	limit := fs.Int("limit", operator.DefaultArtifactReadLimit, "每頁最多幾個（1..100）")
-	cursor := fs.String("cursor", "", "上一頁回傳的 opaque next cursor")
-	jsonOutput := fs.Bool("json", false, "輸出 stable operator JSON DTO")
+	hubURL := fs.String("hub-url", "", "HTTP operator API base URL (auto-discovered when omitted)")
+	dbPath := fs.String("db", "", "path to existing SQLite file for stopped-service direct DB break-glass")
+	status := fs.String("status", "", "filter by available_unverified, unavailable, or invalid")
+	version := fs.String("version", "", "filter by exact artifact version")
+	limit := fs.Int("limit", operator.DefaultArtifactReadLimit, "maximum items per page (1..100)")
+	cursor := fs.String("cursor", "", "opaque next cursor returned from previous page")
+	jsonOutput := fs.Bool("json", false, "output stable operator JSON DTO")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	seen := make(map[string]bool)
 	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
 	if seen["hub-url"] && seen["db"] {
-		return errors.New("artifact read: --hub-url（HTTP mode）與 --db（direct mode）不可同時明示")
+		return errors.New("artifact read: --hub-url (HTTP mode) and --db (direct mode) cannot be specified together")
 	}
 	if seen["hub-url"] {
 		if err := validateArtifactReadCLIValue("hub-url", *hubURL, 4096); err != nil {
@@ -79,19 +79,19 @@ func runArtifactReadCommandWithDeps(ctx context.Context, argv []string, out, err
 	if action == "show" {
 		for _, name := range []string{"status", "version", "limit", "cursor"} {
 			if seen[name] {
-				return fmt.Errorf("artifact show: 不接受 --%s", name)
+				return fmt.Errorf("artifact show: does not accept --%s", name)
 			}
 		}
 		if artifactID == "" {
 			if fs.NArg() != 1 {
-				return errors.New("artifact show: 必須提供且只提供一個 canonical artifact-id")
+				return errors.New("artifact show: exactly one canonical artifact-id must be provided")
 			}
 			artifactID = fs.Arg(0)
 		} else if fs.NArg() != 0 {
-			return errors.New("artifact show: 只接受一個 canonical artifact-id")
+			return errors.New("artifact show: only one canonical artifact-id is accepted")
 		}
 		if !validArtifactReadCLIID(artifactID) {
-			return errors.New("artifact show: artifact-id 必須是 64 個小寫 hex，或 invalid- 加 64 個小寫 hex")
+			return errors.New("artifact show: artifact-id must be 64 lowercase hex characters, or invalid- followed by 64 lowercase hex characters")
 		}
 		if seen["db"] {
 			return runArtifactShowDirect(ctx, artifactID, *dbPath, *jsonOutput, out, deps)
@@ -102,30 +102,30 @@ func runArtifactReadCommandWithDeps(ctx context.Context, argv []string, out, err
 		}
 		result, err := client.Artifact(ctx, artifactID)
 		if err != nil {
-			return fmt.Errorf("讀取 artifact detail 失敗（HTTP operator API）：%w", err)
+			return fmt.Errorf("failed to read artifact detail (HTTP operator API): %w", err)
 		}
 		return writeArtifactDetail(out, result, *jsonOutput, "HTTP operator API")
 	}
 
 	if fs.NArg() != 0 {
-		return fmt.Errorf("artifact list: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("artifact list: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	readStatus := operator.ArtifactReadStatus(*status)
 	if seen["status"] {
 		switch readStatus {
 		case operator.ArtifactAvailableUnverified, operator.ArtifactUnavailable, operator.ArtifactInvalid:
 		default:
-			return errors.New("artifact list: --status 只接受 available_unverified、unavailable 或 invalid")
+			return errors.New("artifact list: --status only accepts available_unverified, unavailable, or invalid")
 		}
 	}
 	if seen["version"] {
 		if err := validateArtifactReadCLIValue("version", *version, 128); err != nil ||
 			*version == "." || *version == ".." || strings.Contains(*version, "/") {
-			return errors.New("artifact list: --version 不可為空、含首尾空白、控制字元、dot segment 或斜線，且長度不可超過 128 bytes")
+			return errors.New("artifact list: --version cannot be empty, contain leading or trailing whitespace, control characters, dot segments, or slashes, and must not exceed 128 bytes")
 		}
 	}
 	if *limit < 1 || *limit > operator.MaxArtifactReadLimit {
-		return fmt.Errorf("artifact list: --limit 必須介於 1 與 %d", operator.MaxArtifactReadLimit)
+		return fmt.Errorf("artifact list: --limit must be between 1 and %d", operator.MaxArtifactReadLimit)
 	}
 	if seen["cursor"] {
 		if err := validateArtifactReadCLIValue("cursor", *cursor, 2048); err != nil {
@@ -144,7 +144,7 @@ func runArtifactReadCommandWithDeps(ctx context.Context, argv []string, out, err
 	}
 	result, err := client.Artifacts(ctx, request)
 	if err != nil {
-		return fmt.Errorf("讀取 artifact list 失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read artifact list (HTTP operator API): %w", err)
 	}
 	return writeArtifactList(out, result, *jsonOutput, "HTTP operator API")
 }
@@ -171,7 +171,7 @@ func rejectDuplicateArtifactReadFlags(args []string) error {
 			continue
 		}
 		if seen[name] {
-			return fmt.Errorf("artifact read: --%s 不可重複", name)
+			return fmt.Errorf("artifact read: --%s cannot be repeated", name)
 		}
 		seen[name] = true
 		consumeValue = needsNext && !hasEquals
@@ -181,11 +181,11 @@ func rejectDuplicateArtifactReadFlags(args []string) error {
 
 func validateArtifactReadCLIValue(name, value string, maxBytes int) error {
 	if value == "" || value != strings.TrimSpace(value) || len(value) > maxBytes || !utf8.ValidString(value) {
-		return fmt.Errorf("artifact read: --%s 不可為空、過長、非 UTF-8 或含首尾空白", name)
+		return fmt.Errorf("artifact read: --%s cannot be empty, too long, non-UTF-8, or contain leading or trailing whitespace", name)
 	}
 	for _, char := range value {
 		if unicode.IsControl(char) || unicode.Is(unicode.Cf, char) {
-			return fmt.Errorf("artifact read: --%s 不可含控制或隱形格式字元", name)
+			return fmt.Errorf("artifact read: --%s cannot contain control or invisible formatting characters", name)
 		}
 	}
 	return nil
@@ -202,27 +202,27 @@ func validArtifactReadCLIID(value string) bool {
 func artifactReadHTTPClient(explicitURL string, explicit bool, deps machineCommandDeps) (*operatorclient.Client, error) {
 	if explicit {
 		if deps.newOperatorClient == nil {
-			return nil, errors.New("artifact read: operator HTTP client 未初始化")
+			return nil, errors.New("artifact read: operator HTTP client not initialized")
 		}
 		client, err := deps.newOperatorClient(explicitURL)
 		if err != nil {
-			return nil, fmt.Errorf("artifact read: 建立 HTTP operator client 失敗：%w", err)
+			return nil, fmt.Errorf("artifact read: failed to create HTTP operator client: %w", err)
 		}
 		return client, nil
 	}
 	if deps.discoverHubURL == nil {
-		return nil, errors.New("artifact read: Hub discovery 未初始化")
+		return nil, errors.New("artifact read: Hub discovery not initialized")
 	}
 	discovered, err := deps.discoverHubURL()
 	if err != nil {
-		return nil, fmt.Errorf("artifact read: 無法發現 Hub：%w", err)
+		return nil, fmt.Errorf("artifact read: unable to discover Hub: %w", err)
 	}
 	if deps.newOperatorClient == nil {
-		return nil, errors.New("artifact read: operator HTTP client 未初始化")
+		return nil, errors.New("artifact read: operator HTTP client not initialized")
 	}
 	client, err := deps.newOperatorClient(discovered)
 	if err != nil {
-		return nil, fmt.Errorf("artifact read: 建立 discovered HTTP operator client 失敗：%w", err)
+		return nil, fmt.Errorf("artifact read: failed to create discovered HTTP operator client: %w", err)
 	}
 	return client, nil
 }
@@ -233,7 +233,7 @@ func runArtifactListDirect(ctx context.Context, request operator.ArtifactListReq
 	return withDirectOperatorStore(ctx, "artifact list", dbPath, deps, func(st *store.Store) error {
 		result, err := operator.NewWithArtifacts(st, artifactsDirFor(dbPath)).ListArtifacts(request, time.Now().UTC())
 		if err != nil {
-			return fmt.Errorf("讀取 artifact list 失敗（direct DB operator service）：%w", err)
+			return fmt.Errorf("failed to read artifact list (direct DB operator service): %w", err)
 		}
 		return writeArtifactList(out, result, jsonOutput, "direct DB operator service")
 	})
@@ -245,7 +245,7 @@ func runArtifactShowDirect(ctx context.Context, artifactID, dbPath string, jsonO
 	return withDirectOperatorStore(ctx, "artifact show", dbPath, deps, func(st *store.Store) error {
 		result, err := operator.NewWithArtifacts(st, artifactsDirFor(dbPath)).ArtifactDetail(ctx, artifactID, time.Now().UTC())
 		if err != nil {
-			return fmt.Errorf("讀取 artifact detail 失敗（direct DB operator service）：%w", err)
+			return fmt.Errorf("failed to read artifact detail (direct DB operator service): %w", err)
 		}
 		return writeArtifactDetail(out, result, jsonOutput, "direct DB operator service")
 	})
@@ -255,12 +255,12 @@ func writeArtifactList(out io.Writer, result operator.ArtifactListResult, jsonOu
 	if jsonOutput {
 		return writeArtifactReadJSON(out, result)
 	}
-	if _, err := fmt.Fprintf(out, "%s；%s consistency；Hub 評估時間 %s；符合 %d 個。\n",
+	if _, err := fmt.Fprintf(out, "%s; %s consistency; Hub evaluation time %s; %d matched.\n",
 		source, terminalSafe(result.Consistency), result.EvaluatedAt.UTC().Format(time.RFC3339Nano), result.Total); err != nil {
 		return err
 	}
 	if len(result.Items) == 0 {
-		if _, err := fmt.Fprintln(out, "沒有符合 filter 的 artifact。"); err != nil {
+		if _, err := fmt.Fprintln(out, "no artifacts matched the filter"); err != nil {
 			return err
 		}
 	} else {
@@ -295,7 +295,7 @@ func writeArtifactDetail(out io.Writer, result operator.ArtifactDetailResult, js
 	}
 	item := result.Item
 	if _, err := fmt.Fprintf(out,
-		"%s；%s consistency；Hub 評估時間 %s。\nartifact_id: %s\nstatus: %s\nname: %s\nversion: %s\nsha256: %s\ndigest: %s\nsize_bytes: %s\nengines_node: %s\nfetched_at: %s\nverified_at: %s\ndeployment references: %d total / %d active\nissue: %s\n",
+		"%s; %s consistency; Hub evaluation time %s.\nartifact_id: %s\nstatus: %s\nname: %s\nversion: %s\nsha256: %s\ndigest: %s\nsize_bytes: %s\nengines_node: %s\nfetched_at: %s\nverified_at: %s\ndeployment references: %d total / %d active\nissue: %s\n",
 		source, terminalSafe(result.Consistency), result.EvaluatedAt.UTC().Format(time.RFC3339Nano),
 		terminalSafe(item.ArtifactID), terminalSafe(string(item.Status)), artifactReadText(item.Name),
 		artifactReadText(item.Version), artifactReadText(item.SHA256), artifactReadText(item.Digest),

@@ -354,7 +354,7 @@ func TestCurrentExecutableMustBeTheManagedBinaryInode(t *testing.T) {
 	if err := os.WriteFile(copyPath, raw, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyCurrentExecutableMatches(copyPath); err == nil || !strings.Contains(err.Error(), "同一個 inode") {
+	if err := verifyCurrentExecutableMatches(copyPath); err == nil || !strings.Contains(err.Error(), "same inode") {
 		t.Fatalf("copied executable accepted: %v", err)
 	}
 }
@@ -443,7 +443,7 @@ func TestVerifyManagedHubCgroupEmptyAtDistinguishesRemovedAndMalformedCgroups(t 
 	if err := os.MkdirAll(cgroupPath, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyManagedHubCgroupEmptyAt(root, controlGroup); err == nil || !strings.Contains(err.Error(), "缺少 cgroup.events") {
+	if err := verifyManagedHubCgroupEmptyAt(root, controlGroup); err == nil || !strings.Contains(err.Error(), "missing cgroup.events") {
 		t.Fatalf("existing cgroup without events accepted: %v", err)
 	}
 

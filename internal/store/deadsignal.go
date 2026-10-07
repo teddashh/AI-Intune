@@ -111,7 +111,7 @@ func (s *Store) DeadSignals(now time.Time) ([]DeadSignal, error) {
 		// 一台時鐘歪掉的機器，它的 measured_at 可能整批落在窗外，
 		// 於是那台機器的證據管線死掉時剛好不會被檢查到。
 		if !have["received_at"] {
-			return nil, fmt.Errorf("store: dead signal %s 沒有 received_at 欄", c.table)
+			return nil, fmt.Errorf("store: dead signal %s has no received_at column", c.table)
 		}
 
 		rows, err := s.rdb.Query(fmt.Sprintf(`

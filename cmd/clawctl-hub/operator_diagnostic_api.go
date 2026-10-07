@@ -96,7 +96,7 @@ func writeOperatorDiagnosticNoopError(w http.ResponseWriter, err error, operatio
 		w.Header().Set("Idempotency-Replayed", "true")
 	}
 	if status == http.StatusInternalServerError {
-		log.Printf("operator diagnostic noop %s 失敗 machine=%q: %v", operation, machineID, err)
+		log.Printf("operator diagnostic noop %s failed machine=%q: %v", operation, machineID, err)
 	}
 	writeErr(w, status, code, detail)
 }

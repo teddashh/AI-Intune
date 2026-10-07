@@ -136,12 +136,12 @@ func (c *Client) SetEnrollmentLimit(ctx context.Context, idempotencyKey string,
 func validateEnrollmentLimitIntent(set bool, maxMachines int) error {
 	if !set {
 		if maxMachines != 0 {
-			return errors.New("operator client: 取消上限時不可以帶台數")
+			return errors.New("operator client: machine count cannot be provided when clearing limit")
 		}
 		return nil
 	}
 	if maxMachines < 0 || maxMachines > operator.MaxEnrollmentLimitMachines {
-		return fmt.Errorf("operator client: 上限必須在 0 到 %d 之間", operator.MaxEnrollmentLimitMachines)
+		return fmt.Errorf("operator client: limit must be between 0 and %d", operator.MaxEnrollmentLimitMachines)
 	}
 	return nil
 }
@@ -151,20 +151,20 @@ func validateEnrollmentLimitApplyRequest(idempotencyKey string, body EnrollmentL
 		return err
 	}
 	if idempotencyKey == "" || validateDeploymentClientText("Idempotency-Key", idempotencyKey, 200, false) != nil {
-		return errors.New("operator client: Idempotency-Key 不可省略、含首尾空白/控制字元或超過 200 bytes")
+		return errors.New("operator client: Idempotency-Key is required, cannot contain leading/trailing whitespace or control characters, and cannot exceed 200 bytes")
 	}
 	if body.PreviewDigest == "" {
-		return errors.New("operator client: preview_digest 不可省略")
+		return errors.New("operator client: preview_digest is required")
 	}
 	if body.ExpectedRevision < 0 {
-		return errors.New("operator client: expected_revision 不可為負數")
+		return errors.New("operator client: expected_revision cannot be negative")
 	}
 	// ⚠ 首尾空白要自己擋。validateDeploymentClientText 不看它，而 Hub 收下之後會
 	// TrimSpace——結果是 Web 與 CLI 拒絕的同一份理由，走這條路會被默默改寫。稽核上
 	// 留下來的理由必須就是操作的人打的那一份。
 	if strings.TrimSpace(body.Reason) != body.Reason ||
 		validateDeploymentClientText("reason", body.Reason, 500, false) != nil {
-		return errors.New("operator client: reason 不可省略、含首尾空白/控制字元或超過 500 bytes")
+		return errors.New("operator client: reason is required, cannot contain leading/trailing whitespace or control characters, and cannot exceed 500 bytes")
 	}
 	return nil
 }
@@ -176,42 +176,42 @@ func validateEnrollmentLimitApplyRequest(idempotencyKey string, body EnrollmentL
 // 永遠不會成功的動作，而畫面上沒有任何地方寫著為什麼。
 func validateEnrollmentLimitState(state store.EnrollmentLimitState) error {
 	if state.InDenominator < 0 || state.Retired < 0 || state.Headroom < 0 || state.Revision < 0 {
-		return errors.New("operator client: enrollment limit 有負數")
+		return errors.New("operator client: enrollment limit has negative values")
 	}
 	if !state.Set {
 		// 沒有上限的時候台數沒有意義，而 at_limit 一定是 false：這個 Hub 收得下
 		// 下一台。一份帶著舊台數的「沒有上限」會在畫面上讀成「上限就是那個數字」。
 		if state.MaxMachines != 0 || state.AtLimit || state.Headroom != 0 {
-			return errors.New("operator client: 沒有設上限，卻帶著上限的內容")
+			return errors.New("operator client: no limit configured, but carries limit details")
 		}
 		// revision 0 是「從來沒設定過」，那一種沒有人改過，也就沒有理由可以講。
 		if state.Revision == 0 && (state.Reason != "" || state.UpdatedBy != "" || !state.UpdatedAt.IsZero()) {
-			return errors.New("operator client: 從來沒設定過的上限，卻說得出誰改的")
+			return errors.New("operator client: limit was never configured, but specifies who changed it")
 		}
 		if state.Revision > 0 && (state.UpdatedBy == "" || state.UpdatedAt.IsZero()) {
-			return errors.New("operator client: 上限被改過，卻說不出誰改的")
+			return errors.New("operator client: limit was modified, but does not specify who changed it")
 		}
 		if state.Revision > 0 && state.UpdatedAt.Location() != time.UTC {
-			return errors.New("operator client: enrollment limit updated_at 不一致")
+			return errors.New("operator client: enrollment limit updated_at is inconsistent")
 		}
 		return nil
 	}
 	if state.Revision < 1 {
-		return errors.New("operator client: 設了上限卻沒有 revision")
+		return errors.New("operator client: limit is configured but lacks revision")
 	}
 	if state.UpdatedAt.IsZero() || state.UpdatedAt.Location() != time.UTC {
-		return errors.New("operator client: enrollment limit updated_at 不一致")
+		return errors.New("operator client: enrollment limit updated_at is inconsistent")
 	}
 	headroom := state.MaxMachines - state.InDenominator
 	if headroom < 0 {
 		headroom = 0
 	}
 	if state.Headroom != headroom {
-		return fmt.Errorf("operator client: 上限 %d 台、名冊上 %d 台，還可以納管的應該是 %d 台，它說 %d 台",
+		return fmt.Errorf("operator client: limit is %d machines, enrolled %d machines, headroom should be %d machines, reported %d machines",
 			state.MaxMachines, state.InDenominator, headroom, state.Headroom)
 	}
 	if state.AtLimit != (state.InDenominator >= state.MaxMachines) {
-		return fmt.Errorf("operator client: 上限 %d 台、名冊上 %d 台，at_limit 說 %t",
+		return fmt.Errorf("operator client: limit is %d machines, enrolled %d machines, at_limit reports %t",
 			state.MaxMachines, state.InDenominator, state.AtLimit)
 	}
 	return nil
@@ -220,20 +220,20 @@ func validateEnrollmentLimitState(state store.EnrollmentLimitState) error {
 func validateEnrollmentLimitResult(result operator.EnrollmentLimitResult) error {
 	if result.SchemaVersion != operator.EnrollmentLimitSchemaVersion ||
 		result.GeneratedAt.IsZero() || result.GeneratedAt.Location() != time.UTC {
-		return errors.New("operator client: enrollment limit identity 不一致")
+		return errors.New("operator client: enrollment limit identity is inconsistent")
 	}
 	if err := validateEnrollmentLimitState(result.State); err != nil {
 		return err
 	}
 	if result.Headline == "" {
-		return errors.New("operator client: enrollment limit 沒有說出它現在是什麼狀態")
+		return errors.New("operator client: enrollment limit does not indicate current state")
 	}
 	// ⚠ 開不了票卻沒說下一步做什麼，等於把人留在一個沒有出口的畫面上。
 	if result.State.Set && result.State.AtLimit && result.NextStep == "" {
-		return errors.New("operator client: 已達上限卻沒有下一步")
+		return errors.New("operator client: limit reached but lacks next step")
 	}
 	if (!result.State.Set || !result.State.AtLimit) && result.NextStep != "" {
-		return errors.New("operator client: 沒有被擋住卻叫人做事")
+		return errors.New("operator client: not blocked but suggests next action")
 	}
 	return nil
 }
@@ -242,23 +242,23 @@ func validateEnrollmentLimitPreview(preview operator.EnrollmentLimitPreview,
 	request operator.EnrollmentLimitPreviewRequest,
 ) error {
 	if preview.Set != request.Set || (request.Set && preview.MaxMachines != request.MaxMachines) {
-		return errors.New("operator client: enrollment limit preview 回的不是這次問的那個上限")
+		return errors.New("operator client: enrollment limit preview returned does not match requested limit")
 	}
 	if err := validateEnrollmentLimitState(preview.Current); err != nil {
 		return err
 	}
 	if preview.PreviewDigest == "" || preview.Headline == "" ||
 		preview.PreviewedAt.IsZero() || preview.PreviewedAt.Location() != time.UTC {
-		return errors.New("operator client: enrollment limit preview identity 不一致")
+		return errors.New("operator client: enrollment limit preview identity is inconsistent")
 	}
 	if preview.ExpectedRevision != preview.Current.Revision {
-		return fmt.Errorf("operator client: preview 帶回去的版本 %d，它看到的是 %d",
+		return fmt.Errorf("operator client: preview expected revision %d, server saw %d",
 			preview.ExpectedRevision, preview.Current.Revision)
 	}
 	// ⚠ 「改完就已經超過」要自己再判一次。它是確認頁上唯一一句會讓人改主意的話：
 	// 這個上限不會退役任何一台，但下一張票就開不出來了。
 	if alreadyOver := preview.Set && preview.Current.InDenominator > preview.MaxMachines; preview.AlreadyOver != alreadyOver {
-		return fmt.Errorf("operator client: 上限要改成 %d 台、名冊上 %d 台，already_over 說 %t",
+		return fmt.Errorf("operator client: limit changing to %d machines, enrolled %d machines, already_over reports %t",
 			preview.MaxMachines, preview.Current.InDenominator, preview.AlreadyOver)
 	}
 	return nil
@@ -276,10 +276,10 @@ func validateEnrollmentLimitApplyResult(result store.OperatorEnrollmentLimitResu
 		return nil
 	}
 	if result.State.Set != request.Set || (request.Set && result.State.MaxMachines != request.MaxMachines) {
-		return errors.New("operator client: 套用後的上限不是這次送出的那一個")
+		return errors.New("operator client: applied limit does not match submitted limit")
 	}
 	if result.State.Revision <= request.ExpectedRevision {
-		return fmt.Errorf("operator client: 送出時看到 revision %d，套用後是 %d",
+		return fmt.Errorf("operator client: submitted at revision %d, applied at revision %d",
 			request.ExpectedRevision, result.State.Revision)
 	}
 	return nil

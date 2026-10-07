@@ -36,29 +36,29 @@ func runEnrollmentLimitCommandWithDeps(ctx context.Context, argv []string, out, 
 	fs := flag.NewFlagSet("enrollment-limit", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub enrollment-limit [--json] [--hub-url URL]")
-		fmt.Fprintln(errOut, "      clawctl-hub enrollment-limit --set N --reason R [--preview] [--json]")
-		fmt.Fprintln(errOut, "      clawctl-hub enrollment-limit --clear --reason R [--preview] [--json]")
-		fmt.Fprintln(errOut, "  上限算的是名冊上沒有退役的台數，也就是註冊報告上的分母。")
-		fmt.Fprintln(errOut, "  ambiguous response retry：重用 --idempotency-key、--expected-revision、--preview-digest。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub enrollment-limit [--json] [--hub-url URL]")
+		fmt.Fprintln(errOut, "      clawctl-hub enrollment-limit --set N --reason REASON [--preview] [--json]")
+		fmt.Fprintln(errOut, "      clawctl-hub enrollment-limit --clear --reason REASON [--preview] [--json]")
+		fmt.Fprintln(errOut, "  The limit counts non-retired machines on the roster, which is the denominator in enrollment report.")
+		fmt.Fprintln(errOut, "  ambiguous response retry: reuse --idempotency-key, --expected-revision, and --preview-digest.")
 		fs.PrintDefaults()
 	}
 	var hubURL auditStringFlag
 	var jsonOutput auditBoolFlag
-	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL（省略時自動發現）")
-	fs.Var(&jsonOutput, "json", "輸出 stable operator JSON DTO")
-	set := fs.String("set", "", "把上限設成幾台（0 代表誰都不准再納管）")
-	clear := fs.Bool("clear", false, "取消上限")
-	reason := fs.String("reason", "", "為什麼改上限")
-	previewOnly := fs.Bool("preview", false, "只顯示影響，不套用")
-	key := fs.String("idempotency-key", "", "ambiguous response retry 使用原 request key")
-	digest := fs.String("preview-digest", "", "ambiguous response retry 使用原 preview digest")
-	revision := fs.Int64("expected-revision", -1, "ambiguous response retry 使用原 expected revision")
+	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL (auto-discovered if omitted)")
+	fs.Var(&jsonOutput, "json", "output stable operator JSON DTO")
+	set := fs.String("set", "", "set limit to N machines (0 prohibits further enrollments)")
+	clear := fs.Bool("clear", false, "clear the limit")
+	reason := fs.String("reason", "", "reason for changing the limit")
+	previewOnly := fs.Bool("preview", false, "display impact only without applying")
+	key := fs.String("idempotency-key", "", "ambiguous response retry: reuse original request key")
+	digest := fs.String("preview-digest", "", "ambiguous response retry: reuse original preview digest")
+	revision := fs.Int64("expected-revision", -1, "ambiguous response retry: reuse original expected revision")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("enrollment-limit: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("enrollment-limit: positional arguments not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	seen := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
@@ -73,12 +73,12 @@ func runEnrollmentLimitCommandWithDeps(ctx context.Context, argv []string, out, 
 	}
 	if !seen["set"] && !*clear {
 		if *previewOnly || seen["reason"] {
-			return errors.New("enrollment-limit: --preview 與 --reason 只能配 --set 或 --clear 使用")
+			return errors.New("enrollment-limit: --preview and --reason can only be used with --set or --clear")
 		}
 		return writeEnrollmentLimitRead(ctx, client, out, jsonOutput.value)
 	}
 	if seen["set"] && *clear {
-		return errors.New("enrollment-limit: --set 與 --clear 不可同時使用")
+		return errors.New("enrollment-limit: --set and --clear cannot be used together")
 	}
 	maxMachines := 0
 	if seen["set"] {
@@ -87,7 +87,7 @@ func runEnrollmentLimitCommandWithDeps(ctx context.Context, argv []string, out, 
 		value, convErr := strconv.Atoi(*set)
 		if convErr != nil || strconv.Itoa(value) != *set ||
 			value < 0 || value > operator.MaxEnrollmentLimitMachines {
-			return fmt.Errorf("enrollment-limit: --set 必須是 0 到 %d 之間的整數",
+			return fmt.Errorf("enrollment-limit: --set must be an integer between 0 and %d",
 				operator.MaxEnrollmentLimitMachines)
 		}
 		maxMachines = value
@@ -123,7 +123,7 @@ func writeEnrollmentLimitRead(ctx context.Context, client *operatorclient.Client
 ) error {
 	page, err := client.EnrollmentLimit(ctx)
 	if err != nil {
-		return fmt.Errorf("讀取註冊上限失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read enrollment limit (HTTP operator API): %w", err)
 	}
 	if asJSON {
 		return writeOperatorJSON(out, page)
@@ -141,13 +141,13 @@ func writeEnrollmentLimitPage(out io.Writer, page operator.EnrollmentLimitResult
 		}
 	}
 	if page.State.Revision > 0 {
-		if _, err := fmt.Fprintf(out, "上次是 %s 由 %s 改的：%s\n",
+		if _, err := fmt.Fprintf(out, "Last updated %s by %s: %s\n",
 			page.State.UpdatedAt.Local().Format("2006-01-02 15:04"),
 			page.State.UpdatedBy, page.State.Reason); err != nil {
 			return err
 		}
 	}
-	_, err := fmt.Fprintln(out, "上限算的是名冊上沒有退役的台數。撤票、票過期都不會讓出一個位子，退役才會。")
+	_, err := fmt.Fprintln(out, "The limit counts the number of non-retired machines on the roster. Revoking a token or token expiration will not free up a slot; only retirement does.")
 	return err
 }
 
@@ -155,13 +155,13 @@ func applyEnrollmentLimitCLI(ctx context.Context, client *operatorclient.Client,
 	req enrollmentLimitCLIApply,
 ) error {
 	if req.PreviewOnly && req.HasRetry {
-		return errors.New("enrollment-limit: --preview 不接受 apply retry coordinates")
+		return errors.New("enrollment-limit: --preview does not accept apply retry coordinates")
 	}
 	if req.HasRetry {
 		for name, present := range req.RetryFlags {
 			if !present {
-				return fmt.Errorf("enrollment-limit: retry 必須同時提供原 --idempotency-key、"+
-					"--expected-revision 與 --preview-digest（缺 --%s）", name)
+				return fmt.Errorf("enrollment-limit: retry requires original --idempotency-key, "+
+					"--expected-revision, and --preview-digest together (missing --%s)", name)
 			}
 		}
 	}
@@ -169,7 +169,7 @@ func applyEnrollmentLimitCLI(ctx context.Context, client *operatorclient.Client,
 		Set: req.Set, MaxMachines: req.MaxMachines,
 	})
 	if err != nil {
-		return fmt.Errorf("預覽註冊上限失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to preview enrollment limit (HTTP operator API): %w", err)
 	}
 	if req.PreviewOnly {
 		if req.JSON {
@@ -182,7 +182,7 @@ func applyEnrollmentLimitCLI(ctx context.Context, client *operatorclient.Client,
 	if !req.HasRetry {
 		key, err = operator.NewIdempotencyKey("cli-enrollment-limit")
 		if err != nil {
-			return fmt.Errorf("enrollment-limit: 無法建立 request key：%w", err)
+			return fmt.Errorf("enrollment-limit: failed to create request key: %w", err)
 		}
 		digest, revision = preview.PreviewDigest, preview.ExpectedRevision
 	}
@@ -191,15 +191,15 @@ func applyEnrollmentLimitCLI(ctx context.Context, client *operatorclient.Client,
 		PreviewDigest: digest, Reason: req.Reason,
 	})
 	if err != nil {
-		return fmt.Errorf("更改註冊上限失敗（HTTP operator API）：%w\n"+
-			"retry 時重用：--idempotency-key %s --expected-revision %d --preview-digest %s",
+		return fmt.Errorf("failed to change enrollment limit (HTTP operator API): %w\n"+
+			"reuse on retry: --idempotency-key %s --expected-revision %d --preview-digest %s",
 			err, key, revision, digest)
 	}
 	if req.JSON {
 		return writeOperatorJSON(out, result)
 	}
 	if result.Replayed {
-		if _, err := fmt.Fprintln(out, "已回放原判決；上限沒有再改一次。"); err != nil {
+		if _, err := fmt.Fprintln(out, "Original verdict replayed; limit was not changed again."); err != nil {
 			return err
 		}
 	}
@@ -211,6 +211,6 @@ func writeEnrollmentLimitPreview(out io.Writer, preview operator.EnrollmentLimit
 	if _, err := fmt.Fprintln(out, preview.Headline); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(out, "沒有套用。要套用就拿掉 --preview。\n")
+	_, err := fmt.Fprintf(out, "Not applied. To apply, remove --preview.\n")
 	return err
 }

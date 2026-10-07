@@ -37,20 +37,20 @@ func runReportListCommandWithDeps(ctx context.Context, argv []string, out, errOu
 	fs := flag.NewFlagSet("report list", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub report list [--json] [--hub-url URL]")
-		fmt.Fprintln(errOut, "  列出這個 Hub 做得出的報告：各自回答什麼、範圍多大、看得到多遠、能不能整份匯出。")
-		fmt.Fprintln(errOut, "  discovery：--hub-url、CLAWCTL_HUB_URL、operator.json。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub report list [--json] [--hub-url URL]")
+		fmt.Fprintln(errOut, "  List reports produced by this Hub: what each answers, scope, horizon, and whether full export is available.")
+		fmt.Fprintln(errOut, "  discovery: --hub-url, CLAWCTL_HUB_URL, operator.json.")
 		fs.PrintDefaults()
 	}
 	var hubURL auditStringFlag
 	var jsonOutput auditBoolFlag
-	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL（省略時自動發現）")
-	fs.Var(&jsonOutput, "json", "輸出 stable operator JSON DTO")
+	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL (auto-discovered when omitted)")
+	fs.Var(&jsonOutput, "json", "output stable operator JSON DTO")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("report list: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("report list: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	if hubURL.set {
 		if err := validateReportChangeCLIText("hub-url", hubURL.value, 2048); err != nil {
@@ -63,7 +63,7 @@ func runReportListCommandWithDeps(ctx context.Context, argv []string, out, errOu
 	}
 	index, err := client.Reports(ctx)
 	if err != nil {
-		return fmt.Errorf("讀取報告清單失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read report list (HTTP operator API): %w", err)
 	}
 	if jsonOutput.value {
 		return writeOperatorJSON(out, index)
@@ -72,12 +72,12 @@ func runReportListCommandWithDeps(ctx context.Context, argv []string, out, errOu
 }
 
 func writeReportIndex(out io.Writer, index operator.ReportIndex) error {
-	if _, err := fmt.Fprintf(out, "%d 份報告，其中 %d 份匯得出整份。\n",
+	if _, err := fmt.Fprintf(out, "%d reports, %d of which can be exported in full.\n",
 		index.Total, index.Exportable); err != nil {
 		return err
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(table, "報告\t回答什麼\t範圍\t看得到多遠\t匯出"); err != nil {
+	if _, err := fmt.Fprintln(table, "report\tanswers what\tscope\thorizon\texport"); err != nil {
 		return err
 	}
 	for _, entry := range index.Entries {
@@ -94,7 +94,7 @@ func writeReportIndex(out io.Writer, index operator.ReportIndex) error {
 		return err
 	}
 	for _, entry := range index.Entries {
-		if _, err := fmt.Fprintf(out, "%s：%s　%s\n",
+		if _, err := fmt.Fprintf(out, "%s: %s  %s\n",
 			entry.Title, entry.Path, entry.ScopeSentence); err != nil {
 			return err
 		}
@@ -114,25 +114,25 @@ func reportHTTPClient(label, explicitURL string, explicit bool, deps machineComm
 	*operatorclient.Client, error,
 ) {
 	if deps.newOperatorClient == nil {
-		return nil, fmt.Errorf("%s: operator HTTP client 未初始化", label)
+		return nil, fmt.Errorf("%s: operator HTTP client not initialized", label)
 	}
 	if explicit {
 		client, err := deps.newOperatorClient(explicitURL)
 		if err != nil {
-			return nil, fmt.Errorf("%s: 建立 HTTP operator client 失敗：%w", label, err)
+			return nil, fmt.Errorf("%s: failed to create HTTP operator client: %w", label, err)
 		}
 		return client, nil
 	}
 	if deps.discoverHubURL == nil {
-		return nil, fmt.Errorf("%s: Hub discovery 未初始化", label)
+		return nil, fmt.Errorf("%s: Hub discovery not initialized", label)
 	}
 	discovered, err := deps.discoverHubURL()
 	if err != nil {
-		return nil, fmt.Errorf("%s: 無法發現 Hub：%w", label, err)
+		return nil, fmt.Errorf("%s: cannot discover Hub: %w", label, err)
 	}
 	client, err := deps.newOperatorClient(discovered)
 	if err != nil {
-		return nil, fmt.Errorf("%s: 建立 discovered HTTP operator client 失敗：%w", label, err)
+		return nil, fmt.Errorf("%s: failed to create discovered HTTP operator client: %w", label, err)
 	}
 	return client, nil
 }
