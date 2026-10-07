@@ -1,16 +1,29 @@
 # Litestream 0.5 config for the Fly image.
 # ${NAME} is expanded by Litestream (os.Expand), not by a shell.
-# The entrypoint exports LITESTREAM_BUCKET, LITESTREAM_PATH, and
-# LITESTREAM_ENDPOINT before starting Litestream. Defaults are not
-# written here because Litestream does not apply ${NAME:-default}.
+# Defaults are not written here because Litestream does not apply ${NAME:-default}.
+# The entrypoint / r2-env helper validates and exports:
+#   LITESTREAM_SYNC_INTERVAL:     default 10s
+#   LITESTREAM_SNAPSHOT_INTERVAL: default 24h
+#   LITESTREAM_RETENTION:         default 168h
+#   LITESTREAM_PATH:              default clawctl/litestream/clawctl.sqlite
+#   LITESTREAM_BUCKET:            or derived from R2_BUCKET
+#   LITESTREAM_ENDPOINT:          or derived from R2_ENDPOINT / R2_ACCOUNT_ID
+#   R2_ACCESS_KEY_ID:             required (from secrets)
+#   R2_SECRET_ACCESS_KEY:         required (from secrets)
+
+snapshot:
+  interval: ${LITESTREAM_SNAPSHOT_INTERVAL}
+  retention: ${LITESTREAM_RETENTION}
+
 dbs:
   - path: /var/lib/clawctl/clawctl.sqlite
-    replicas:
-      - type: s3
-        bucket: ${LITESTREAM_BUCKET}
-        path: ${LITESTREAM_PATH}
-        endpoint: ${LITESTREAM_ENDPOINT}
-        region: auto
-        access-key-id: ${R2_ACCESS_KEY_ID}
-        secret-access-key: ${R2_SECRET_ACCESS_KEY}
-        force-path-style: true
+    replica:
+      type: s3
+      bucket: ${LITESTREAM_BUCKET}
+      path: ${LITESTREAM_PATH}
+      endpoint: ${LITESTREAM_ENDPOINT}
+      region: auto
+      access-key-id: ${R2_ACCESS_KEY_ID}
+      secret-access-key: ${R2_SECRET_ACCESS_KEY}
+      force-path-style: true
+      sync-interval: ${LITESTREAM_SYNC_INTERVAL}

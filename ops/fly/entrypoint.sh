@@ -17,6 +17,12 @@
 # removed. TS_AUTHKEY is unset before the long-running process starts.
 set -eu
 
+if [ -f /usr/local/lib/clawctl-fly/notify-env.sh ]; then
+  . /usr/local/lib/clawctl-fly/notify-env.sh
+else
+  . "$(dirname "$0")/notify-env.sh"
+fi
+
 data=${CLAWCTL_DATA:-/var/lib/clawctl}
 state_dir=$data/tailscale
 state_file=$state_dir/tailscaled.state
@@ -199,34 +205,10 @@ case ${LITESTREAM_REQUIRED:-} in
     ;;
 esac
 
-if [ -n "${R2_ACCOUNT_ID:-}" ]; then
-  case $R2_ACCOUNT_ID in
-    *[!0-9a-fA-F]*)
-      echo "clawctl-fly: R2_ACCOUNT_ID must be 32 hex characters. The value is not printed." >&2
-      exit 1
-      ;;
-  esac
-  if [ "${#R2_ACCOUNT_ID}" -ne 32 ]; then
-    echo "clawctl-fly: R2_ACCOUNT_ID must be 32 hex characters. The value is not printed." >&2
-    exit 1
-  fi
-fi
-if [ -z "${R2_ENDPOINT:-}" ] && [ -z "${LITESTREAM_ENDPOINT:-}" ] && [ -n "${R2_ACCOUNT_ID:-}" ]; then
-  export R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-  echo "clawctl-fly: derived R2_ENDPOINT from R2_ACCOUNT_ID"
-fi
-if [ -z "${LITESTREAM_ENDPOINT:-}" ] && [ -n "${R2_ENDPOINT:-}" ]; then
-  export LITESTREAM_ENDPOINT="$R2_ENDPOINT"
-fi
-if [ -n "${LITESTREAM_ENDPOINT:-}" ] && [ -z "${R2_ENDPOINT:-}" ]; then
-  export R2_ENDPOINT="$LITESTREAM_ENDPOINT"
-  echo "clawctl-fly: set R2_ENDPOINT from LITESTREAM_ENDPOINT so Hub sees one R2 group"
-fi
-if [ -z "${LITESTREAM_BUCKET:-}" ] && [ -n "${R2_BUCKET:-}" ]; then
-  export LITESTREAM_BUCKET="$R2_BUCKET"
-fi
-if [ -n "${LITESTREAM_BUCKET:-}" ] && [ -z "${R2_BUCKET:-}" ]; then
-  export R2_BUCKET="$LITESTREAM_BUCKET"
+if [ -f /usr/local/lib/clawctl-fly/r2-env.sh ]; then
+  . /usr/local/lib/clawctl-fly/r2-env.sh
+else
+  . "$(dirname "$0")/r2-env.sh"
 fi
 
 any_replica=0
