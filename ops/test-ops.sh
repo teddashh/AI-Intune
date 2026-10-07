@@ -818,6 +818,7 @@ agent_installer_complete_fixture() {
 	tailscale_key="$fixture/tailscale-key"
 	log="$fixture/calls"
 	system_unit_dir="$fixture/systemd/system"
+	rm -rf "$fixture"
 	mkdir -p "$mock" "$home"
 	chmod 0700 "$home"
 	printf '%s\n' 'one-time-token' >"$token"
@@ -829,6 +830,7 @@ agent_installer_complete_fixture() {
 		'if [[ "$1" == "env" && "$2" == TARGET_USER=* ]]; then exit 0; fi' \
 		'exec "$@"' >"$mock/sudo"
 	printf '%s\n' '#!/usr/bin/env bash' \
+		'printf "systemctl %s\n" "$*" >>"$AGENT_TEST_LOG"' \
 		'case "$*" in' \
 		'  *property=NRestarts*) echo 0 ;;' \
 		'  *property=MainPID*) echo 4242 ;;' \
@@ -864,8 +866,13 @@ agent_installer_complete_fixture() {
 		'printf "%s\\n" "$*" >>"$AGENT_TEST_LOG"' \
 		'case "$1" in' \
 		'  version) echo test-version ;;' \
-		'  enroll) mkdir -p "$HOME/.config/clawctl"; printf "{}\\n" >"$HOME/.config/clawctl/agent.json"; chmod 0600 "$HOME/.config/clawctl/agent.json" ;;' \
-		'  verify) echo "Hub ready: machine_id=test checkin=2026-09-10T18:00:00Z jobs=enabled agent=test-version" ;;' \
+		'  enroll) ' \
+		'    if [[ "$FAIL_ENROLL" == "1" ]]; then exit 1; fi ' \
+		'    hub=""; for ((i=1;i<=$#;i++)); do if [[ "${!i}" == "--hub" ]]; then j=$((i+1)); hub="${!j}"; break; fi; done ' \
+		'    mkdir -p "$HOME/.config/clawctl"; printf "{\"hub_url\":\"%s\"}\\n" "$hub" >"$HOME/.config/clawctl/agent.json"; chmod 0600 "$HOME/.config/clawctl/agent.json" ;;' \
+		'  verify) ' \
+		'    if [[ "${FAIL_VERIFY:-}" == "1" ]]; then exit 1; fi ' \
+		'    echo "Hub ready: machine_id=test checkin=2026-09-10T18:00:00Z jobs=enabled agent=test-version" ;;' \
 		'  *) exit 1 ;;' \
 		'esac' >"$fixture/clawctl-agent"
 	chmod 0755 "$mock/sudo" "$mock/systemctl" "$mock/loginctl" "$mock/tailscale" "$mock/ps" \
@@ -895,6 +902,89 @@ agent_installer_complete_fixture() {
 	grep -Fq 'enroll --hub http://100.64.0.1:8787 --token-file' "$log" || return 93
 	grep -Fq 'verify --hub http://100.64.0.1:8787 --since ' "$log" || return 94
 	grep -Fxq 'tailscale-up' "$log" || return 95
+
+	# Re-enrollment Case 1: existing config same hub -> skip enroll
+	rm -f "$log"
+	HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
+		TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
+		CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+		AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
+		"$install_agent" --hub http://100.64.0.1:8787 --binary "$fixture/clawctl-agent" || return 101
+	grep -q 'enroll --hub' "$log" && return 102
+
+	# Re-enrollment Case 2: existing config different hub without flag -> fails with hint
+	rm -f "$log"
+	if HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
+		TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
+		CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+		AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
+		"$install_agent" --hub http://100.64.0.2:8787 --binary "$fixture/clawctl-agent" >"$fixture/out2" 2>&1; then
+		return 103
+	fi
+	grep -q 'enrolled to a different Hub' "$fixture/out2" || return 104
+
+	# Re-enrollment Case 3: --reenroll success
+	rm -f "$log"
+	HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
+		TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
+		CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+		AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
+		"$install_agent" --hub http://100.64.0.2:8787 --reenroll --token-file "$token" --binary "$fixture/clawctl-agent" || return 105
+	grep -q 'systemctl stop clawctl-agent.service' "$log" || return 106
+	local backups=("$home"/.config/clawctl/agent.json.pre-reenroll-*)
+	[[ ${#backups[@]} -eq 1 ]] || return 107
+	[[ "$(stat -c '%a' "${backups[0]}")" == "600" ]] || return 108
+	grep -q '100.64.0.1' "${backups[0]}" || return 109
+	grep -q '100.64.0.2' "$home/.config/clawctl/agent.json" || return 110
+
+	# Re-enrollment Case 4: --reenroll with failing enroll stub -> original restored
+	rm -f "$log"
+	rm -f "$home"/.config/clawctl/agent.json.pre-reenroll-*
+	cp "$home/.config/clawctl/agent.json" "$fixture/agent.before"
+	if FAIL_ENROLL=1 HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
+		TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
+		CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+		AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
+		"$install_agent" --hub http://100.64.0.3:8787 --reenroll --token-file "$token" --binary "$fixture/clawctl-agent" >"$fixture/out4" 2>&1; then
+		return 111
+	fi
+	grep -qi 'previous configuration restored' "$fixture/out4" || return 112
+	grep -q "old Hub's install-agent.sh" "$fixture/out4" || return 123
+	grep -q '100.64.0.2' "$home/.config/clawctl/agent.json" || return 113
+	cmp -s "$home/.config/clawctl/agent.json" "$fixture/agent.before" || return 114
+	local restored_backups=("$home"/.config/clawctl/agent.json.pre-reenroll-*)
+	[[ ! -e "${restored_backups[0]}" ]] || return 115
+
+	# Re-enrollment Case 5: --reenroll when existing config points at the SAME hub still re-enrolls
+	rm -f "$log"
+	rm -f "$home"/.config/clawctl/agent.json.pre-reenroll-*
+	HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
+		TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
+		CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+		AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
+		"$install_agent" --hub http://100.64.0.2:8787 --reenroll --token-file "$token" --binary "$fixture/clawctl-agent" || return 116
+	grep -q 'systemctl stop clawctl-agent.service' "$log" || return 117
+	grep -Fq 'enroll --hub http://100.64.0.2:8787 --token-file' "$log" || return 118
+	local same_hub_backups=("$home"/.config/clawctl/agent.json.pre-reenroll-*)
+	[[ ${#same_hub_backups[@]} -eq 1 ]] || return 119
+	[[ "$(stat -c '%a' "${same_hub_backups[0]}")" == "600" ]] || return 120
+	grep -q '100.64.0.2' "${same_hub_backups[0]}" || return 121
+	grep -q '100.64.0.2' "$home/.config/clawctl/agent.json" || return 122
+
+	# Re-enrollment Case 6: --reenroll failure after successful re-enrollment prints backup path
+	rm -f "$log"
+	rm -f "$home"/.config/clawctl/agent.json.pre-reenroll-*
+	if FAIL_VERIFY=1 HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
+		TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
+		CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+		AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
+		"$install_agent" --hub http://100.64.0.3:8787 --reenroll --token-file "$token" --binary "$fixture/clawctl-agent" >"$fixture/out6" 2>&1; then
+		return 124
+	fi
+	local verify_fail_backups=("$home"/.config/clawctl/agent.json.pre-reenroll-*)
+	[[ ${#verify_fail_backups[@]} -eq 1 ]] || return 125
+	[[ -f "${verify_fail_backups[0]}" ]] || return 126
+	grep -Fq "Previous configuration backed up at: ${verify_fail_backups[0]} (see docs/MOVE-AGENTS.md, Rollback)" "$fixture/out6" || return 127
 }
 
 macos_agent_installer_complete_fixture() {
