@@ -65,12 +65,16 @@ func configuredOperatorAuthorizer(mode authMode, listen, prefix string) (operato
 }
 
 func cloudConfiguration(mode authMode, listen string) (cloudBoundaryConfig, error) {
-	if _, err := operatorendpoint.ParseCloudListen(listen); err != nil {
+	endpoint, err := operatorendpoint.ParseCloudListen(listen)
+	if err != nil {
 		return cloudBoundaryConfig{}, err
 	}
 	public, err := operatorendpoint.ParsePublicURL(os.Getenv("CLAWCTL_PUBLIC_URL"))
 	if err != nil {
 		return cloudBoundaryConfig{}, err
+	}
+	if public.Scheme() == "http" && !endpoint.Destination().IsLoopback() {
+		return cloudBoundaryConfig{}, fmt.Errorf("HTTP CLAWCTL_PUBLIC_URL requires a loopback CLAWCTL_LISTEN/--listen IP (127.0.0.0/8 or ::1); use HTTPS for non-loopback listeners")
 	}
 	config := cloudBoundaryConfig{public: public, mode: mode}
 	if mode == authModeBoth {

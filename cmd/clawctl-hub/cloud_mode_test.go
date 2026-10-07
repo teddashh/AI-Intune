@@ -157,7 +157,11 @@ func TestCloudSecurityResponses(t *testing.T) {
 	for _, public := range []string{"https://hub.example.com", "http://localhost:8787"} {
 		t.Run(public, func(t *testing.T) {
 			t.Setenv("CLAWCTL_PUBLIC_URL", public)
-			config, err := cloudConfiguration(authModeBoth, testOperatorAuthority)
+			listen := testOperatorAuthority
+			if strings.HasPrefix(public, "http://") {
+				listen = "127.0.0.1:8787"
+			}
+			config, err := cloudConfiguration(authModeBoth, listen)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -203,7 +207,11 @@ func TestCloudSecurityResponses(t *testing.T) {
 				}
 			}
 			boundary := newOperatorBoundary(http.NewServeMux(), nil, nil, nil, config.public.Authority(), config)
-			for _, host := range []string{config.public.Authority(), testOperatorAuthority} {
+			hosts := []string{config.public.Authority()}
+			if config.tailnetAuthority != "" {
+				hosts = append(hosts, config.tailnetAuthority)
+			}
+			for _, host := range hosts {
 				r := httptest.NewRequest("GET", public+"/", nil)
 				r.Host = host
 				w := httptest.NewRecorder()
@@ -214,6 +222,29 @@ func TestCloudSecurityResponses(t *testing.T) {
 				}
 				if !strings.Contains(w.Header().Get("Content-Security-Policy"), "connect-src "+scheme+"://"+host+";") {
 					t.Fatal(host, w.Header())
+				}
+			}
+		})
+	}
+}
+
+func TestCloudHTTPRequiresLoopbackListen(t *testing.T) {
+	for _, mode := range []authMode{authModeLocal, authModeBoth} {
+		t.Run(string(mode), func(t *testing.T) {
+			for _, public := range []string{"http://localhost:8787", "http://127.0.0.1:8787", "http://[::1]:8787"} {
+				t.Setenv("CLAWCTL_PUBLIC_URL", public)
+				for _, listen := range []string{"0.0.0.0:8787", "[::]:8787", "192.168.1.2:8787", "203.0.113.2:8787", "100.64.0.1:8787"} {
+					if _, err := cloudConfiguration(mode, listen); err == nil || !strings.Contains(err.Error(), "requires a loopback") {
+						t.Fatalf("mode=%s public=%s listen=%s: expected clear loopback error, got %v", mode, public, listen, err)
+					}
+					if base, why := publicBase(listen, string(mode)); base != "" || !strings.Contains(why, "requires a loopback") {
+						t.Fatalf("unsafe publicBase: %q %q", base, why)
+					}
+				}
+				for _, listen := range []string{"127.0.0.1:8787", "127.42.0.2:8787", "[::1]:8787"} {
+					if _, err := cloudConfiguration(mode, listen); err != nil {
+						t.Fatalf("loopback refused: %s: %v", listen, err)
+					}
 				}
 			}
 		})
