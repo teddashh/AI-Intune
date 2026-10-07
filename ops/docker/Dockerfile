@@ -24,7 +24,13 @@
 # It is not the default build target. See ops/fly/README.md.
 
 # ---- build ----
-FROM golang:1.27.1-bookworm AS build
+# The build stage runs on the builder's own platform and cross-compiles the
+# Hub/agent for the target platform (BuildKit sets TARGETOS/TARGETARCH), so a
+# multi-arch build (linux/amd64 + linux/arm64) needs no emulation. Without
+# BuildKit both are empty and the binaries are built for the builder's arch.
+FROM --platform=$BUILDPLATFORM golang:1.27.1-bookworm AS build
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
 
 COPY go.mod go.sum ./
@@ -70,9 +76,11 @@ fi
 mkdir -p /out /src/build
 ldflags="-s -w -X main.version=${version}"
 
-go build -buildvcs=false -trimpath -ldflags "$ldflags" \
+goos="${TARGETOS:-$(go env GOOS)}"
+goarch="${TARGETARCH:-$(go env GOARCH)}"
+GOOS="$goos" GOARCH="$goarch" go build -buildvcs=false -trimpath -ldflags "$ldflags" \
   -o /out/clawctl-hub ./cmd/clawctl-hub
-go build -buildvcs=false -trimpath -ldflags "$ldflags" \
+GOOS="$goos" GOARCH="$goarch" go build -buildvcs=false -trimpath -ldflags "$ldflags" \
   -o /out/clawctl-agent ./cmd/clawctl-agent
 
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -buildvcs=false -trimpath \

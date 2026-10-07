@@ -242,6 +242,8 @@ docker compose -f ops/docker/docker-compose.yml \
   --env-file ops/docker/hub.env up -d
 ```
 
+Prebuilt, signed images: [RELEASE.md](RELEASE.md) (GHCR, cosign keyless, SBOM; run them with `ops/docker/docker-compose.ghcr.yml`).
+
 Without Docker: `make hub` then `./ops/install-hub.sh --listen <tailscale-ip>:<port> --operator-capability-prefix …`. That is the systemd alternative. Hosted example: [DEPLOY-FLY.md](DEPLOY-FLY.md).
 
 ---

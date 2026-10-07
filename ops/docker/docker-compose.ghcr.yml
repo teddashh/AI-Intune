@@ -1,0 +1,31 @@
+# Optional: run the signed release images from GHCR instead of building locally.
+#
+#   CLAWCTL_VERSION=v1.2.3   # in hub.env; the exact release tag, with the "v"
+#   cosign verify ghcr.io/teddashh/clawctl-hub:$CLAWCTL_VERSION \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     --certificate-identity-regexp '^https://github\.com/teddashh/AI-Intune/\.github/workflows/release\.yml@refs/tags/v'
+#   (same for ghcr.io/teddashh/clawctl-hub-init)
+#   docker compose \
+#     -f ops/docker/docker-compose.yml \
+#     -f ops/docker/docker-compose.ghcr.yml \
+#     --env-file ops/docker/hub.env pull
+#   docker compose ... up -d   (same -f/--env-file list)
+#
+# Use the full vX.Y.Z tag for both images. The Hub loads
+# agent-bootstrap/<its own baked version> from the volume, and the init image
+# seeds the release named after its own baked version, so both images must be
+# the same release or the Hub stops at startup. Pin by digest (image@sha256:...) if
+# you want the exact bytes you verified. See docs/RELEASE.md.
+
+name: clawctl
+
+services:
+  hub-data-init:
+    build: !reset null
+    image: ghcr.io/teddashh/clawctl-hub-init:${CLAWCTL_VERSION:?set CLAWCTL_VERSION to a release tag such as v1.2.3}
+    pull_policy: missing
+
+  hub:
+    build: !reset null
+    image: ghcr.io/teddashh/clawctl-hub:${CLAWCTL_VERSION:?set CLAWCTL_VERSION to a release tag such as v1.2.3}
+    pull_policy: missing
