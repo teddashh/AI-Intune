@@ -1,0 +1,5 @@
+[
+  { "targets": ["100.64.200.2:9100"], "labels": { "machine": "samplehub1" } },
+  { "targets": ["100.64.200.11:9100"], "labels": { "machine": "sampleagent1" } },
+  { "targets": ["100.64.200.12:9100"], "labels": { "machine": "sampleagent2" } }
+]

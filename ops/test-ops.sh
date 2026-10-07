@@ -1955,6 +1955,29 @@ else
 	echo "skip: promtool 不在 PATH 上，略過 ops/prometheus/rules/*.yml。CI 設 CLAWCTL_REQUIRE_PROMTOOL=1 時這條必須失敗。"
 fi
 
+# --- ops/prometheus/install.sh only calls stage scripts that exist.
+# It once called an install script that was never in this tree, so the first
+# stage could not run at all.
+missing=""
+stages=0
+for s in $(grep -o '"\$HERE/[^"]*\.sh"' "$ROOT/ops/prometheus/install.sh" | sed 's|"\$HERE/||; s|"$||'); do
+	stages=$((stages + 1))
+	[ -x "$ROOT/ops/prometheus/$s" ] || missing="$missing $s"
+done
+rc=0
+output="stages=$stages missing:${missing:- none}"
+if [ "$stages" -ge 3 ] && [ -z "$missing" ]; then
+	pass 'ops/prometheus/install.sh calls only stage scripts that exist'
+else
+	fail 'ops/prometheus/install.sh calls only stage scripts that exist'
+fi
+
+run env -u CLAWCTL_FLEET_JSON "$ROOT/ops/prometheus/install-prometheus.sh"
+expect 'install-prometheus.sh refuses to run without a fleet.json' 1 has 'CLAWCTL_FLEET_JSON'
+
+run env CLAWCTL_FLEET_JSON="$ROOT/ops/prometheus/fleet.example.json" CLAWCTL_PROMETHEUS_YML="$TMP/no-such.yml" "$ROOT/ops/prometheus/install-prometheus.sh"
+expect 'install-prometheus.sh refuses a missing Prometheus config' 1 has 'not found'
+
 # --- ops/check-metrics.sh：沒有 parser 的時候要**大聲**，不是安靜跳過。
 #
 # ⚠ 這一條守的是這個專案最在意的那種 bug：一支「因為缺工具所以什麼都沒做」
