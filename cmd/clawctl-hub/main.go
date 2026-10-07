@@ -131,6 +131,9 @@ type hub struct {
 	// retention 是每一類資料留多久。零值是不合法的（Validate 會擋），
 	// 所以 serve 一定要填 —— 一個零值的政策會被解讀成「全部刪掉」。
 	retention store.RetentionPolicy
+
+	terminalIdleTimeout time.Duration
+	terminalMaxLifetime time.Duration
 }
 
 func main() {
@@ -430,6 +433,8 @@ func serve(argv []string) {
 	keepOccupancy := fs.Duration("keep-occupancy", def.Occupancy, "how long to keep ticket occupancy records")
 	operatorCapabilityPrefix := fs.String("operator-capability-prefix", os.Getenv("CLAWCTL_OPERATOR_CAPABILITY_PREFIX"),
 		"Tailscale grants app capability prefix (<owned-domain>/cap/<application>)")
+	terminalIdleTimeoutStr := fs.String("terminal-idle-timeout", os.Getenv("CLAWCTL_TERMINAL_IDLE_TIMEOUT"), "idle timeout for operator terminals (e.g. 30m, 1h)")
+	terminalMaxLifetimeStr := fs.String("terminal-max-lifetime", os.Getenv("CLAWCTL_TERMINAL_MAX_LIFETIME"), "absolute maximum lifetime for operator terminals (e.g. 12h, 24h)")
 	_ = fs.Parse(argv)
 	listenSet := false
 	fs.Visit(func(f *flag.Flag) { listenSet = listenSet || f.Name == "listen" })
@@ -439,6 +444,12 @@ func serve(argv []string) {
 	if err := rejectUnexpectedServePositionals(fs.Args()); err != nil {
 		log.Fatal(err)
 	}
+
+	terminalIdleTimeout, terminalMaxLifetime, err := parseTerminalLimits(*terminalIdleTimeoutStr, *terminalMaxLifetimeStr)
+	if err != nil {
+		log.Fatalf("invalid terminal limit configuration: %v", err)
+	}
+
 	canonicalDBPath, err := canonicalServeDBPath(*dbPath)
 	if err != nil {
 		log.Fatalf("unable to canonicalize database path: %v", err)
@@ -540,6 +551,8 @@ func serve(argv []string) {
 		retention: store.RetentionPolicy{
 			Observations: *keepObs, Checkins: *keepCheckins, Occupancy: *keepOccupancy,
 		},
+		terminalIdleTimeout: terminalIdleTimeout,
+		terminalMaxLifetime: terminalMaxLifetime,
 	}
 	// ⚠ 開機就擋掉一個會切進讀取窗口的保留期，而不是等到半夜第一次清理才發現。
 	// 一個在凌晨三點才炸掉的設定錯誤，等於它上線的那天到炸掉的那天之間，
@@ -576,6 +589,7 @@ func serve(argv []string) {
 	ui.SetTailnetCache(tailnetCache)
 	ui.SetOperatorService(operatorService)
 	ui.SetHubBase(h.publicURL)
+	ui.SetTerminalLimits(h.terminalIdleTimeout, h.terminalMaxLifetime)
 	if err := ui.SetRetentionPolicy(h.retention); err != nil {
 		log.Fatalf("invalid web retention policy configuration: %v", err)
 	}
@@ -1342,4 +1356,40 @@ func parseHM(s string) (int, int, bool) {
 		return 0, 0, false
 	}
 	return hh, mm, true
+}
+
+// parseTerminalLimits validates the operator terminal limits. Empty means the
+// default; there is deliberately no value that disables either limit.
+func parseTerminalLimits(idleStr, lifeStr string) (time.Duration, time.Duration, error) {
+	if idleStr == "" {
+		idleStr = web.DefaultTerminalIdleTimeout.String()
+	}
+	idle, err := time.ParseDuration(idleStr)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid idle timeout %q: %w", idleStr, err)
+	}
+	if idle < time.Minute || idle > 24*time.Hour {
+		return 0, 0, fmt.Errorf("idle timeout must be between 1m and 24h")
+	}
+	if idle.Truncate(time.Second) != idle {
+		return 0, 0, fmt.Errorf("idle timeout must be a whole number of seconds")
+	}
+
+	if lifeStr == "" {
+		lifeStr = web.DefaultTerminalMaxLifetime.String()
+	}
+	life, err := time.ParseDuration(lifeStr)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid max lifetime %q: %w", lifeStr, err)
+	}
+	if life < time.Minute || life > 720*time.Hour {
+		return 0, 0, fmt.Errorf("max lifetime must be between 1m and 720h")
+	}
+	if life.Truncate(time.Second) != life {
+		return 0, 0, fmt.Errorf("max lifetime must be a whole number of seconds")
+	}
+	if idle > life {
+		return 0, 0, fmt.Errorf("idle timeout (%v) cannot be greater than max lifetime (%v)", idle, life)
+	}
+	return idle, life, nil
 }

@@ -38,6 +38,8 @@ const (
 	AgentSessionCloseReasonAuthUnavailable       = "無法確認操作者身分"
 	AgentSessionCloseReasonMachineError          = "機器端終端發生錯誤"
 	AgentSessionCloseReasonTerminalNotLinked     = "開啟時終端連線沒有接上 Hub"
+	AgentSessionCloseReasonIdleTimeout           = "終端閒置逾時，已自動關閉"
+	AgentSessionCloseReasonLifetimeReached       = "終端已達最長使用時間，已自動關閉"
 	// MaxOpenAgentSessionsPerMachine bounds the live PTYs, agent workers, and
 	// output queues one machine carries. Four lets an operator keep a second
 	// terminal open beside the one they are working in, and still leaves room

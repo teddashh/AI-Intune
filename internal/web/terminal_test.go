@@ -239,3 +239,50 @@ func htmlStyleContains(html, css string) bool {
 		rest = rest[end+len("</style>"):]
 	}
 }
+
+func TestTerminalPageStatesLimitsAndDeadline(t *testing.T) {
+	s, st := newServer(t)
+	machineID := enroll(t, st, "samplehub1", time.Now().UTC())
+	openWebTerminalSession(t, st, machineID, "42", "operator@example.com", "session-limits")
+	session, err := st.AgentSessionForOperator(machineID, "session-limits", "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := terminalResponse(t, s, "/machines/"+machineID+"/terminals/session-limits", true)
+	body := rec.Body.String()
+	deadline := session.OpenedAt.Add(DefaultTerminalMaxLifetime).Local().Format("2006-01-02 15:04")
+	if rec.Code != http.StatusOK ||
+		!strings.Contains(body, "閒置 30 分鐘或開啟滿 12 小時會自動關閉（本終端最晚 "+deadline+" 結束）。") ||
+		!strings.Contains(body, `data-idle-timeout-ms="1800000"`) {
+		t.Fatalf("default limits not stated:\n%s", body)
+	}
+
+	s.SetTerminalLimits(90*time.Second, 90*time.Minute)
+	body = terminalResponse(t, s, "/machines/"+machineID+"/terminals/session-limits", true).Body.String()
+	deadline = session.OpenedAt.Add(90 * time.Minute).Local().Format("2006-01-02 15:04")
+	if !strings.Contains(body, "閒置 1 分鐘 30 秒或開啟滿 1 小時 30 分鐘會自動關閉（本終端最晚 "+deadline+" 結束）。") ||
+		!strings.Contains(body, `data-idle-timeout-ms="90000"`) {
+		t.Fatalf("configured limits not stated exactly:\n%s", body)
+	}
+
+	s.SetTerminalLimits(0, -time.Hour) // non-positive keeps the previous values
+	if s.terminalIdleTimeout != 90*time.Second || s.terminalMaxLifetime != 90*time.Minute {
+		t.Fatalf("non-positive limits replaced configured ones: %v %v", s.terminalIdleTimeout, s.terminalMaxLifetime)
+	}
+}
+
+func TestTerminalLimitText(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		30 * time.Minute:                      "30 分鐘",
+		12 * time.Hour:                        "12 小時",
+		90 * time.Minute:                      "1 小時 30 分鐘",
+		90 * time.Second:                      "1 分鐘 30 秒",
+		720 * time.Hour:                       "720 小時",
+		time.Hour + time.Minute + time.Second: "1 小時 1 分鐘 1 秒",
+	} {
+		if got := terminalLimitText(d); got != want {
+			t.Errorf("terminalLimitText(%v)=%q want %q", d, got, want)
+		}
+	}
+}
