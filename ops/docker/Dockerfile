@@ -171,6 +171,7 @@ RUN apt-get update \
       iptables \
       iproute2 \
       util-linux \
+      sqlite3 \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --system --gid 65532 nonroot \
  && useradd --system --uid 65532 --gid 65532 --no-create-home \
@@ -186,11 +187,16 @@ COPY --from=build /out/agent-bootstrap /opt/clawctl-seed/agent-bootstrap
 COPY --from=build /out/agent-bootstrap /usr/local/share/clawctl/agent-bootstrap
 COPY ops/docker/hub-data-init.sh /usr/local/bin/hub-data-init.sh
 COPY ops/fly/entrypoint.sh /usr/local/bin/clawctl-fly-entrypoint
+COPY ops/fly/notify-env.sh /usr/local/lib/clawctl-fly/notify-env.sh
+COPY ops/fly/r2-env.sh /usr/local/lib/clawctl-fly/r2-env.sh
+COPY ops/fly/restore-drill.sh /usr/local/bin/clawctl-restore-drill
 COPY ops/fly/litestream.yml /etc/litestream.yml
 
 RUN chmod 0755 /usr/local/bin/clawctl-hub /usr/local/bin/tailscaled \
       /usr/local/bin/tailscale /usr/local/bin/litestream \
       /usr/local/bin/hub-data-init.sh /usr/local/bin/clawctl-fly-entrypoint \
+      /usr/local/lib/clawctl-fly/notify-env.sh /usr/local/lib/clawctl-fly/r2-env.sh \
+      /usr/local/bin/clawctl-restore-drill \
  && chmod 0644 /etc/litestream.yml
 
 VOLUME ["/var/lib/clawctl"]
