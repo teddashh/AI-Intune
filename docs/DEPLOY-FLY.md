@@ -207,3 +207,7 @@ Build the image locally when Docker is available:
 ```
 
 That builds the `hub-fly` target, checks `tailscaled`, `tailscale`, `litestream`, `clawctl-hub`, and the bundle files, and checks that the entrypoint fails clearly with no `TS_AUTHKEY`. It also parses your `fly.toml` file.
+
+## Autopilot (public) mode: client IP
+
+The full Fly public-mode pack comes in a later PR; this pack remains Tailscale-only. For public HTTP mode set `CLAWCTL_TRUSTED_PROXIES=172.16.0.0/12` and `CLAWCTL_CLIENT_IP_HEADER=Fly-Client-IP`. The rightmost X-Forwarded-For entry is the app's own edge address. Fly staff describe proxy egress as 172.16.0.0/16, but 172.19.x has been observed, hence /12. Fly 6PN private networking uses IPv6 fdaa::/16, which this configuration does not trust. See [Client IP and reverse proxies](AUTOPILOT.md#client-ip-and-reverse-proxies).

@@ -136,17 +136,42 @@ Use the account's existing username when resetting. Headless bootstrap needs no 
 | `CLAWCTL_LISTEN` / `--listen` | `tailscale`: canonical literal Tailscale node IP and nonzero port only. `local` / `both`: canonical literal IP and nonzero port, including wildcard, loopback, LAN or public IP; no hostname. IPv6 uses brackets. Flag default is `127.0.0.1:8770`; the examples explicitly use 8787. |
 | `CLAWCTL_PUBLIC_URL` | Required in `local` / `both`: HTTPS origin, or HTTP only on localhost/loopback for development with a loopback listen IP (127.0.0.0/8 or ::1); startup refuses HTTP with a wildcard, LAN, public or Tailscale listen IP. No userinfo, path (except a trailing slash), query or fragment. Pins the accepted public Host and determines secure cookies. In `tailscale`, optional but must match `http://<listen>`. |
 | `CLAWCTL_SETUP_CODE` | Optional first-run code in `local` / `both`; omit to generate and log it. If supplied, requires at least 16 characters after removing whitespace/hyphens; comparisons are case-insensitive. Empty is invalid before the first admin exists. |
+| `CLAWCTL_TRUSTED_PROXIES` | Comma/space separated proxy CIDRs or bare IPv4/IPv6 addresses (/32 or /128). Default empty ignores forwarded headers. Invalid entries and prefixes broader than IPv4 /8 or IPv6 /16 refuse startup. |
+| `CLAWCTL_CLIENT_IP_HEADER` | `X-Forwarded-For` (default) or `Fly-Client-IP`; other values refuse startup. |
+| `CLAWCTL_DOCKER_SUBNET` | Compose bridge subnet and Hub trusted proxies; default `172.31.87.0/24`. Override if it collides. |
 | `CLAWCTL_DB` / `--db` | SQLite path; its parent must be private and owned by the service user. The Docker image's explicit `--db` pins `/var/lib/clawctl/clawctl.sqlite`. |
 | `CLAWCTL_PUBLIC_HOST` | Compose/Caddy input only: public DNS hostname used to construct `CLAWCTL_PUBLIC_URL`. |
 | `CLAWCTL_VERSION` | Docker build arg/image tag and agent-bundle version, not a Hub runtime setting. Use a unique Git SHA per build. |
+
+## Client IP and reverse proxies
+
+The Docker+Caddy pack configures this for you: its fixed bridge subnet is both the Compose IPAM subnet and `CLAWCTL_TRUSTED_PROXIES`, and the Hub has no published port. Only containers on that network can reach it. Override `CLAWCTL_DOCKER_SUBNET` if it collides. Caddy v2.5+ appends the real client to `X-Forwarded-For` and ignores client-sent forwarded headers unless its own `trusted_proxies` is configured ([Caddy documentation](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)).
+
+For a bare-metal proxy on the same host, bind Hub to loopback and set:
+
+```env
+CLAWCTL_TRUSTED_PROXIES=127.0.0.1,::1
+CLAWCTL_CLIENT_IP_HEADER=X-Forwarded-For
+```
+
+Trust only your proxy's actual source addresses and ensure it sanitizes forwarded headers. Empty trust uses the TCP peer; without configuration every proxied client shares one IP. Trusted XFF chains are walked right-to-left (at most 32 entries), skipping trusted hops. The first untrusted IP wins; malformed entries fall back to the last trusted hop, and all-trusted chains fall back to the peer. `Fly-Client-IP` must contain exactly one header value and one IP without a port. XFF entries with ports or empty entries are malformed; surrounding spaces are accepted. `Forwarded` and `X-Real-IP` are never used. This affects account limiter, lockout, audit/session source addresses and enrollment limits; operator identity, Host checks and WhoIs continue to use their existing boundary.
+
+For Fly public HTTP mode use:
+
+```env
+CLAWCTL_TRUSTED_PROXIES=172.16.0.0/12
+CLAWCTL_CLIENT_IP_HEADER=Fly-Client-IP
+```
+
+On Fly the rightmost `X-Forwarded-For` entry is the app's own edge address. Fly staff describe fly-proxy egress as `172.16.0.0/16`, but `172.19.x` has been observed, hence `/12`. Fly 6PN private networking is IPv6 `fdaa::/16` and is not trusted by this setting. The full Fly public-mode pack comes in a later PR; the existing Fly pack remains Tailscale-only.
 
 ## Security model and current limits
 
 - Public HTTPS exposes the login surface to the Internet. Tailscale-only deployments instead keep it privately reachable within the mesh. TLS protects transport; it does not make the public service invisible.
 - Enrollment tickets have a **2-hour TTL** and are **one-time**. A keyed package is password-equivalent until its ticket is used, revoked or expires. It embeds the Hub URL and token, and is delivered with `Cache-Control: no-store`. The extracted token file is removed after successful enrollment; archived or copied tokens are not erased remotely.
 - The resulting machine bearer is long-lived. If stolen, retire the compromised machine credential and re-enroll with a new ticket; `--reenroll` alone does not revoke the old Hub credential. See [Moving agents](MOVE-AGENTS.md).
-- Passwords use **Argon2id**. **5 failures** lock the account for **15 minutes**. Others can deliberately trigger that lockout; recover through the local password-reset CLI above.
-- Login/setup POSTs share a per-IP token bucket: **10/minute**, burst **5**. Enrollment uses **30/minute**, burst **30**. Keys are the **TCP peer**, never forwarded headers. Behind this reverse proxy, all clients share the proxy's bucket. Trusted-proxy configuration is a follow-up; changing `X-Forwarded-For` does not bypass or partition the limit.
+- Passwords use **Argon2id** and a **12-character minimum** (enforced as 12 bytes). **5 consecutive failures** lock only that **(account, client key)** pair for **15 minutes**. IPv4 keys use the address; IPv6 keys use its /64 prefix (IPv4-mapped IPv6 uses IPv4). An attacker can lock out their own key; an admin on another key is unaffected. Audit/session sources retain the full address. Success resets only its pair; password reset clears all pairs. Rows older than 24 hours are pruned opportunistically. At least 50 failures across IPs in one rolling hour produce one audit signal per hour, without blocking the account. Distributed guessing is slowed by Argon2id, per-IP buckets and the password minimum; the stacked MFA PR adds a required second factor.
+- Login/setup POSTs share a per-client-key token bucket: **10/minute**, burst **5**. Enrollment uses **30/minute**, burst **30**. Behind a proxy, configure trusted proxies or every client shares the proxy IP, bucket and lockout pair. Each limiter holds at most 4096 buckets, pruning idle entries and evicting the least recently updated bucket when full so new admin sources remain eligible. An evicted attacker regains only a fresh burst.
 - Sessions expire after **12 hours idle** or **7 days absolute**. Cookies are HttpOnly and SameSite=Lax; HTTPS uses a Secure `__Host-` cookie. HTTPS mode emits HSTS. Go `CrossOriginProtection` checks browser writes; Host is pinned to `PUBLIC_URL`. `/metrics` requires an operator session in local mode; `/healthz` remains a content-free public probe.
 - Optional **TOTP MFA is available** and currently there is **one admin account** (multi-user/roles planned). Local admin authorizes all three operator capabilities. Operator **CLI/MCP transport remains Tailscale-mode only**; operator API tokens are a follow-up. The local maintenance commands above are separate from that HTTP transport.
 

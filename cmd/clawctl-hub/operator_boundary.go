@@ -419,7 +419,7 @@ func newHubHTTPHandler(h *hub, ui *web.Server, authorizer operatorRequestAuthori
 	}
 	root := http.NewServeMux()
 	nonOperatorRegistered := h.machineAndPublicRoutes(root)
-	nonOperatorRegistered = append(nonOperatorRegistered, registerAccountRoutes(root, h.store, ui, authority, cloud...)...)
+	nonOperatorRegistered = append(nonOperatorRegistered, registerAccountRoutes(root, h.store, ui, authority, h.clientIP, cloud...)...)
 
 	operatorMux := http.NewServeMux()
 	operatorRegistered := h.operatorRoutes(operatorMux)

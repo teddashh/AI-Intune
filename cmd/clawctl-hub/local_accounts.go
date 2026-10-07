@@ -9,7 +9,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,6 +17,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/teddashh/AI-Intune/internal/clientip"
 	"github.com/teddashh/AI-Intune/internal/localauth"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/store"
@@ -125,7 +125,7 @@ func safeLoginNext(next string) string {
 	return next
 }
 
-func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, authority string, cloud ...cloudBoundaryConfig) []string {
+func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, authority string, resolver clientip.Resolver, cloud ...cloudBoundaryConfig) []string {
 	boundary := newOperatorBoundary(http.NewServeMux(), nil, st, nil, authority, cloud...)
 	limiter := newIPLimiter(10, 5)
 	csrf := http.NewCrossOriginProtection()
@@ -144,7 +144,8 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 			http.Error(w, "Cross-origin request rejected", 403)
 			return
 		}
-		metadata := store.AuditEntry{SourceAddr: r.RemoteAddr, UserAgent: r.UserAgent()}
+		ip := resolver.Resolve(r)
+		metadata := store.AuditEntry{SourceAddr: ip, UserAgent: r.UserAgent()}
 		setup := r.URL.Path == "/setup"
 		if setup {
 			n, err := st.CountAccounts()
@@ -177,7 +178,7 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 			ui.RenderAccountForm(w, setup, next, "")
 			return
 		}
-		if !limiter.allow(r.RemoteAddr) {
+		if !limiter.allow(ip) {
 			w.Header().Set("Retry-After", "6")
 			http.Error(w, "Too many attempts", 429)
 			return
@@ -220,7 +221,7 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 				account, err = st.CreateFirstAdmin(username, r.PostForm.Get("password"), metadata)
 			}
 		} else {
-			account, err = st.VerifyPassword(username, r.PostForm.Get("password"), metadata)
+			account, err = st.VerifyPassword(username, r.PostForm.Get("password"), ip, metadata)
 		}
 		if err != nil {
 			if setup && errors.Is(err, store.ErrAdminExists) {
@@ -253,7 +254,7 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 				return
 			}
 		}
-		token, err := st.CreateSession(account, r.RemoteAddr, r.UserAgent())
+		token, err := st.CreateSession(account, ip, r.UserAgent())
 		if err != nil {
 			http.Error(w, "Session unavailable", 503)
 			return
@@ -270,9 +271,9 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 	return append([]string(nil), accountRoutePatterns...)
 }
 
-// Limits use only the TCP peer. Behind a reverse proxy all clients share its
-// bucket; X-Forwarded-For is deliberately not trusted. Idle buckets are pruned,
+// Limits use clientip.Key on resolved client IPs. Idle buckets are pruned,
 // and the map has a hard cap so arbitrary source IPs cannot grow memory forever.
+// Eviction admits new clients; an evicted attacker only regains a fresh burst.
 type ipBucket struct {
 	tokens float64
 	at     time.Time
@@ -287,10 +288,7 @@ func newIPLimiter(perMinute, burst int) *ipLimiter {
 	return &ipLimiter{buckets: make(map[string]ipBucket), perSecond: float64(perMinute) / 60, burst: float64(burst)}
 }
 func (l *ipLimiter) allow(remote string) bool {
-	ip, _, err := net.SplitHostPort(remote)
-	if err != nil {
-		ip = remote
-	}
+	ip := clientip.Key(remote)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
@@ -303,7 +301,14 @@ func (l *ipLimiter) allow(remote string) bool {
 				}
 			}
 			if len(l.buckets) >= 4096 {
-				return false
+				var oldest string
+				var at time.Time
+				for k, v := range l.buckets {
+					if oldest == "" || v.at.Before(at) {
+						oldest, at = k, v.at
+					}
+				}
+				delete(l.buckets, oldest)
 			}
 		}
 		b = ipBucket{l.burst, now}
@@ -317,9 +322,9 @@ func (l *ipLimiter) allow(remote string) bool {
 	l.buckets[ip] = b
 	return allowed
 }
-func (l *ipLimiter) wrap(next http.HandlerFunc) http.HandlerFunc {
+func (l *ipLimiter) wrap(next http.HandlerFunc, resolver clientip.Resolver) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !l.allow(r.RemoteAddr) {
+		if !l.allow(resolver.Resolve(r)) {
 			w.Header().Set("Retry-After", "2")
 			http.Error(w, "Too many attempts", 429)
 			return

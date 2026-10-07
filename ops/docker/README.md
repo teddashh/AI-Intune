@@ -119,3 +119,5 @@ Docker 套件目前沒有連續複寫功能（Litestream 連續備份目前僅�
 ```
 
 完整說明：`docs/DEPLOY-OSS.md`。託管範例：`docs/DEPLOY-FLY.md`（Fly.io）。Cloudflare Containers 尚未實作。
+
+The Autopilot pack uses a fixed bridge subnet as Hub trusted proxies and publishes no Hub port. Caddy v2.5+ appends the real client to `X-Forwarded-For` and ignores client-sent forwarded headers unless Caddy itself has `trusted_proxies` configured. See [Caddy documentation](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy).

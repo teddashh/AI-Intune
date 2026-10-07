@@ -1,5 +1,6 @@
 # Automatic HTTPS; reverse_proxy handles WebSocket upgrades by default.
-# Preserve the original Host. Hub does not trust forwarded identity headers.
+# Preserve the original Host. Caddy v2.5+ appends the real client to X-Forwarded-For
+# and ignores client-sent forwarded headers unless its own trusted_proxies is set.
 {$CLAWCTL_PUBLIC_HOST} {
     reverse_proxy hub:8787
 }

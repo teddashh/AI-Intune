@@ -249,6 +249,10 @@ func TestMFABadCodesLockoutAcrossPendingLogins(t *testing.T) {
 		}
 	}
 	w := request("192.0.2.99:1234", "/login", "username=admin&password=a+long+test+password", nil)
+	if w.Code != 200 {
+		t.Fatal("per-client password login did not reach second factor", w.Code)
+	}
+	w = request("192.0.2.99:1234", "/login/mfa", "code="+codes[0], w.Result().Cookies()[0])
 	if w.Code != 401 {
 		t.Fatal("password cleared second factor failures", w.Code)
 	}

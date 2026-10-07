@@ -53,8 +53,8 @@ func TestMFALifecycleReplayRecoveryLockout(t *testing.T) {
 			t.Fatal("bad code")
 		}
 	}
-	if _, err = s.VerifyPassword("admin", testAdminPassword); err == nil {
-		t.Fatal("password bypassed MFA lockout")
+	if _, err = s.VerifyPassword("admin", testAdminPassword, ""); err != nil {
+		t.Fatal("legacy MFA counter affected per-client password verification", err)
 	}
 	if err = s.VerifySecondFactor(a.AccountID, codes[1]); err == nil {
 		t.Fatal("recovery bypassed lockout")

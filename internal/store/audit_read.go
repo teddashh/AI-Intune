@@ -75,7 +75,7 @@ var allAuditActions = [...]AuditAction{
 	AuditMaintenanceContinue,
 	AuditMaintenanceAbandon,
 	AuditOperatorDenied,
-	AuditHubSetup, AuditHubLoginOK, AuditHubLoginFailed, AuditHubLockout, AuditHubLogout,
+	AuditHubGuessing, AuditHubSetup, AuditHubLoginOK, AuditHubLoginFailed, AuditHubLockout, AuditHubLogout,
 	AuditMFAEnabled, AuditMFADisabled, AuditMFAFailed, AuditRecoveryCodeUsed,
 }
 

@@ -131,7 +131,7 @@ func registerSecurityRoutes(mux *http.ServeMux, st *store.Store, authority strin
 				data.Enabled = err == nil
 			case "/account/security/totp/disable", "/account/security/password":
 				var a store.HubAccount
-				a, err = st.VerifyPassword(p.TailnetUserLogin, r.PostForm.Get("password"), metadata)
+				a, err = st.VerifyPassword(p.TailnetUserLogin, r.PostForm.Get("password"), r.RemoteAddr, metadata)
 				if err == nil && a.AccountID != id {
 					err = store.ErrAccountAuth
 				}

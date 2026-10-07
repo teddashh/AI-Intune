@@ -13,7 +13,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/teddashh/AI-Intune/internal/clientip"
 	"github.com/teddashh/AI-Intune/internal/localauth"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/store"
@@ -40,7 +42,11 @@ func localAccountHandler(t *testing.T) (http.Handler, *store.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := newHubHTTPHandler(&hub{store: st}, ui, auth, config.public.Authority(), config)
+	resolver, err := clientip.Parse(os.Getenv("CLAWCTL_TRUSTED_PROXIES"), os.Getenv("CLAWCTL_CLIENT_IP_HEADER"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := newHubHTTPHandler(&hub{store: st, clientIP: resolver}, ui, auth, config.public.Authority(), config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,6 +234,9 @@ func TestEnrollmentIPLimit(t *testing.T) {
 		if i < 30 && w.Code == 429 {
 			t.Fatal("early limit")
 		}
+		if i < 30 && w.Code != 400 {
+			t.Fatalf("enrollment request missed handler: %d", w.Code)
+		}
 		if i == 30 && w.Code != 429 {
 			t.Fatal("no limit", w.Code)
 		}
@@ -253,7 +262,7 @@ func TestResetAdminPasswordCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 5 {
-		st.VerifyPassword("admin", "wrong")
+		st.VerifyPassword("admin", "wrong", "192.0.2.1")
 	}
 	// Use the existing database opened by the helper; recovery also works while
 	// a process has it open, with SQLite serializing the account/session update.
@@ -272,7 +281,7 @@ func TestResetAdminPasswordCommand(t *testing.T) {
 	if _, err = st.LookupSession(token); err == nil {
 		t.Fatal("session survived reset")
 	}
-	if _, err = st.VerifyPassword("admin", "replacement password"); err != nil {
+	if _, err = st.VerifyPassword("admin", "replacement password", "192.0.2.1"); err != nil {
 		t.Fatal("lockout not cleared", err)
 	}
 }
@@ -399,7 +408,7 @@ func TestBootstrapAdminCommand(t *testing.T) {
 	if err := runBootstrapAdmin(args, strings.NewReader("headless admin password\r\n")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.VerifyPassword("admin", "headless admin password"); err != nil {
+	if _, err := st.VerifyPassword("admin", "headless admin password", "192.0.2.1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := runBootstrapAdmin(args, strings.NewReader("another admin password")); !errors.Is(err, store.ErrAdminExists) {
@@ -407,5 +416,119 @@ func TestBootstrapAdminCommand(t *testing.T) {
 	}
 	if n, err := st.CountAccounts(); err != nil || n != 1 {
 		t.Fatal(n, err)
+	}
+}
+
+func TestLoginResolvedIPBuckets(t *testing.T) {
+	for _, trusted := range []bool{true, false} {
+		t.Run(fmt.Sprint(trusted), func(t *testing.T) {
+			proxies := ""
+			if trusted {
+				proxies = "10.0.0.0/8"
+			}
+			t.Setenv("CLAWCTL_TRUSTED_PROXIES", proxies)
+			h, st := localAccountHandler(t)
+			if _, err := st.CreateFirstAdmin("admin", "test admin password"); err != nil {
+				t.Fatal(err)
+			}
+			request := func(ip string) int {
+				r := httptest.NewRequest("POST", "https://hub.example.com/login", strings.NewReader("username=unknown&password=wrong"))
+				r.RemoteAddr = "10.0.0.1:1234"
+				r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				r.Header.Set("X-Forwarded-For", ip)
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, r)
+				return w.Code
+			}
+			for range 5 {
+				if code := request("192.0.2.1"); code != 401 {
+					t.Fatal(code)
+				}
+			}
+			if code := request("192.0.2.1"); code != 429 {
+				t.Fatal(code)
+			}
+			want := 429
+			if trusted {
+				want = 401
+			}
+			if code := request("192.0.2.2"); code != want {
+				t.Fatalf("got %d want %d", code, want)
+			}
+		})
+	}
+}
+
+func TestIPLimiterKeysAndEviction(t *testing.T) {
+	l := newIPLimiter(10, 1)
+	if !l.allow("2001:db8:1:2::1") || l.allow("2001:db8:1:2::2") || !l.allow("2001:db8:1:3::1") {
+		t.Fatal("IPv6 /64 buckets")
+	}
+	if !l.allow("192.0.2.1") || l.allow("::ffff:192.0.2.1") {
+		t.Fatal("mapped IPv4 buckets")
+	}
+	l = newIPLimiter(10, 1)
+	now := time.Now()
+	for i := range 4096 {
+		l.buckets[fmt.Sprintf("source-%d", i)] = ipBucket{0, now}
+	}
+	l.buckets["source-0"] = ipBucket{0, now.Add(-time.Minute)}
+	if !l.allow("192.0.2.1") {
+		t.Fatal("full map denied new admin source")
+	}
+	if len(l.buckets) != 4096 {
+		t.Fatal(len(l.buckets))
+	}
+	if _, ok := l.buckets["source-0"]; ok {
+		t.Fatal("oldest bucket retained")
+	}
+	if l.allow("192.0.2.1") {
+		t.Fatal("new bucket not limited")
+	}
+	if !l.allow("source-0") {
+		t.Fatal("evicted source did not regain burst")
+	}
+}
+
+func TestEnrollmentResolvedIPv6Limiter(t *testing.T) {
+	resolver, _ := clientip.Parse("10.0.0.0/8", "")
+	h := &hub{clientIP: resolver}
+	mux := http.NewServeMux()
+	h.agentRoutes(mux)
+	for i := range 31 {
+		req := httptest.NewRequest("POST", "/v1/enrollments", strings.NewReader("{"))
+		req.RemoteAddr = "10.0.0.1:1"
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("2001:db8:1:2::%x", i+1))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if i < 30 && w.Code != 400 {
+			t.Fatalf("enrollment request missed handler: %d", w.Code)
+		}
+		if i == 30 && w.Code != 429 {
+			t.Fatalf("rotating IPv6 bypassed enrollment limiter: %d", w.Code)
+		}
+	}
+}
+
+func TestLoginIPv6Rotation(t *testing.T) {
+	t.Setenv("CLAWCTL_TRUSTED_PROXIES", "10.0.0.0/8")
+	h, st := localAccountHandler(t)
+	if _, err := st.CreateFirstAdmin("admin", "test admin password"); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 6 {
+		req := httptest.NewRequest("POST", "https://hub.example.com/login", strings.NewReader("username=unknown&password=wrong"))
+		req.RemoteAddr = "10.0.0.1:1"
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("2001:db8:1:2::%x", i+1))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		want := 401
+		if i == 5 {
+			want = 429
+		}
+		if w.Code != want {
+			t.Fatalf("attempt %d: %d want %d", i, w.Code, want)
+		}
 	}
 }

@@ -43,6 +43,9 @@ func TestOpenAddsOperatorAndAuthColumnsToLegacyAuditLog(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.DB().Exec(`DROP INDEX idx_audit_auth_action_at`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.DB().Exec(`ALTER TABLE audit_log DROP COLUMN idempotency_key`); err != nil {
 		t.Fatal(err)
 	}
@@ -61,6 +64,10 @@ func TestOpenAddsOperatorAndAuthColumnsToLegacyAuditLog(t *testing.T) {
 		t.Fatalf("migrate legacy audit_log: %v", err)
 	}
 	defer s.Close()
+	var indexCount int
+	if err := s.DB().QueryRow(`SELECT count(*) FROM sqlite_master WHERE name='idx_audit_auth_action_at'`).Scan(&indexCount); err != nil || indexCount != 1 {
+		t.Fatalf("login audit index: %d %v", indexCount, err)
+	}
 	have, err := columnSet(s.DB(), "audit_log")
 	if err != nil || !have["idempotency_key"] || !have["request_digest"] ||
 		!have["auth_subject"] || !have["auth_node_id"] || !have["auth_capability"] ||

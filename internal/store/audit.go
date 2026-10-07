@@ -28,6 +28,7 @@ import (
 type AuditAction string
 
 const (
+	AuditHubGuessing               AuditAction = "hub-login-guessing"
 	AuditHubSetup                  AuditAction = "hub-setup"
 	AuditHubLoginOK                AuditAction = "hub-login-ok"
 	AuditHubLoginFailed            AuditAction = "hub-login-failed"
