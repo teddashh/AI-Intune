@@ -24,8 +24,13 @@ import (
 
 func localAccountHandler(t *testing.T) (http.Handler, *store.Store) {
 	t.Helper()
+	return localAccountHandlerForMode(t, authModeLocal)
+}
+
+func localAccountHandlerForMode(t *testing.T, mode authMode) (http.Handler, *store.Store) {
+	t.Helper()
 	t.Setenv("CLAWCTL_PUBLIC_URL", "https://hub.example.com")
-	config, err := cloudConfiguration(authModeLocal, "127.0.0.1:8787")
+	config, err := cloudConfiguration(mode, "127.0.0.1:8787")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +43,7 @@ func localAccountHandler(t *testing.T) (http.Handler, *store.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	auth, err := withSessionAuthorizer(st, authModeLocal, true, "", nil)
+	auth, err := withSessionAuthorizer(st, mode, true, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,6 +71,7 @@ func accountRequest(handler http.Handler, method, path, body string, cookie *htt
 	return w
 }
 func TestLocalAccountLifecycle(t *testing.T) {
+	t.Setenv("CLAWCTL_REQUIRE_MFA", "0")
 	h, st := localAccountHandler(t)
 	for _, tt := range []struct {
 		path     string

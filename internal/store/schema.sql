@@ -1528,6 +1528,20 @@ CREATE TABLE IF NOT EXISTS hub_sessions (
 );
 CREATE INDEX IF NOT EXISTS hub_sessions_account ON hub_sessions(account_id);
 
+-- DB read access = MFA bypass, as on any TOTP server. DB backups are sensitive.
+CREATE TABLE IF NOT EXISTS hub_account_mfa (
+ account_id TEXT PRIMARY KEY REFERENCES hub_accounts(account_id),
+ totp_secret TEXT NOT NULL,
+ enabled_at TEXT,
+ last_used_step INTEGER NOT NULL DEFAULT 0,
+ pending_secret TEXT
+);
+CREATE TABLE IF NOT EXISTS hub_account_recovery_codes (
+ account_id TEXT NOT NULL REFERENCES hub_accounts(account_id),
+ code_hash TEXT NOT NULL,
+ used_at TEXT,
+ PRIMARY KEY(account_id, code_hash)
+);
 -- Per-client lockout; account-wide legacy counters are no longer used.
 CREATE TABLE IF NOT EXISTS hub_login_failures (
  account_id TEXT NOT NULL REFERENCES hub_accounts(account_id),

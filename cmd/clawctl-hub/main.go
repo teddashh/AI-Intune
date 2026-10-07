@@ -472,6 +472,9 @@ func serve(argv []string) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if _, err := mfaEnforcement(mode, log.Printf); err != nil {
+		log.Fatal(err)
+	}
 	ipResolver, err := clientip.Parse(os.Getenv("CLAWCTL_TRUSTED_PROXIES"), os.Getenv("CLAWCTL_CLIENT_IP_HEADER"))
 	if err != nil {
 		log.Fatal(err)

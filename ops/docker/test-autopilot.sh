@@ -28,3 +28,6 @@ subnet="$(sed -n 's/^        - subnet: //p' "$compose")"
 trusted="$(sed -n 's/^      CLAWCTL_TRUSTED_PROXIES: //p' "$compose")"
 [[ "$subnet" == '${CLAWCTL_DOCKER_SUBNET:-172.31.87.0/24}' && "$subnet" == "$trusted" ]] || fail 'subnet must equal trusted proxies'
 grep -q 'CLAWCTL_CLIENT_IP_HEADER: X-Forwarded-For' "$compose" || fail 'client IP header missing'
+
+grep -Eq '^      CLAWCTL_REQUIRE_MFA:$' "$compose" || fail 'MFA must preserve default-on and pass explicit opt-out'
+grep -Fq '# CLAWCTL_REQUIRE_MFA=0  # NOT recommended' "$HERE/autopilot.env.example" || fail 'MFA opt-out warning missing'

@@ -31,6 +31,7 @@ type HubAccount struct {
 	AccountID    string
 	Username     string
 	passwordHash string // also guards session issuance against a concurrent password reset
+	mfaSecret    string // snapshots the factor at password verification; enrollment invalidates it
 }
 
 func passwordHash(password string) (string, error) {
@@ -154,7 +155,7 @@ func (s *Store) VerifyPassword(username, password, clientIP string, metadata ...
 	}
 	var disabled sql.NullString
 	var currentHash string
-	err = tx.QueryRow(`SELECT password_hash,disabled_at FROM hub_accounts WHERE account_id=?`, a.AccountID).Scan(&currentHash, &disabled)
+	err = tx.QueryRow(`SELECT password_hash,disabled_at,COALESCE((SELECT totp_secret FROM hub_account_mfa WHERE account_id=hub_accounts.account_id AND enabled_at IS NOT NULL),'') FROM hub_accounts WHERE account_id=?`, a.AccountID).Scan(&currentHash, &disabled, &a.mfaSecret)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return HubAccount{}, err
 	}
@@ -171,7 +172,8 @@ func (s *Store) VerifyPassword(username, password, clientIP string, metadata ...
 	blocked = blocked || now.Before(until)
 	action := AuditAction(AuditHubLoginFailed)
 	if valid && !blocked {
-		_, err = tx.Exec(`DELETE FROM hub_login_failures WHERE account_id=? AND client_ip=?`, a.AccountID, clientIP)
+		// With MFA, completion of the second factor clears login failures.
+		_, err = tx.Exec(`DELETE FROM hub_login_failures WHERE account_id=? AND client_ip=? AND NOT EXISTS (SELECT 1 FROM hub_account_mfa WHERE account_id=? AND enabled_at IS NOT NULL)`, a.AccountID, clientIP, a.AccountID)
 		action = AuditHubLoginOK
 	} else if !blocked {
 		if locked.Valid {
@@ -199,23 +201,8 @@ func (s *Store) VerifyPassword(username, password, clientIP string, metadata ...
 		}
 	}
 	if a.AccountID != "" && (!valid || blocked) {
-		var failures, signals int
-		since := fmtTime(now.Add(-time.Hour))
-		subject := "local-user:" + a.AccountID
-		if err = tx.QueryRow(`SELECT count(*) FROM audit_log WHERE auth_subject=? AND action=? AND at>?`, subject, AuditHubLoginFailed, since).Scan(&failures); err != nil {
+		if err = s.auditHubGuessingTx(tx, a, metadata...); err != nil {
 			return HubAccount{}, err
-		}
-		if failures >= 50 {
-			if err = tx.QueryRow(`SELECT count(*) FROM audit_log WHERE auth_subject=? AND action=? AND at>?`, subject, AuditHubGuessing, since).Scan(&signals); err != nil {
-				return HubAccount{}, err
-			}
-			if signals == 0 {
-				entry := accountAudit(AuditHubGuessing, a, false, metadata...)
-				entry.Detail = "hub login: distributed password guessing suspected"
-				if err = s.recordAuditTx(tx, entry); err != nil {
-					return HubAccount{}, err
-				}
-			}
 		}
 	}
 	if err = tx.Commit(); err != nil {
@@ -238,7 +225,7 @@ func (s *Store) CreateSession(a HubAccount, sourceAddr, userAgent string) (strin
 		return "", err
 	}
 	now := s.nowFn()
-	res, err := s.execWrite(context.Background(), "create_hub_session", `INSERT INTO hub_sessions(session_hash,account_id,created_at,last_seen_at,idle_expires_at,absolute_expires_at,source_addr,user_agent) SELECT ?,account_id,?,?,?,?,?,? FROM hub_accounts WHERE account_id=? AND password_hash=? AND disabled_at IS NULL`, sessionHash(token), fmtTime(now), fmtTime(now), fmtTime(now.Add(12*time.Hour)), fmtTime(now.Add(7*24*time.Hour)), sourceAddr, truncAudit(userAgent, 200), a.AccountID, a.passwordHash)
+	res, err := s.execWrite(context.Background(), "create_hub_session", `INSERT INTO hub_sessions(session_hash,account_id,created_at,last_seen_at,idle_expires_at,absolute_expires_at,source_addr,user_agent) SELECT ?,account_id,?,?,?,?,?,? FROM hub_accounts WHERE account_id=? AND password_hash=? AND disabled_at IS NULL AND COALESCE((SELECT totp_secret FROM hub_account_mfa WHERE account_id=hub_accounts.account_id AND enabled_at IS NOT NULL),'')=?`, sessionHash(token), fmtTime(now), fmtTime(now), fmtTime(now.Add(12*time.Hour)), fmtTime(now.Add(7*24*time.Hour)), sourceAddr, truncAudit(userAgent, 200), a.AccountID, a.passwordHash, a.mfaSecret)
 	if err != nil {
 		return "", err
 	}
@@ -349,4 +336,27 @@ func (s *Store) LocalAccountLogin(accountID string) (string, error) {
 	var login string
 	err := s.rdb.QueryRow(`SELECT username FROM hub_accounts WHERE account_id=? AND disabled_at IS NULL`, accountID).Scan(&login)
 	return login, err
+}
+
+// Password and second-factor failures contribute to one rolling audit signal.
+// This observes distributed guessing without locking the account globally.
+func (s *Store) auditHubGuessingTx(tx *writeTx, a HubAccount, metadata ...AuditEntry) error {
+	var failures, signals int
+	since := fmtTime(s.nowFn().Add(-time.Hour))
+	subject := "local-user:" + a.AccountID
+	if err := tx.QueryRow(`SELECT count(*) FROM audit_log WHERE auth_subject=? AND action IN (?,?) AND at>?`, subject, AuditHubLoginFailed, AuditMFAFailed, since).Scan(&failures); err != nil {
+		return err
+	}
+	if failures < 50 {
+		return nil
+	}
+	if err := tx.QueryRow(`SELECT count(*) FROM audit_log WHERE auth_subject=? AND action=? AND at>?`, subject, AuditHubGuessing, since).Scan(&signals); err != nil {
+		return err
+	}
+	if signals != 0 {
+		return nil
+	}
+	entry := accountAudit(AuditHubGuessing, a, false, metadata...)
+	entry.Detail = "hub login: distributed password or second-factor guessing suspected"
+	return s.recordAuditTx(tx, entry)
 }

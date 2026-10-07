@@ -679,17 +679,25 @@ func selectSubNavigationLocation(nav *subNavigation, section string) {
 	}
 }
 
+type mfaEnforcementDisabledKey struct{}
+
+// WithMFAEnforcementDisabled marks a validated local session for the UI warning.
+func WithMFAEnforcementDisabled(r *http.Request) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), mfaEnforcementDisabledKey{}, true))
+}
+
 type accessView struct {
-	LocalSession bool
-	Known        bool
-	Login        string
-	Device       string
-	Subject      string
-	Permissions  string
-	Attribution  string
-	CanView      bool
-	CanOperate   bool
-	CanAdmin     bool
+	MFAEnforcementDisabled bool
+	LocalSession           bool
+	Known                  bool
+	Login                  string
+	Device                 string
+	Subject                string
+	Permissions            string
+	Attribution            string
+	CanView                bool
+	CanOperate             bool
+	CanAdmin               bool
 }
 
 func accessFromRequest(r *http.Request) accessView {
@@ -701,8 +709,9 @@ func accessFromRequest(r *http.Request) accessView {
 		return accessView{}
 	}
 	return accessView{
-		LocalSession: principal.AuthMethod == operatorauth.AuthMethodLocalAccountSession,
-		Known:        true, Login: principal.TailnetUserLogin, Device: principal.DeviceName,
+		MFAEnforcementDisabled: r.Context().Value(mfaEnforcementDisabledKey{}) == true && principal.AuthMethod == operatorauth.AuthMethodLocalAccountSession,
+		LocalSession:           principal.AuthMethod == operatorauth.AuthMethodLocalAccountSession,
+		Known:                  true, Login: principal.TailnetUserLogin, Device: principal.DeviceName,
 		Subject: principal.StableSubject(), Permissions: principal.PermissionLabel(),
 		Attribution: principal.Attribution(), CanView: principal.Has(operatorauth.View),
 		CanOperate: principal.Has(operatorauth.Operate), CanAdmin: principal.Has(operatorauth.Admin),

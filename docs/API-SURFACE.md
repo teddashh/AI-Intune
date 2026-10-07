@@ -3,23 +3,24 @@
 > 這是控制面 parity 的帳本，不是行銷功能表。只要正常操作仍只有 CLI，
 > 就留在「缺口」欄；高風險不是把入口藏起來，而是補 RBAC、preview、確認、
 > 冪等與 audit。共同成功語意見 [CONTROL-PLANE-CONTRACT.md](CONTROL-PLANE-CONTRACT.md)。
-> 逐一對照 227 個 HTTP operations（23 non-operator＋204 operator；107 條 operator JSON）、
+> 逐一對照 233 個 HTTP operations（24 non-operator＋209 operator；107 條 operator JSON）、
 > native Store、UI／CLI 與 Intune-style submenu 的完整清單，
 > 見 [FEATURE-INVENTORY.md](FEATURE-INVENTORY.md)。
 
 ## Public local-account routes (Autopilot)
 
-These five operations are included in the 227-operation tally above (23 non-operator + 204 operator). The Tailscale inventory/contract excludes these five and totals 222. Account routes return 404 in `tailscale` mode. In `local` / `both`, they pin Host to `CLAWCTL_PUBLIC_URL`, use locked security headers and Go CrossOriginProtection, and do not require an existing operator session.
+These six operations are included in the 233-operation tally above (24 non-operator + 209 operator). The inventory/contract excludes these six public account operations and totals 227. Account routes return 404 in `tailscale` mode. In `local` / `both`, they pin Host to `CLAWCTL_PUBLIC_URL`, use locked security headers and Go CrossOriginProtection, and do not require an existing operator session.
 
 | Method | Route | Authority / behavior |
 |---|---|---|
-| `GET`, `POST` | `/setup` | First account only; POST requires setup code, username and password. Returns 404 after an admin exists. |
-| `GET`, `POST` | `/login` | Form and password authentication; creates local session. Login/setup POSTs share TCP-peer limit 10/minute, burst 5. |
+| `GET`, `POST` | `/setup` | First account only; POST requires setup code, username and password, creates a session, and redirects to automatic TOTP enrollment. Returns 404 after an admin exists. |
+| `GET`, `POST` | `/login` | Form and password authentication; creates a local session, or a five-minute source-bound pending login when MFA is enabled. Login/setup POSTs share resolved client-key limit 10/minute, burst 5. |
+| `POST` | `/login/mfa` | Requires pending login cookie plus authenticator or unused recovery code; same resolved client-key limiter and per-(account, client key) lockout as password login. |
 | `POST` | `/logout` | Revokes the presented session, clears cookie, redirects to login. |
 
 | Method | Operator download route | Authority / behavior |
 |---|---|---|
-| `POST` | `/machines/{id}/keyed-installer` | Admin, locked browser security profile and CSRF checks; form `token` + Linux `arch` (`amd64` / `arm64`); returns no-store archive embedding Hub URL and pending one-time token without redeeming it. Already included in the 204 operator tally. |
+| `POST` | `/machines/{id}/keyed-installer` | Admin, locked browser security profile and CSRF checks; form `token` + Linux `arch` (`amd64` / `arm64`); returns no-store archive embedding Hub URL and pending one-time token without redeeming it. Already included in the 209 operator tally. |
 
 In local mode operator routes use a local admin session, including `/metrics`; in `both`, sessions precede eligible WhoIs fallback. Forwarded identity headers and machine/verifier bearers never authorize operators. The Tailscale-specific explanations below describe the advanced mode. See [Autopilot](AUTOPILOT.md) for setup, expiry, lockout and recovery.
 
@@ -514,3 +515,17 @@ locked security profile. It accepts `token` and Linux `arch` (`amd64` or `arm64`
 in a form body and returns a non-cacheable bootstrap archive containing the Hub
 URL and a one-time enrollment token, without redeeming it. Invalid, used, expired,
 revoked, or mismatched tickets return the same generic 404 response.
+
+### Local account security (operator Admin)
+
+All five routes require a local session principal; Tailscale principals receive 404. POSTs use the operator cross-origin protection and an IP limiter. Responses are no-store.
+
+| Method | Route | Behavior |
+|---|---|---|
+| GET | `/account/security` | MFA status and password-change form; starts required enrollment automatically. |
+| POST | `/account/security/totp/begin` | Pending secret and escaped otpauth URI; refuses replacement of enabled MFA. |
+| POST | `/account/security/totp/confirm` | Confirms code, enables MFA, shows ten recovery codes once. |
+| POST | `/account/security/totp/disable` | Refused with HTTP 400 while MFA enforcement is on; otherwise requires current password plus valid second factor. |
+| POST | `/account/security/password` | Requires current password; changes password and revokes other sessions. |
+
+MFA enforcement defaults on in `local` / `both`; local sessions without MFA redirect from operator HTML routes to `/account/security`, and other operator routes return 403 `MFA_ENROLLMENT_REQUIRED`. Enrollment and logout remain accessible. Explicit `CLAWCTL_REQUIRE_MFA=0` / `false` / `off` opts out with startup and UI warnings; invalid values refuse startup. Tailscale principals are unaffected.
