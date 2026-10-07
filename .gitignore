@@ -19,3 +19,4 @@ __pycache__/
 
 # Docker Hub env (secrets / Tailscale listen) — never commit
 ops/docker/hub.env
+ops/notify.env

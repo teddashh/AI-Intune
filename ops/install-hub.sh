@@ -556,7 +556,11 @@ cat <<EOF
        但若另行明示有效 tailnet listener 與 prefix，仍可產生第二 writer。
        改設定請寫 hub.env 後 restart unit。
 
-       CLAWCTL_NOTIFY_CMD=\$HOME/.local/libexec/clawctl/notify-telegram.sh
+       # Preferred: built-in Telegram/webhook channels (ops/notify.env.example).
+       CLAWCTL_NOTIFY_ENV=\$HOME/.config/clawctl/notify.env
+       # Legacy command (built-in channels in that file are then unused):
+       # CLAWCTL_NOTIFY_CMD=\$HOME/.local/libexec/clawctl/notify-telegram.sh
+       # ops/notify-telegram.sh stays for ops/deadman.sh and Alertmanager.
 
   4. ⚠ Hub 不可以裝在它自己管的機器上，也不可以自己監看自己。
      外部死人之鐘要跑在**另一台**上：ops/deadman.sh

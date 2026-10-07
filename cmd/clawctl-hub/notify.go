@@ -11,9 +11,9 @@ import (
 	"github.com/teddashh/AI-Intune/internal/store"
 )
 
-// notifier is the delivery seam. nil means no command is configured. A later
-// Telegram or webhook sender can implement the same method without changing
-// deliver's name or parameters.
+// notifier is the delivery seam. nil means nothing is configured. The command
+// notifier and the built-in Telegram/webhook notifier both implement Notify
+// without changing deliver's name or parameters.
 type notifier interface {
 	Notify(ctx context.Context, kind, body string) (channel string, err error)
 }
@@ -37,10 +37,16 @@ func (n commandNotifier) Notify(ctx context.Context, kind, body string) (string,
 }
 
 func (h *hub) notifier() notifier {
-	if h == nil || strings.TrimSpace(h.notifyCmd) == "" {
+	if h == nil {
 		return nil
 	}
-	return commandNotifier{cmd: h.notifyCmd}
+	if strings.TrimSpace(h.notifyCmd) != "" {
+		return commandNotifier{cmd: h.notifyCmd}
+	}
+	if h.notifyBuiltin != nil {
+		return h.notifyBuiltin
+	}
+	return nil
 }
 
 const (
@@ -66,11 +72,43 @@ func notifyBackoff(failures int) time.Duration {
 	return d
 }
 
-// logNotifyConfigured records that a command is set. It does not run it.
+// logNotifyConfigured records which notifier is active. It does not send.
 func (h *hub) logNotifyConfigured() {
-	if h.notifier() != nil {
-		log.Printf("notify command is configured")
+	n := h.notifier()
+	if n == nil {
+		return
 	}
+	if _, ok := n.(commandNotifier); ok {
+		if h.notifyEnvChannelsIgnored {
+			log.Printf("notify: using notify command; built-in channels in the notify env file are not used")
+			return
+		}
+		log.Printf("notify: using command")
+		return
+	}
+	kind := h.notifyKind
+	path := strings.TrimSpace(h.notifyEnv)
+	if b, ok := n.(*builtinNotifier); ok {
+		if path == "" {
+			path = b.path
+		}
+		if kind == "" {
+			kind = b.channels
+		}
+		if kind == "" {
+			if cfg, err := loadNotifyEnvFile(b.path); err == nil {
+				kind = cfg.channelName()
+			}
+		}
+	}
+	if kind == "" {
+		kind = "builtin"
+	}
+	if path != "" {
+		log.Printf("notify: using %s; env file %s", kind, path)
+		return
+	}
+	log.Printf("notify: using %s", kind)
 }
 
 func (h *hub) reportDue(now time.Time) (time.Time, bool) {
