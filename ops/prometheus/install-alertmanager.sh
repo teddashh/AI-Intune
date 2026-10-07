@@ -15,7 +15,7 @@
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then
-	echo "要 root：sudo $0" >&2
+	echo "Must be root: sudo $0" >&2
 	exit 1
 fi
 
@@ -26,7 +26,7 @@ REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
 
 HUB_ENV="$REAL_HOME/.config/clawctl/hub.env"
 [ -r "$HUB_ENV" ] || {
-	echo "讀不到 $HUB_ENV" >&2
+	echo "Cannot read $HUB_ENV" >&2
 	exit 1
 }
 
@@ -34,23 +34,23 @@ HUB_ENV="$REAL_HOME/.config/clawctl/hub.env"
 NOTIFY_ENV="$(sed -n 's/^CLAWCTL_NOTIFY_ENV=//p' "$HUB_ENV" | tr -d '"'"'" | head -1)"
 NOTIFY_ENV="${NOTIFY_ENV/#\~/$REAL_HOME}"
 [ -r "$NOTIFY_ENV" ] || {
-	echo "讀不到通知設定檔（CLAWCTL_NOTIFY_ENV 指到 $NOTIFY_ENV）" >&2
+	echo "Cannot read notification config (CLAWCTL_NOTIFY_ENV points to $NOTIFY_ENV)" >&2
 	exit 1
 }
-echo "══ 通知設定讀自 $NOTIFY_ENV"
+echo "══ Notification config read from $NOTIFY_ENV"
 
 CHAT_ID="$(sed -n 's/^TELEGRAM_CHAT_ID=//p' "$NOTIFY_ENV" | tr -d '"'"'" | head -1)"
 [ -n "$CHAT_ID" ] || {
-	echo "$NOTIFY_ENV 裡沒有 TELEGRAM_CHAT_ID" >&2
+	echo "Missing TELEGRAM_CHAT_ID in $NOTIFY_ENV" >&2
 	exit 1
 }
 
-echo "══ 1/5 放 token（0600，owner prometheus，全程不印出來）"
+echo "══ 1/5 Setting up token (0600, owner prometheus, never printed)"
 TOKEN_FILE=/etc/prometheus/telegram.token
 install -m 0600 -o prometheus -g prometheus /dev/null "$TOKEN_FILE"
 sed -n 's/^TELEGRAM_BOT_TOKEN=//p' "$NOTIFY_ENV" | tr -d '"'"'" | head -1 | tr -d '\n' >"$TOKEN_FILE"
 [ -s "$TOKEN_FILE" ] || {
-	echo "token 是空的 —— 一個帶著空 token 的 Alertmanager 會安靜地送不出去" >&2
+	echo "Token is empty — an Alertmanager with an empty token will quietly fail to send" >&2
 	rm -f "$TOKEN_FILE"
 	exit 1
 }
@@ -58,7 +58,7 @@ printf '   %s  %s  sha256=%s…\n' "$TOKEN_FILE" \
 	"$(stat -c '%a %U' "$TOKEN_FILE")" \
 	"$(sha256sum "$TOKEN_FILE" | cut -c1-12)"
 
-echo "══ 2/5 產生 alertmanager.yml（chat_id 代入，token 走 bot_token_file）"
+echo "══ 2/5 Generating alertmanager.yml (chat_id substituted, token via bot_token_file)"
 AM=/etc/prometheus/alertmanager.yml
 [ -f "$AM" ] && cp -a "$AM" "$AM.bak-$STAMP" && chmod 600 "$AM.bak-$STAMP"
 sed "s|__CHAT_ID__|$CHAT_ID|" "$HERE/alertmanager.yml.tmpl" >"$AM"
@@ -66,7 +66,7 @@ sed "s|__CHAT_ID__|$CHAT_ID|" "$HERE/alertmanager.yml.tmpl" >"$AM"
 chown root:prometheus "$AM"
 chmod 640 "$AM"
 
-echo "══ 3/5 讓 Prometheus 知道 Alertmanager 在哪"
+echo "══ 3/5 Informing Prometheus where Alertmanager is located"
 PROM=/etc/prometheus/prometheus.yml
 if ! grep -q '^alerting:' "$PROM"; then
 	cp -a "$PROM" "$PROM.bak-$STAMP"
@@ -77,16 +77,16 @@ alerting:
     - static_configs:
         - targets: ["localhost:9093"]
 YAML
-	echo "   已加入 alerting 區段"
+	echo "   added alerting section"
 else
-	echo "   已經有了，沒動"
+	echo "   already present, unchanged"
 fi
 
-echo "══ 4/5 檢查（過不了就不重啟）"
+echo "══ 4/5 Verification (will not restart if checks fail)"
 amtool check-config "$AM"
 promtool check config "$PROM"
 
-echo "══ 5/5 重啟"
+echo "══ 5/5 Restarting"
 systemctl restart prometheus-alertmanager
 systemctl reload prometheus || systemctl restart prometheus
 sleep 3
@@ -95,19 +95,19 @@ for s in prometheus prometheus-alertmanager; do
 done
 
 echo
-echo "現在會送出去的（Alertmanager 分組之後的實際則數）："
+echo "Currently sending (actual count after Alertmanager grouping):"
 sleep 5
 curl -s http://localhost:9093/api/v2/alerts/groups 2>/dev/null |
 	python3 -c 'import json,sys
 gs=json.load(sys.stdin)
 if not gs:
-    print("   （沒有 —— 可能還沒收到，等一分鐘再看 http://localhost:9093）")
+    print("   (none — may not have arrived yet, wait one minute and check http://localhost:9093)")
 for g in gs:
     m=g["labels"].get("machine","?")
-    print("   %-10s %d 件：%s" % (m, len(g["alerts"]),
+    print("   %-10s %d items: %s" % (m, len(g["alerts"]),
         ", ".join(sorted({a["labels"]["alertname"] for a in g["alerts"]}))))' 2>/dev/null ||
-	echo "   （讀不到，看 http://localhost:9093）"
+	echo "   (cannot read, check http://localhost:9093)"
 
 echo
-echo "靜音一台：amtool silence add machine=sampleagent1 -d 720h -c '我自己處理'"
-echo "看目前靜音：amtool silence query"
+echo "Silence a machine: amtool silence add machine=sampleagent1 -d 720h -c 'Handling manually'"
+echo "View current silences: amtool silence query"

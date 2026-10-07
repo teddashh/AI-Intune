@@ -25,7 +25,7 @@ func (h *hub) handleListOperatorChanges(w http.ResponseWriter, r *http.Request) 
 	result, err := operator.New(h.store).ListChangesContext(r.Context(), request, time.Now().UTC())
 	if err != nil {
 		if !writeOperatorChangeReadError(w, err) {
-			log.Printf("讀取 operator changes 失敗: %v", err)
+			log.Printf("failed to read operator changes: %v", err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 changes 失敗")
 		}
 		return

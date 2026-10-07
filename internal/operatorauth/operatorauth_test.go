@@ -486,12 +486,12 @@ func TestAuthorizeRequiresRunningDaemonAndLocalDestination(t *testing.T) {
 		{
 			name: "destination belongs to another peer", state: "Running",
 			localIPs: []netip.Addr{netip.MustParseAddr("100.64.200.4")},
-			wantCode: AuthConfigurationInvalid, wantDetail: "不是這台機器",
+			wantCode: AuthConfigurationInvalid, wantDetail: "not a Tailscale IP currently held by this machine",
 		},
 		{
 			name: "status has no local addresses", state: "Running",
 			localIPs: []netip.Addr{},
-			wantCode: AuthConfigurationInvalid, wantDetail: "不是這台機器",
+			wantCode: AuthConfigurationInvalid, wantDetail: "not a Tailscale IP currently held by this machine",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -576,8 +576,8 @@ func TestPrincipalContextAndHonestAttribution(t *testing.T) {
 	}
 	wording := principal.Attribution()
 	for _, want := range []string{
-		"來源裝置 operator-laptop.example.ts.net.",
-		"Tailscale 使用者 operator@example.com",
+		"source device operator-laptop.example.ts.net.",
+		"Tailscale user operator@example.com",
 	} {
 		if !strings.Contains(wording, want) {
 			t.Errorf("Attribution() = %q, missing %q", wording, want)

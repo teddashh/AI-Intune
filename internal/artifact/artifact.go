@@ -342,14 +342,14 @@ func ReadSidecars(dir string) ([]Sidecar, error) {
 		}
 		b, err := os.ReadFile(filepath.Join(dir, entry.Name()))
 		if err != nil {
-			return nil, fmt.Errorf("讀 sidecar %s：%w", entry.Name(), err)
+			return nil, fmt.Errorf("read sidecar %s: %w", entry.Name(), err)
 		}
 		var record Sidecar
 		if err := json.Unmarshal(b, &record); err != nil {
-			return nil, fmt.Errorf("sidecar %s 不是合法 JSON：%w", entry.Name(), err)
+			return nil, fmt.Errorf("sidecar %s is not valid JSON: %w", entry.Name(), err)
 		}
 		if !ValidSHA256Hex(record.SHA256) || entry.Name() != record.SHA256+".json" {
-			return nil, fmt.Errorf("sidecar %s 的 sha256 或檔名不合法", entry.Name())
+			return nil, fmt.Errorf("sidecar %s sha256 or filename is invalid", entry.Name())
 		}
 		records = append(records, record)
 	}

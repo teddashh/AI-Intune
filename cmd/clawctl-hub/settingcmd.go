@@ -32,14 +32,14 @@ func runSettingsCommandWithDeps(ctx context.Context, argv []string, out, errOut 
 	deps machineCommandDeps,
 ) error {
 	usage := func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub settings list")
-		fmt.Fprintln(errOut, "      clawctl-hub settings publish --policy ID --checkin DUR --observation DUR [--preview]")
-		fmt.Fprintln(errOut, "      clawctl-hub settings assign --scope machine|channel --scope-id ID --policy ID --revision N [--preview]")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub settings list")
+		fmt.Fprintln(errOut, "       clawctl-hub settings publish --policy ID --checkin DUR --observation DUR [--preview]")
+		fmt.Fprintln(errOut, "       clawctl-hub settings assign --scope machine|channel --scope-id ID --policy ID --revision N [--preview]")
 	}
 	if len(argv) == 0 || argv[0] == "-h" || argv[0] == "--help" {
 		usage()
 		if len(argv) == 0 {
-			return errors.New("settings: 必須指定 list、publish 或 assign")
+			return errors.New("settings: must specify list, publish, or assign")
 		}
 		return flag.ErrHelp
 	}
@@ -52,7 +52,7 @@ func runSettingsCommandWithDeps(ctx context.Context, argv []string, out, errOut 
 		return runSettingsAssign(ctx, argv[1:], out, errOut, deps)
 	default:
 		usage()
-		return fmt.Errorf("settings: 不認得 subcommand %q", argv[0])
+		return fmt.Errorf("settings: unrecognized subcommand %q", argv[0])
 	}
 }
 
@@ -63,8 +63,8 @@ type settingsTransportFlags struct {
 
 func addSettingsTransportFlags(fs *flag.FlagSet) settingsTransportFlags {
 	return settingsTransportFlags{
-		hubURL: fs.String("hub-url", "", "HTTP operator API base URL（省略時自動發現）"),
-		json:   fs.Bool("json", false, "輸出 stable operator JSON DTO"),
+		hubURL: fs.String("hub-url", "", "HTTP operator API base URL (auto-discovered if omitted)"),
+		json:   fs.Bool("json", false, "output stable operator JSON DTO"),
 	}
 }
 
@@ -78,11 +78,11 @@ func settingsHTTPClient(flags settingsTransportFlags, fs *flag.FlagSet,
 		}
 	})
 	if explicit && (*flags.hubURL == "" || *flags.hubURL != strings.TrimSpace(*flags.hubURL)) {
-		return nil, errors.New("settings: --hub-url 不可為空或含首尾空白")
+		return nil, errors.New("settings: --hub-url cannot be empty or contain leading/trailing whitespace")
 	}
 	client, err := deploymentHTTPClient(*flags.hubURL, explicit, deps)
 	if err != nil {
-		return nil, fmt.Errorf("settings: 連接 Hub 失敗：%w", err)
+		return nil, fmt.Errorf("settings: failed to connect to Hub: %w", err)
 	}
 	return client, nil
 }
@@ -92,14 +92,14 @@ func settingsHTTPClient(flags settingsTransportFlags, fs *flag.FlagSet,
 // into a different policy than the one the operator typed.
 func settingsIntervalSeconds(name string, value time.Duration) (int, error) {
 	if value <= 0 || value%time.Second != 0 {
-		return 0, fmt.Errorf("settings: --%s 必須是正的整秒（例如 90s、5m）", name)
+		return 0, fmt.Errorf("settings: --%s must be positive whole seconds (e.g. 90s, 5m)", name)
 	}
 	return int(value / time.Second), nil
 }
 
 func validateSettingsReason(value string) error {
 	if validateDeploymentReadCLIValue("reason", value, 500) != nil {
-		return errors.New("settings: --reason 必填，最多 500 bytes，且不可含控制字元")
+		return errors.New("settings: --reason is required, at most 500 bytes, and cannot contain control characters")
 	}
 	return nil
 }
@@ -114,7 +114,7 @@ func runSettingsList(ctx context.Context, argv []string, out, errOut io.Writer,
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("settings list: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("settings list: positional arguments not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	client, err := settingsHTTPClient(flags, fs, deps)
 	if err != nil {
@@ -122,12 +122,12 @@ func runSettingsList(ctx context.Context, argv []string, out, errOut io.Writer,
 	}
 	board, err := client.SettingBoard(ctx)
 	if err != nil {
-		return fmt.Errorf("讀取設定盤面失敗：%w", err)
+		return fmt.Errorf("failed to read settings board: %w", err)
 	}
 	if *flags.json {
 		return writeSettingsJSON(out, board)
 	}
-	fmt.Fprintf(out, "預設：check-in %ds、observation %ds\n",
+	fmt.Fprintf(out, "defaults: check-in %ds, observation %ds\n",
 		board.Defaults.CheckinIntervalSeconds, board.Defaults.ObservationIntervalSeconds)
 	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "POLICY\tREVISION\tCHECKIN\tOBSERVATION\tASSIGNED")
@@ -137,7 +137,7 @@ func runSettingsList(ctx context.Context, argv []string, out, errOut io.Writer,
 			policy.Assignments)
 	}
 	if len(board.Policies) == 0 {
-		fmt.Fprintln(w, "（尚未發佈任何設定原則）")
+		fmt.Fprintln(w, "(no setting policies published yet)")
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -167,17 +167,17 @@ func runSettingsPublish(ctx context.Context, argv []string, out, errOut io.Write
 	fs := flag.NewFlagSet("settings publish", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	flags := addSettingsTransportFlags(fs)
-	policyID := fs.String("policy", "", "設定原則 ID（小寫、數字與 hyphen）")
-	checkin := fs.Duration("checkin", 0, "機器多久報到一次（30s..1h，整秒）")
-	observation := fs.Duration("observation", 0, "機器多久量一次工作負載（1m..24h，整秒）")
-	previewOnly := fs.Bool("preview", false, "只顯示會發佈成什麼，不寫入")
-	reason := fs.String("reason", "", "發佈理由")
-	requestKey := fs.String("idempotency-key", "", "重送時沿用的 request key")
+	policyID := fs.String("policy", "", "setting policy ID (lowercase, digits, and hyphens)")
+	checkin := fs.Duration("checkin", 0, "device check-in interval (30s..1h, whole seconds)")
+	observation := fs.Duration("observation", 0, "device workload observation interval (1m..24h, whole seconds)")
+	previewOnly := fs.Bool("preview", false, "show what would be published only, do not write")
+	reason := fs.String("reason", "", "publishing reason")
+	requestKey := fs.String("idempotency-key", "", "request key reused on resend")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("settings publish: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("settings publish: positional arguments not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	checkinSeconds, err := settingsIntervalSeconds("checkin", *checkin)
 	if err != nil {
@@ -196,22 +196,22 @@ func runSettingsPublish(ctx context.Context, argv []string, out, errOut io.Write
 		ObservationIntervalSeconds: observationSeconds,
 	})
 	if err != nil {
-		return fmt.Errorf("預覽設定原則失敗：%w", err)
+		return fmt.Errorf("failed to preview setting policy: %w", err)
 	}
 	if *previewOnly {
 		if *flags.json {
 			return writeSettingsJSON(out, preview)
 		}
 		if preview.Unchanged {
-			fmt.Fprintf(out, "%s revision %d 已經就是這組值；發佈不會產生新 revision。\n",
+			fmt.Fprintf(out, "%s revision %d already matches these values; publishing will not create a new revision\n",
 				preview.PolicyID, preview.CurrentRev)
 			return nil
 		}
-		fmt.Fprintf(out, "%s：revision %d → %d，check-in %ds、observation %ds，影響 %d 台。\n",
+		fmt.Fprintf(out, "%s: revision %d → %d, check-in %ds, observation %ds, affects %d machines\n",
 			preview.PolicyID, preview.CurrentRev, preview.NextRev,
 			preview.Settings.CheckinIntervalSeconds, preview.Settings.ObservationIntervalSeconds,
 			preview.AffectedMachines)
-		fmt.Fprintf(out, "下一步：重跑同一道指令，去掉 --preview，加上 --reason REASON。\n")
+		fmt.Fprintln(out, "next step: rerun the same command without --preview and add --reason REASON")
 		return nil
 	}
 	if err := validateSettingsReason(*reason); err != nil {
@@ -228,20 +228,20 @@ func runSettingsPublish(ctx context.Context, argv []string, out, errOut io.Write
 		PreviewDigest: preview.PreviewDigest, ConfirmPolicyID: *policyID, Reason: *reason,
 	})
 	if err != nil {
-		return fmt.Errorf("發佈設定原則失敗（idempotency-key=%q expected-revision=%d）：%w",
+		return fmt.Errorf("failed to publish setting policy (idempotency-key=%q expected-revision=%d): %w",
 			key, expected, err)
 	}
 	if *flags.json {
 		return writeSettingsJSON(out, result)
 	}
 	if result.Unchanged {
-		fmt.Fprintf(out, "%s 仍是 revision %d：這組值已經發佈過了。\n", result.PolicyID, result.Revision)
+		fmt.Fprintf(out, "%s is still revision %d: these values have already been published\n", result.PolicyID, result.Revision)
 		return nil
 	}
-	fmt.Fprintf(out, "%s revision %d 已發佈（check-in %ds、observation %ds，replayed=%t）。\n",
+	fmt.Fprintf(out, "%s revision %d published (check-in %ds, observation %ds, replayed=%t)\n",
 		result.PolicyID, result.Revision, result.Settings.CheckinIntervalSeconds,
 		result.Settings.ObservationIntervalSeconds, result.Replayed)
-	fmt.Fprintf(out, "下一步：clawctl-hub settings assign --scope machine --scope-id ID --policy %s --revision %d\n",
+	fmt.Fprintf(out, "next step: clawctl-hub settings assign --scope machine --scope-id ID --policy %s --revision %d\n",
 		result.PolicyID, result.Revision)
 	return nil
 }
@@ -252,21 +252,21 @@ func runSettingsAssign(ctx context.Context, argv []string, out, errOut io.Writer
 	fs := flag.NewFlagSet("settings assign", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	flags := addSettingsTransportFlags(fs)
-	scope := fs.String("scope", "machine", "machine 或 channel")
-	scopeID := fs.String("scope-id", "", "machine ID 或 channel 名稱")
-	policyID := fs.String("policy", "", "要指派的設定原則 ID")
-	revision := fs.Int64("revision", 0, "要指派的 policy revision")
-	previewOnly := fs.Bool("preview", false, "只顯示會指派成什麼，不寫入")
-	reason := fs.String("reason", "", "指派理由")
-	requestKey := fs.String("idempotency-key", "", "重送時沿用的 request key")
+	scope := fs.String("scope", "machine", "machine or channel")
+	scopeID := fs.String("scope-id", "", "machine ID or channel name")
+	policyID := fs.String("policy", "", "setting policy ID to assign")
+	revision := fs.Int64("revision", 0, "policy revision to assign")
+	previewOnly := fs.Bool("preview", false, "show what would be assigned only, do not write")
+	reason := fs.String("reason", "", "assignment reason")
+	requestKey := fs.String("idempotency-key", "", "request key reused on resend")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("settings assign: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("settings assign: positional arguments not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	if *scope != string(settingpolicy.ScopeMachine) && *scope != string(settingpolicy.ScopeChannel) {
-		return errors.New("settings assign: --scope 只接受 machine 或 channel")
+		return errors.New("settings assign: --scope only accepts machine or channel")
 	}
 	client, err := settingsHTTPClient(flags, fs, deps)
 	if err != nil {
@@ -276,26 +276,26 @@ func runSettingsAssign(ctx context.Context, argv []string, out, errOut io.Writer
 		Scope: *scope, ScopeID: *scopeID, PolicyID: *policyID, Revision: *revision,
 	})
 	if err != nil {
-		return fmt.Errorf("預覽設定指派失敗：%w", err)
+		return fmt.Errorf("failed to preview setting assignment: %w", err)
 	}
 	if *previewOnly {
 		if *flags.json {
 			return writeSettingsJSON(out, preview)
 		}
 		if preview.Unchanged {
-			fmt.Fprintf(out, "%s %s 已經在跑這組值；指派不會改變任何機器。\n",
+			fmt.Fprintf(out, "%s %s is already running these values; assignment will not change any machines\n",
 				preview.ScopeLabel, preview.ScopeID)
 			return nil
 		}
-		current := "尚未指派（跑預設值）"
+		current := "unassigned (running defaults)"
 		if preview.CurrentPolicyID != "" {
 			current = fmt.Sprintf("%s@%d", preview.CurrentPolicyID, preview.CurrentRevision)
 		}
-		fmt.Fprintf(out, "%s %s：%s → %s@%d，check-in %ds、observation %ds，影響 %d 台。\n",
+		fmt.Fprintf(out, "%s %s: %s → %s@%d, check-in %ds, observation %ds, affects %d machines\n",
 			preview.ScopeLabel, preview.ScopeID, current, preview.PolicyID, preview.Revision,
 			preview.Settings.CheckinIntervalSeconds, preview.Settings.ObservationIntervalSeconds,
 			preview.AffectedMachines)
-		fmt.Fprintln(out, "下一步：重跑同一道指令，去掉 --preview，加上 --reason REASON。")
+		fmt.Fprintln(out, "next step: rerun the same command without --preview and add --reason REASON")
 		return nil
 	}
 	if err := validateSettingsReason(*reason); err != nil {
@@ -310,21 +310,21 @@ func runSettingsAssign(ctx context.Context, argv []string, out, errOut io.Writer
 		PreviewDigest: preview.PreviewDigest, ConfirmScopeID: *scopeID, Reason: *reason,
 	})
 	if err != nil {
-		return fmt.Errorf("指派設定原則失敗（idempotency-key=%q）：%w", key, err)
+		return fmt.Errorf("failed to assign setting policy (idempotency-key=%q): %w", key, err)
 	}
 	if *flags.json {
 		return writeSettingsJSON(out, result)
 	}
 	if result.Unchanged {
-		fmt.Fprintf(out, "%s %s 仍是 %s@%d：這組值已經在跑了。\n", preview.ScopeLabel,
+		fmt.Fprintf(out, "%s %s is still %s@%d: these values are already in effect\n", preview.ScopeLabel,
 			result.ScopeID, result.PolicyID, result.PolicyRev)
 		return nil
 	}
-	fmt.Fprintf(out, "%s %s 已指派 %s@%d（check-in %ds、observation %ds，replayed=%t）。\n",
+	fmt.Fprintf(out, "%s %s assigned %s@%d (check-in %ds, observation %ds, replayed=%t)\n",
 		preview.ScopeLabel, result.ScopeID, result.PolicyID, result.PolicyRev,
 		result.Settings.CheckinIntervalSeconds, result.Settings.ObservationIntervalSeconds,
 		result.Replayed)
-	fmt.Fprintln(out, "下一步：clawctl-hub settings list，看每台回報的是不是這一份。")
+	fmt.Fprintln(out, "next step: clawctl-hub settings list to inspect whether each machine is reporting this policy")
 	return nil
 }
 

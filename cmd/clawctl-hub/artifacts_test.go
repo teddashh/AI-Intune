@@ -136,7 +136,7 @@ func TestFetchArtifactRejectsSHA512MismatchWithoutLeavingFiles(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "artifacts")
 	_, _, err := fetchArtifact(context.Background(), dir, "openclaw@2026.9.2",
 		registry.server.URL, defaultArtifactMaxBytes, "tester")
-	if err == nil || !strings.Contains(err.Error(), "sha512") || !strings.Contains(err.Error(), "對不上") {
+	if err == nil || !strings.Contains(err.Error(), "sha512") || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("sha512 mismatch 錯誤不清楚：%v", err)
 	}
 	assertNoArtifactFiles(t, dir)

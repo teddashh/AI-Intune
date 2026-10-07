@@ -180,7 +180,7 @@ func NormalizeMachineTimelineRequest(request MachineTimelineRequest) (MachineTim
 		request.Days = DefaultMachineTimelineDays
 	}
 	if request.Days < 1 || request.Days > MaxMachineTimelineDays {
-		return MachineTimelineRequest{}, fmt.Errorf("%w: days 是 %d，可用範圍是 1–%d",
+		return MachineTimelineRequest{}, fmt.Errorf("%w: days is %d, allowed range is 1-%d",
 			ErrInvalidMachineTimeline, request.Days, MaxMachineTimelineDays)
 	}
 	return request, nil

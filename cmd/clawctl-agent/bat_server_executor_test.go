@@ -209,7 +209,7 @@ func TestBATServerExecutorSilencesServiceStdout(t *testing.T) {
 		"/home/bat-test/.local/share/clawctl/bat-server/data",
 	)
 	if !strings.Contains(body, "\nStandardOutput=null\nStandardError=journal\nUMask=0077\n") {
-		t.Fatalf("unit body 未丟棄 stdout:\n%s", body)
+		t.Fatalf("unit body did not discard stdout:\n%s", body)
 	}
 
 	deps := execDeps{fsRoot: t.TempDir()}
@@ -217,16 +217,16 @@ func TestBATServerExecutorSilencesServiceStdout(t *testing.T) {
 	unsilenced := []byte("[Service]\nExecStart=/opt/bat/bat-server --token-file=/opt/bat/token\nUMask=0077\n")
 	for _, line := range bytes.Split(unsilenced, []byte{'\n'}) {
 		if bytes.Equal(line, []byte("StandardOutput=null")) || bytes.Contains(line, []byte("--token=")) {
-			t.Fatalf("fixture 含有不該出現的守門字：%s", unsilenced)
+			t.Fatalf("fixture contains forbidden gate string: %s", unsilenced)
 		}
 	}
 	changed, err := writeBATServerUnit(deps, logical, unsilenced)
 	unitPath := deps.fsPath(logical)
 	_, statErr := os.Lstat(unitPath)
 	entries, dirErr := os.ReadDir(filepath.Dir(unitPath))
-	if err == nil || err.Error() != "BAT Server unit 未丟棄 stdout" || changed || !errors.Is(statErr, os.ErrNotExist) ||
+	if err == nil || err.Error() != "BAT Server unit does not discard stdout" || changed || !errors.Is(statErr, os.ErrNotExist) ||
 		(dirErr == nil && len(entries) > 0) || (dirErr != nil && !errors.Is(dirErr, os.ErrNotExist)) {
-		t.Fatalf("未丟棄 stdout 的 unit 被寫出 changed=%v err=%v stat=%v entries=%v dirErr=%v", changed, err, statErr, entries, dirErr)
+		t.Fatalf("unit without discarded stdout was written changed=%v err=%v stat=%v entries=%v dirErr=%v", changed, err, statErr, entries, dirErr)
 	}
 }
 
@@ -356,7 +356,7 @@ func refuseNonRegularBATServerToken(t *testing.T, err error, secret []byte) {
 	if len(secret) > 0 && bytes.Contains([]byte(msg), secret) {
 		t.Fatal("token path was not rejected as a non-regular file")
 	}
-	if msg != "BAT Server token 不是 regular file" {
+	if msg != "BAT Server token is not a regular file" {
 		t.Fatalf("token path rejected as %q", msg)
 	}
 }
@@ -406,7 +406,7 @@ func TestBATServerExecutorRejectsSymlinkAndHardlinkByTypeflag(t *testing.T) {
 			})
 			executor, job, _, actions := batServerTestRun(t, "linux", "amd64", bundle, hex.EncodeToString(sum[:]), "active")
 			rows, err := executor.Run(t.Context(), job)
-			if err != nil || len(rows) != 1 || rows[0].Passed || !strings.Contains(rows[0].StderrExcerpt, "不是 regular file") {
+			if err != nil || len(rows) != 1 || rows[0].Passed || !strings.Contains(rows[0].StderrExcerpt, "is not a regular file") {
 				t.Fatalf("typeflag %s rows=%+v err=%v", tc.name, rows, err)
 			}
 			if strings.Join(*actions, "\n") != "--user is-active clawctl-bat-server.service" {
@@ -434,7 +434,7 @@ func TestBATServerExecutorRejectsPathEscape(t *testing.T) {
 	if err == nil && allPassed(rows) {
 		t.Fatal("accepted a member that escapes the release")
 	}
-	if err != nil || len(rows) == 0 || !strings.Contains(rows[0].StderrExcerpt, "路徑超出 release") {
+	if err != nil || len(rows) == 0 || !strings.Contains(rows[0].StderrExcerpt, "path outside release") {
 		t.Fatalf("rows=%+v err=%v", rows, err)
 	}
 	found := false
@@ -753,7 +753,7 @@ func TestBATServerExecutorRefusesPortHeldByAnotherProgram(t *testing.T) {
 
 	rows, err := executor.Run(t.Context(), job)
 	var rejected *rejectError
-	if !errors.As(err, &rejected) || rejected.Detail != "連接埠 19876 已被其他程式使用，BAT Server 無法啟動。停止使用該連接埠的程式後，重新部署 BAT Server。" ||
+	if !errors.As(err, &rejected) || rejected.Detail != "port 19876 is already in use by another program, BAT Server cannot start. Stop the program using this port, then redeploy BAT Server." ||
 		len(rows) != 0 || *downloads != 0 {
 		t.Fatalf("rows=%v err=%v downloads=%d", rows, err, *downloads)
 	}
@@ -795,7 +795,7 @@ func TestBATServerExecutorRefusesForeignFileAtLinkPath(t *testing.T) {
 			rows, err := executor.Run(t.Context(), job)
 			var rejected *rejectError
 			if !errors.As(err, &rejected) ||
-				rejected.Detail != "/home/bat-test/.config/systemd/user/clawctl-bat-server.service 不是 AI-Intune 建立的連結，BAT Server 無法安裝。移除這個檔案後，重新部署 BAT Server。" ||
+				rejected.Detail != "/home/bat-test/.config/systemd/user/clawctl-bat-server.service is not a link created by AI-Intune, BAT Server cannot be installed. Remove this file, then redeploy BAT Server." ||
 				len(rows) != 0 || *downloads != 0 {
 				t.Fatalf("rows=%v err=%v downloads=%d", rows, err, *downloads)
 			}
@@ -864,7 +864,7 @@ func TestBATServerExecutorHandshakeRetriesAndNeverRecordsItsError(t *testing.T) 
 		last := rows[len(rows)-1]
 		if last.RuleID != "bat-server-endpoint" || last.Passed || last.Command != "bat-remote auth 127.0.0.1:19876" ||
 			last.StdoutExcerpt != "" || last.ExitCode != 1 ||
-			last.StderrExcerpt != "127.0.0.1:19876 上沒有以本機 token 與憑證回應的 BAT Server。" {
+			last.StderrExcerpt != "no BAT Server responding with local token and certificate on 127.0.0.1:19876" {
 			t.Fatalf("endpoint row=%+v", last)
 		}
 	})

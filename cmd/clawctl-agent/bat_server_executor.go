@@ -88,7 +88,7 @@ func (e batServerExecutor) Run(ctx context.Context, job model.JobResponse) ([]mo
 	if state, _, _ := d.systemctl(ctx, "--user", "is-active", model.BATServerUnit); strings.TrimSpace(state) != "active" {
 		listener, err := e.listen("tcp", net.JoinHostPort(batremote.LoopbackHost, strconv.Itoa(model.BATServerPort)))
 		if err != nil {
-			return nil, rejectPrecondition("連接埠 " + strconv.Itoa(model.BATServerPort) + " 已被其他程式使用，BAT Server 無法啟動。停止使用該連接埠的程式後，重新部署 BAT Server。")
+			return nil, rejectPrecondition("port " + strconv.Itoa(model.BATServerPort) + " is already in use by another program, BAT Server cannot start. Stop the program using this port, then redeploy BAT Server.")
 		}
 		_ = listener.Close()
 	}
@@ -99,11 +99,11 @@ func (e batServerExecutor) Run(ctx context.Context, job model.JobResponse) ([]mo
 
 	root := model.BATServerRoot(d.home)
 	if err := d.requireWritableAncestor(root); err != nil {
-		return nil, rejectPrecondition("BAT Server 目錄不可寫：" + err.Error())
+		return nil, rejectPrecondition("BAT Server directory is not writable: " + err.Error())
 	}
 	release := filepath.Join(root, "releases", spec.Version)
 	if err := os.MkdirAll(d.fsPath(filepath.Dir(release)), 0o700); err != nil {
-		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "stage", "建立 BAT Server releases", err)}, nil
+		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "stage", "create BAT Server releases", err)}, nil
 	}
 	failure, err := e.ensureRelease(ctx, d, job, spec, release)
 	if err != nil {
@@ -114,22 +114,22 @@ func (e batServerExecutor) Run(ctx context.Context, job model.JobResponse) ([]mo
 	}
 	tokenFile := model.BATServerTokenFile(d.home)
 	if err := ensureBATServerToken(d.fsPath(tokenFile)); err != nil {
-		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "token", "安裝 BAT Server token", err)}, nil
+		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "token", "install BAT Server token", err)}, nil
 	}
 	dataDir := model.BATServerDataDir(d.home)
 	if err := os.MkdirAll(d.fsPath(dataDir), 0o700); err != nil {
-		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "data", "建立 BAT Server data", err)}, nil
+		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "data", "create BAT Server data", err)}, nil
 	}
 	binaryRel, ok := model.BATServerInstalledBinary(spec.TargetArch)
 	if !ok {
-		return nil, rejectPrecondition("BAT Server 只能安裝在 linux/amd64 或 linux/arm64")
+		return nil, rejectPrecondition("BAT Server can only be installed on linux/amd64 or linux/arm64")
 	}
 	binary := filepath.Join(release, filepath.FromSlash(binaryRel))
 
 	unitPath := model.BATServerUnitFile(d.home)
 	changed, err := writeBATServerUnit(d, unitPath, []byte(batServerUnitBody(release, binary, tokenFile, dataDir)))
 	if err != nil {
-		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "unit", "寫入 "+model.BATServerUnit, err)}, nil
+		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "unit", "write "+model.BATServerUnit, err)}, nil
 	}
 
 	if needsLink {
@@ -156,7 +156,7 @@ func (e batServerExecutor) Run(ctx context.Context, job model.JobResponse) ([]mo
 // at that path belongs to someone else and stops the install.
 func batServerNeedsLink(d execDeps) (bool, error) {
 	link := filepath.Join(d.home, ".config", "systemd", "user", model.BATServerUnit)
-	foreign := rejectPrecondition(link + " 不是 AI-Intune 建立的連結，BAT Server 無法安裝。移除這個檔案後，重新部署 BAT Server。")
+	foreign := rejectPrecondition(link + " is not a link created by AI-Intune, BAT Server cannot be installed. Remove this file, then redeploy BAT Server.")
 	info, err := os.Lstat(d.fsPath(link))
 	if errors.Is(err, os.ErrNotExist) {
 		return true, nil
@@ -175,50 +175,50 @@ func (e batServerExecutor) gate(job model.JobResponse) (model.BATServerSpec, err
 	decoder := json.NewDecoder(strings.NewReader(string(job.Spec)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&spec); err != nil {
-		return spec, rejectPrecondition("BAT Server spec 不是合法 JSON：" + err.Error())
+		return spec, rejectPrecondition("BAT Server spec is not valid JSON: " + err.Error())
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return spec, rejectPrecondition("BAT Server spec 含有尾隨資料")
+		return spec, rejectPrecondition("BAT Server spec contains trailing data")
 	}
 	if job.ResourceKind != agentadapter.ExecutorKindBATServer || spec.Kind != agentadapter.ExecutorKindBATServer {
-		return spec, rejectPrecondition("工作單與 spec kind 必須是 bat-server")
+		return spec, rejectPrecondition("job and spec kind must be bat-server")
 	}
 	if job.ResourceID != "bat-server" || !safePathComponent(spec.Version) || !validNodeRuntimeExactVersion(spec.Version) {
-		return spec, rejectPrecondition("BAT Server identity 不合法")
+		return spec, rejectPrecondition("invalid BAT Server identity")
 	}
 	if spec.TargetOS != "linux" || (spec.TargetArch != "amd64" && spec.TargetArch != "arm64") {
-		return spec, rejectPrecondition("BAT Server 只能安裝在 linux/amd64 或 linux/arm64")
+		return spec, rejectPrecondition("BAT Server can only be installed on linux/amd64 or linux/arm64")
 	}
 	if spec.TargetOS != e.targetOS || spec.TargetArch != e.targetArch {
-		return spec, rejectPrecondition("BAT Server target 與 agent 平台不一致")
+		return spec, rejectPrecondition("BAT Server target does not match agent platform")
 	}
 	if spec.BundleLayout != model.BATServerBundleLayoutV1 || spec.Artifact == nil {
-		return spec, rejectPrecondition("BAT Server bundle contract 不合法")
+		return spec, rejectPrecondition("invalid BAT Server bundle contract")
 	}
 	if len(spec.BinarySHA256) != sha256.Size*2 {
-		return spec, rejectPrecondition("binary_sha256 不是 64 碼十六進位")
+		return spec, rejectPrecondition("binary_sha256 is not 64 hex digits")
 	}
 	if decoded, err := hex.DecodeString(spec.BinarySHA256); err != nil || len(decoded) != sha256.Size ||
 		strings.ToLower(spec.BinarySHA256) != spec.BinarySHA256 {
-		return spec, rejectPrecondition("binary_sha256 必須是小寫十六進位")
+		return spec, rejectPrecondition("binary_sha256 must be lowercase hex")
 	}
 	pinned := spec.Artifact
 	if len(pinned.SHA256) != sha256.Size*2 {
-		return spec, rejectPrecondition("artifact.sha256 不是 64 碼十六進位")
+		return spec, rejectPrecondition("artifact.sha256 is not 64 hex digits")
 	}
 	if _, err := hex.DecodeString(pinned.SHA256); err != nil || strings.ToLower(pinned.SHA256) != pinned.SHA256 {
-		return spec, rejectPrecondition("artifact.sha256 必須是小寫十六進位")
+		return spec, rejectPrecondition("artifact.sha256 must be lowercase hex")
 	}
 	if pinned.Size <= 0 || pinned.Size > int64(1<<30) {
-		return spec, rejectPrecondition("artifact.size 超出 BAT Server bundle 上限")
+		return spec, rejectPrecondition("artifact.size exceeds BAT Server bundle limit")
 	}
 	if pinned.URL != "/v1/artifacts/"+pinned.SHA256 ||
 		pinned.EnginesNode != "" || pinned.UpstreamTarball != "" || pinned.SHA512 != "" {
-		return spec, rejectPrecondition("BAT Server artifact contract 不合法")
+		return spec, rejectPrecondition("invalid BAT Server artifact contract")
 	}
 	if job.ArtifactDigest != "sha256:"+pinned.SHA256 {
-		return spec, &rejectError{Code: deploy.ArtifactHashMismatch, Detail: "工作單 artifact digest 與 spec 不一致"}
+		return spec, &rejectError{Code: deploy.ArtifactHashMismatch, Detail: "job artifact digest does not match spec"}
 	}
 	return spec, nil
 }
@@ -228,7 +228,7 @@ func (e batServerExecutor) ensureRelease(ctx context.Context, d execDeps, job mo
 ) (*model.JobVerificationRequest, error) {
 	member, ok := batServerBundleMember(spec.TargetOS, spec.TargetArch)
 	if !ok {
-		return nodeRuntimeFailure(d, "stage", "展開 BAT Server bundle", errors.New("BAT Server 成員不存在")), nil
+		return nodeRuntimeFailure(d, "stage", "extract BAT Server bundle", errors.New("BAT Server member does not exist")), nil
 	}
 	if info, err := os.Lstat(d.fsPath(release)); err == nil {
 		if info.IsDir() && allPassed(verifyBATServerFiles(d, release, spec)) {
@@ -239,23 +239,23 @@ func (e batServerExecutor) ensureRelease(ctx context.Context, d execDeps, job mo
 		}
 		broken := release + ".broken-" + safeJobID(job.JobID)
 		if _, err := os.Lstat(d.fsPath(broken)); err == nil {
-			return nodeRuntimeFailure(d, "stage", "保留既有 BAT Server release", errors.New("broken 證據路徑已存在")), nil
+			return nodeRuntimeFailure(d, "stage", "preserve existing BAT Server release", errors.New("broken evidence path already exists")), nil
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return nodeRuntimeFailure(d, "stage", "檢查 BAT Server broken 證據", err), nil
+			return nodeRuntimeFailure(d, "stage", "check BAT Server broken evidence", err), nil
 		}
 		if err := os.Rename(d.fsPath(release), d.fsPath(broken)); err != nil {
-			return nodeRuntimeFailure(d, "stage", "保留既有 BAT Server release", err), nil
+			return nodeRuntimeFailure(d, "stage", "preserve existing BAT Server release", err), nil
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return nodeRuntimeFailure(d, "stage", "檢查 BAT Server release", err), nil
+		return nodeRuntimeFailure(d, "stage", "check BAT Server release", err), nil
 	}
 	staging := filepath.Join(filepath.Dir(release), ".staging-"+safeJobID(job.JobID))
 	if err := os.RemoveAll(d.fsPath(staging)); err != nil {
-		return nodeRuntimeFailure(d, "stage", "清理 BAT Server staging", err), nil
+		return nodeRuntimeFailure(d, "stage", "clean BAT Server staging", err), nil
 	}
 	defer os.RemoveAll(d.fsPath(staging))
 	if err := os.MkdirAll(d.fsPath(staging), 0o700); err != nil {
-		return nodeRuntimeFailure(d, "stage", "建立 BAT Server staging", err), nil
+		return nodeRuntimeFailure(d, "stage", "create BAT Server staging", err), nil
 	}
 	bundle := filepath.Join(staging, "bat-server.tgz")
 	actualDigest, actualSize, err := d.downloadArtifactAtMost(ctx, d.hubURL+spec.Artifact.URL, bundle, spec.Artifact.Size)
@@ -263,18 +263,18 @@ func (e batServerExecutor) ensureRelease(ctx context.Context, d execDeps, job mo
 		var sizeErr *artifactDownloadSizeError
 		if errors.As(err, &sizeErr) {
 			return nil, &rejectError{Code: deploy.ArtifactHashMismatch,
-				Detail: fmt.Sprintf("BAT Server artifact 超過宣告 size=%d", spec.Artifact.Size)}
+				Detail: fmt.Sprintf("BAT Server artifact exceeds declared size=%d", spec.Artifact.Size)}
 		}
-		return nodeRuntimeFailure(d, "stage", "下載 BAT Server bundle", err), nil
+		return nodeRuntimeFailure(d, "stage", "download BAT Server bundle", err), nil
 	}
 	if actualDigest != spec.Artifact.SHA256 || actualSize != spec.Artifact.Size {
 		return nil, &rejectError{Code: deploy.ArtifactHashMismatch,
-			Detail: fmt.Sprintf("BAT Server artifact 期望 sha256=%s size=%d，實得 sha256=%s size=%d",
+			Detail: fmt.Sprintf("BAT Server artifact expected sha256=%s size=%d; got sha256=%s size=%d",
 				shortDigest(spec.Artifact.SHA256), spec.Artifact.Size, shortDigest(actualDigest), actualSize)}
 	}
 	payload := filepath.Join(staging, "payload")
 	if err := extractBATServerBundle(d.fsPath(bundle), d.fsPath(payload), member); err != nil {
-		return nodeRuntimeFailure(d, "stage", "展開 BAT Server bundle", err), nil
+		return nodeRuntimeFailure(d, "stage", "extract BAT Server bundle", err), nil
 	}
 	if err := requireBATServerBinary(d, payload, spec); err != nil {
 		relative, _ := model.BATServerInstalledBinary(spec.TargetArch)
@@ -282,7 +282,7 @@ func (e batServerExecutor) ensureRelease(ctx context.Context, d execDeps, job mo
 	}
 	marker := filepath.Join(payload, nodeRuntimeArtifactMarker)
 	if err := writePrivateFile(d.fsPath(marker), []byte("sha256:"+spec.Artifact.SHA256+"\n")); err != nil {
-		return nodeRuntimeFailure(d, "stage", "記錄 BAT Server artifact identity", err), nil
+		return nodeRuntimeFailure(d, "stage", "record BAT Server artifact identity", err), nil
 	}
 	checks := verifyBATServerFiles(d, payload, spec)
 	if !allPassed(checks) {
@@ -296,10 +296,10 @@ func (e batServerExecutor) ensureRelease(ctx context.Context, d execDeps, job mo
 		return &failure, nil
 	}
 	if err := os.Rename(d.fsPath(payload), d.fsPath(release)); err != nil {
-		return nodeRuntimeFailure(d, "stage", "發佈 BAT Server release", err), nil
+		return nodeRuntimeFailure(d, "stage", "publish BAT Server release", err), nil
 	}
 	if err := syncNodeRuntimeDirectory(d.fsPath(filepath.Dir(release))); err != nil {
-		return nodeRuntimeFailure(d, "stage", "同步 BAT Server releases", err), nil
+		return nodeRuntimeFailure(d, "stage", "sync BAT Server releases", err), nil
 	}
 	return nil, nil
 }
@@ -326,7 +326,7 @@ func extractBATServerBundle(bundle, destination, member string) error {
 	defer input.Close()
 	gz, err := gzip.NewReader(input)
 	if err != nil {
-		return errors.New("BAT Server bundle 解不開")
+		return errors.New("cannot unpack BAT Server bundle")
 	}
 	defer gz.Close()
 	if err := os.MkdirAll(destination, 0o755); err != nil {
@@ -341,11 +341,11 @@ func extractBATServerBundle(bundle, destination, member string) error {
 			break
 		}
 		if err != nil {
-			return errors.New("BAT Server bundle 解不開")
+			return errors.New("cannot unpack BAT Server bundle")
 		}
 		entries++
 		if entries > maxBATServerExtractEntries || header.Size < 0 {
-			return errors.New("BAT Server bundle 超出展開上限")
+			return errors.New("BAT Server bundle exceeds extraction limit")
 		}
 		name, err := cleanBATServerBundleMember(header.Name)
 		if err != nil {
@@ -355,7 +355,7 @@ func extractBATServerBundle(bundle, destination, member string) error {
 			continue
 		}
 		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
-			return fmt.Errorf("BAT Server bundle 成員 %s 不是 regular file", header.Name)
+			return fmt.Errorf("BAT Server bundle member %s is not a regular file", header.Name)
 		}
 		if name != member {
 			if err := discardBATServerMember(reader, header.Size); err != nil {
@@ -364,7 +364,7 @@ func extractBATServerBundle(bundle, destination, member string) error {
 			continue
 		}
 		if found || header.Size <= 0 || header.Size > maxBATServerMemberBytes {
-			return errors.New("BAT Server 成員超出大小上限")
+			return errors.New("BAT Server member exceeds size limit")
 		}
 		found = true
 		if err := unpackBATServerTar(reader, header.Size, destination); err != nil {
@@ -372,44 +372,44 @@ func extractBATServerBundle(bundle, destination, member string) error {
 		}
 	}
 	if !found {
-		return errors.New("BAT Server bundle 缺少目標成員")
+		return errors.New("missing target member in BAT Server bundle")
 	}
 	return nil
 }
 
 func cleanBATServerBundleMember(name string) (string, error) {
 	if name == "" || strings.ContainsRune(name, 0) || strings.Contains(name, `\`) || strings.HasPrefix(name, "/") {
-		return "", errors.New("BAT Server bundle 路徑超出範圍")
+		return "", errors.New("BAT Server bundle path out of bounds")
 	}
 	cleaned := path.Clean(strings.TrimSuffix(name, "/"))
 	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return "", errors.New("BAT Server bundle 路徑超出範圍")
+		return "", errors.New("BAT Server bundle path out of bounds")
 	}
 	if cleaned != "bat-server" && !strings.HasPrefix(cleaned, "bat-server/") {
-		return "", errors.New("BAT Server bundle 路徑超出範圍")
+		return "", errors.New("BAT Server bundle path out of bounds")
 	}
 	return cleaned, nil
 }
 
 func discardBATServerMember(reader io.Reader, size int64) error {
 	if size < 0 || size > maxBATServerMemberBytes {
-		return errors.New("BAT Server 成員超出大小上限")
+		return errors.New("BAT Server member exceeds size limit")
 	}
 	n, err := io.Copy(io.Discard, io.LimitReader(reader, size+1))
 	if err != nil || n != size {
-		return errors.New("BAT Server 成員不完整")
+		return errors.New("incomplete BAT Server member")
 	}
 	return nil
 }
 
 func unpackBATServerTar(reader io.Reader, size int64, destination string) error {
 	if size <= 0 || size > maxBATServerMemberBytes {
-		return errors.New("BAT Server 成員超出大小上限")
+		return errors.New("BAT Server member exceeds size limit")
 	}
 	limited := &io.LimitedReader{R: reader, N: size}
 	gz, err := gzip.NewReader(limited)
 	if err != nil {
-		return errors.New("BAT Server 成員解不開")
+		return errors.New("cannot unpack BAT Server member")
 	}
 	defer gz.Close()
 	inner := tar.NewReader(gz)
@@ -421,11 +421,11 @@ func unpackBATServerTar(reader io.Reader, size int64, destination string) error 
 			break
 		}
 		if err != nil {
-			return errors.New("BAT Server 成員解不開")
+			return errors.New("cannot unpack BAT Server member")
 		}
 		entries++
 		if entries > maxBATServerExtractEntries {
-			return errors.New("BAT Server 成員超出展開上限")
+			return errors.New("BAT Server member exceeds extraction limit")
 		}
 		relative, err := cleanBATServerExtractRel(header.Name)
 		if err != nil {
@@ -442,10 +442,10 @@ func unpackBATServerTar(reader io.Reader, size int64, destination string) error 
 			continue
 		}
 		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
-			return fmt.Errorf("BAT Server 成員 %s 不是 regular file", relative)
+			return fmt.Errorf("BAT Server member %s is not a regular file", relative)
 		}
 		if header.Size < 0 || header.Size > maxBATServerMemberBytes || total > maxBATServerMemberBytes-header.Size {
-			return errors.New("BAT Server 成員超出大小上限")
+			return errors.New("BAT Server member exceeds size limit")
 		}
 		total += header.Size
 		mode := os.FileMode(0o644)
@@ -461,7 +461,7 @@ func unpackBATServerTar(reader io.Reader, size int64, destination string) error 
 	}
 	if limited.N > 0 {
 		if _, err := io.Copy(io.Discard, limited); err != nil {
-			return errors.New("BAT Server 成員不完整")
+			return errors.New("incomplete BAT Server member")
 		}
 	}
 	return nil
@@ -469,18 +469,18 @@ func unpackBATServerTar(reader io.Reader, size int64, destination string) error 
 
 func cleanBATServerExtractRel(name string) (string, error) {
 	if name == "" || strings.ContainsRune(name, 0) {
-		return "", errors.New("BAT Server 路徑不合法")
+		return "", errors.New("invalid BAT Server path")
 	}
 	slash := strings.ReplaceAll(name, `\`, "/")
 	if strings.HasPrefix(slash, "/") || (len(slash) >= 2 && slash[1] == ':') {
-		return "", errors.New("BAT Server 路徑超出 release")
+		return "", errors.New("BAT Server path outside release")
 	}
 	cleaned := path.Clean(slash)
 	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return "", errors.New("BAT Server 路徑超出 release")
+		return "", errors.New("BAT Server path outside release")
 	}
 	if path.IsAbs(cleaned) || strings.Contains(cleaned, ":") {
-		return "", errors.New("BAT Server 路徑超出 release")
+		return "", errors.New("BAT Server path outside release")
 	}
 	return cleaned, nil
 }
@@ -496,7 +496,7 @@ func writeBATServerMember(path string, reader io.Reader, size int64, mode os.Fil
 	}
 	n, err := io.Copy(file, io.LimitReader(reader, size+1))
 	if err != nil || n != size {
-		return errors.New("BAT Server 成員不完整")
+		return errors.New("incomplete BAT Server member")
 	}
 	return file.Close()
 }
@@ -505,7 +505,7 @@ func ensureBATServerToken(path string) error {
 	info, err := os.Lstat(path)
 	if err == nil {
 		if !info.Mode().IsRegular() {
-			return errors.New("BAT Server token 不是 regular file")
+			return errors.New("BAT Server token is not a regular file")
 		}
 		file, err := os.Open(path)
 		if err != nil {
@@ -556,14 +556,14 @@ func writeBATServerUnit(d execDeps, logical string, body []byte) (bool, error) {
 	stdoutDiscarded := false
 	for _, line := range bytes.Split(body, []byte{'\n'}) {
 		if bytes.Contains(line, []byte("--token=")) {
-			return false, errors.New("BAT Server unit 含有 token 值")
+			return false, errors.New("BAT Server unit contains token value")
 		}
 		if bytes.Equal(line, []byte("StandardOutput=null")) {
 			stdoutDiscarded = true
 		}
 	}
 	if !stdoutDiscarded {
-		return false, errors.New("BAT Server unit 未丟棄 stdout")
+		return false, errors.New("BAT Server unit does not discard stdout")
 	}
 	fsPath := d.fsPath(logical)
 	existing, err := os.ReadFile(fsPath)
@@ -602,7 +602,7 @@ func (e batServerExecutor) verifyBATServerService(ctx context.Context, d execDep
 	stdout, stderr, err := d.systemctl(ctx, "--user", "is-active", model.BATServerUnit)
 	passed := err == nil && strings.TrimSpace(stdout) == "active"
 	if err == nil && !passed {
-		err = errors.New("BAT Server unit 不是 active")
+		err = errors.New("BAT Server unit is not active")
 	}
 	checks = append(checks, d.verification("bat-server-unit", "systemctl --user is-active "+model.BATServerUnit,
 		stdout, errorText(stderr, err), exitCode(err), passed))
@@ -625,7 +625,7 @@ func (e batServerExecutor) verifyBATServerService(ctx context.Context, d execDep
 	if handshakeErr != nil {
 		address := net.JoinHostPort(batremote.LoopbackHost, strconv.Itoa(model.BATServerPort))
 		return append(checks, d.verification("bat-server-endpoint", model.BATServerEndpointCommand,
-			"", address+" 上沒有以本機 token 與憑證回應的 BAT Server。", 1, false))
+			"", "no BAT Server responding with local token and certificate on "+address, 1, false))
 	}
 	return append(checks, d.verification("bat-server-endpoint", model.BATServerEndpointCommand, "authenticated\n", "", 0, true))
 }
@@ -635,7 +635,7 @@ func verifyBATServerFiles(d execDeps, release string, spec model.BATServerSpec) 
 	releaseInfo, releaseErr := os.Lstat(d.fsPath(release))
 	releasePassed := releaseErr == nil && releaseInfo.IsDir()
 	if releaseErr == nil && !releasePassed {
-		releaseErr = errors.New("BAT Server release 不是目錄")
+		releaseErr = errors.New("BAT Server release is not a directory")
 	}
 	results := []model.JobVerificationRequest{d.verification("bat-server-release", releaseCmd,
 		release+"\n", errorText("", releaseErr), exitCode(releaseErr), releasePassed)}
@@ -646,7 +646,7 @@ func verifyBATServerFiles(d execDeps, release string, spec model.BATServerSpec) 
 	marker, err := readPrivateRegularFile(d.fsPath(markerLogical))
 	markerPassed := err == nil && string(marker) == "sha256:"+spec.Artifact.SHA256+"\n"
 	if err == nil && !markerPassed {
-		err = errors.New("artifact identity marker 與工作單 digest 不符")
+		err = errors.New("artifact identity marker does not match job digest")
 	}
 	results = append(results, d.verification("bat-server-artifact", "cat "+markerLogical,
 		string(marker), errorText("", err), exitCode(err), markerPassed))
@@ -656,7 +656,7 @@ func verifyBATServerFiles(d execDeps, release string, spec model.BATServerSpec) 
 	relative, ok := model.BATServerInstalledBinary(spec.TargetArch)
 	if !ok {
 		results = append(results, *nodeRuntimeFailure(d, "bat-server-binary", "sha256sum",
-			errors.New("BAT Server target 不合法")))
+			errors.New("invalid BAT Server target")))
 		return results
 	}
 	binaryLogical := filepath.Join(release, filepath.FromSlash(relative))
@@ -664,7 +664,7 @@ func verifyBATServerFiles(d execDeps, release string, spec model.BATServerSpec) 
 	info, statErr := os.Lstat(binaryPath)
 	if statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o111 == 0 {
 		if statErr == nil {
-			statErr = errors.New(relative + " 不是可執行 regular file")
+			statErr = errors.New(relative + " is not an executable regular file")
 		}
 		results = append(results, *nodeRuntimeFailure(d, "bat-server-binary", "sha256sum "+binaryLogical, statErr))
 		return results
@@ -672,7 +672,7 @@ func verifyBATServerFiles(d execDeps, release string, spec model.BATServerSpec) 
 	sum, hashErr := hashBATServerFile(binaryPath)
 	passed := hashErr == nil && sum == spec.BinarySHA256
 	if hashErr == nil && !passed {
-		hashErr = errors.New("安裝的 BAT Server binary sha256 與 spec 不一致")
+		hashErr = errors.New("installed BAT Server binary sha256 does not match spec")
 	}
 	stdout := ""
 	if hashErr == nil || sum != "" {
@@ -686,7 +686,7 @@ func verifyBATServerFiles(d execDeps, release string, spec model.BATServerSpec) 
 func requireBATServerBinary(d execDeps, release string, spec model.BATServerSpec) error {
 	relative, ok := model.BATServerInstalledBinary(spec.TargetArch)
 	if !ok {
-		return errors.New("BAT Server target 不合法")
+		return errors.New("invalid BAT Server target")
 	}
 	binaryPath := d.fsPath(filepath.Join(release, filepath.FromSlash(relative)))
 	info, err := os.Lstat(binaryPath)
@@ -694,14 +694,14 @@ func requireBATServerBinary(d execDeps, release string, spec model.BATServerSpec
 		return err
 	}
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o111 == 0 {
-		return errors.New(relative + " 不是可執行 regular file")
+		return errors.New(relative + " is not an executable regular file")
 	}
 	sum, err := hashBATServerFile(binaryPath)
 	if err != nil {
 		return err
 	}
 	if sum != spec.BinarySHA256 {
-		return errors.New("安裝的 BAT Server binary sha256 與 spec 不一致")
+		return errors.New("installed BAT Server binary sha256 does not match spec")
 	}
 	return nil
 }
@@ -717,7 +717,7 @@ func hashBATServerFile(path string) (string, error) {
 		return "", err
 	}
 	if !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > maxBATServerMemberBytes {
-		return "", errors.New("BAT Server binary 超出大小上限")
+		return "", errors.New("BAT Server binary exceeds size limit")
 	}
 	hash := sha256.New()
 	n, err := io.Copy(hash, io.LimitReader(file, maxBATServerMemberBytes+1))
@@ -725,7 +725,7 @@ func hashBATServerFile(path string) (string, error) {
 		return "", err
 	}
 	if n != info.Size() || n > maxBATServerMemberBytes {
-		return "", errors.New("BAT Server binary 超出大小上限")
+		return "", errors.New("BAT Server binary exceeds size limit")
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }

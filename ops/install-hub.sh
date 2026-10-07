@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
     --listen) LISTEN="$2"; shift 2 ;;
     --operator-capability-prefix) CAP_PREFIX="$2"; shift 2 ;;
     -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
-    *) echo "未知參數：$1" >&2; exit 2 ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
@@ -45,8 +45,8 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # passwd DB 裡的單一 home。否則 fake HOME 可以讓這支腳本 chmod 或安裝到
 # caller 指定的另一棵樹。
 if [[ $EUID -eq 0 ]]; then
-  echo "⚠ 不要用 root 跑這支。Hub 是 systemd --user unit —— 用 root 裝會讓" >&2
-  echo "  資料庫落在 /root 底下，而你之後用自己的帳號會看到一個空名冊。" >&2
+  echo "⚠ Do not run this as root. Hub is a systemd --user unit — running as root will" >&2
+  echo "  cause the database to be placed under /root, and you will see an empty inventory with your own user" >&2
   exit 2
 fi
 
@@ -54,21 +54,21 @@ verify_canonical_home() {
   local rows account_name passwd_marker account_uid account_gid gecos account_home account_shell resolved
   mapfile -t rows < <(/usr/bin/getent passwd "$EUID")
   if [[ ${#rows[@]} -ne 1 ]]; then
-    echo "✗ 無法為 EUID=$EUID 取得唯一 passwd home；拒絕安裝。" >&2
+    echo "✗ Cannot obtain unique passwd home for EUID=$EUID; refusing to install" >&2
     return 1
   fi
   IFS=: read -r account_name passwd_marker account_uid account_gid gecos account_home account_shell <<<"${rows[0]}"
   if [[ "$account_uid" != "$EUID" || -z "$account_home" || "$account_home" != /* ||
         -L "$account_home" || ! -d "$account_home" || ! -O "$account_home" ]]; then
-    echo "✗ passwd home 不是目前使用者持有的 non-symlink absolute directory。" >&2
+    echo "✗ passwd home is not a non-symlink absolute directory owned by current user" >&2
     return 1
   fi
   if [[ "$HOME" != "$account_home" ]]; then
-    echo "✗ caller HOME=$HOME 與 EUID=$EUID 的 canonical home 不一致；尚未建立或修改安裝路徑。" >&2
+    echo "✗ caller HOME=$HOME does not match canonical home for EUID=$EUID; no installation paths created or modified" >&2
     return 1
   fi
   if ! resolved="$(/usr/bin/realpath -e -- "$HOME")" || [[ "$resolved" != "$account_home" ]]; then
-    echo "✗ HOME 的實體路徑與 passwd home 不一致；尚未建立或修改安裝路徑。" >&2
+    echo "✗ HOME realpath does not match passwd home; no installation paths created or modified" >&2
     return 1
   fi
 }
@@ -93,7 +93,7 @@ resolve_operator_config_paths() {
   if [[ "$configured" != /* ]] ||
      ! resolved="$(/usr/bin/realpath -m -- "$configured")" ||
      [[ "$resolved" != "$configured" ]]; then
-    echo "✗ XDG operator config root 必須是 canonical absolute path：$configured" >&2
+    echo "✗ XDG operator config root must be a canonical absolute path: $configured" >&2
     return 1
   fi
   OPERATOR_CONFIG_HOME="$configured"
@@ -104,16 +104,16 @@ resolve_operator_config_paths() {
 reject_unsafe_existing_directory() {
   local path="$1" label="$2" resolved
   if [[ -L "$path" ]]; then
-    echo "✗ $label 不可是 symlink：$path" >&2
+    echo "✗ $label must not be a symlink: $path" >&2
     return 1
   fi
   if [[ -e "$path" && ( ! -d "$path" || ! -O "$path" ) ]]; then
-    echo "✗ $label 必須是目前使用者持有的 directory：$path" >&2
+    echo "✗ $label must be a directory owned by current user: $path" >&2
     return 1
   fi
   if [[ -e "$path" ]] &&
      { ! resolved="$(/usr/bin/realpath -e -- "$path")" || [[ "$resolved" != "$path" ]]; }; then
-    echo "✗ $label 必須是 canonical non-symlink directory：$path" >&2
+    echo "✗ $label must be a canonical non-symlink directory: $path" >&2
     return 1
   fi
 }
@@ -122,13 +122,13 @@ ensure_owned_canonical_directory() {
   local path="$1" label="$2" permissions
   reject_unsafe_existing_directory "$path" "$label" || return 1
   if [[ ! -e "$path" ]] && ! mkdir -m 0700 -- "$path"; then
-    echo "✗ 無法建立 $label：$path" >&2
+    echo "✗ Cannot create $label: $path" >&2
     return 1
   fi
   reject_unsafe_existing_directory "$path" "$label" || return 1
   permissions="$(stat -c '%a' -- "$path")" || return 1
   if (( (8#$permissions & 8#022) != 0 )); then
-    echo "✗ $label 可被 group/other 改寫：$path ($permissions)" >&2
+    echo "✗ $label is writable by group/other: $path ($permissions)" >&2
     return 1
   fi
 }
@@ -137,7 +137,7 @@ ensure_private_owned_directory() {
   local path="$1" label="$2" resolved
   reject_unsafe_existing_directory "$path" "$label" || return 1
   if [[ ! -e "$path" ]] && ! mkdir -m 0700 -- "$path"; then
-    echo "✗ 無法建立 $label：$path" >&2
+    echo "✗ Cannot create $label: $path" >&2
     return 1
   fi
   # mkdir 之後再 lstat/realpath：即使 final component 在檢查後被換成
@@ -145,7 +145,7 @@ ensure_private_owned_directory() {
   if [[ ! -d "$path" || -L "$path" || ! -O "$path" ]] ||
      ! resolved="$(/usr/bin/realpath -e -- "$path")" ||
      [[ "$resolved" != "$path" ]]; then
-    echo "✗ $label 不是目前使用者持有的 canonical non-symlink directory：$path" >&2
+    echo "✗ $label is not a canonical non-symlink directory owned by current user: $path" >&2
     return 1
   fi
   chmod 0700 -- "$path"
@@ -182,16 +182,16 @@ if [[ -z "$LISTEN" ]] && command -v tailscale >/dev/null 2>&1; then
 fi
 if [[ -z "$LISTEN" || -z "$CAP_PREFIX" ]]; then
   cat >&2 <<EOF
-缺少 operator auth 安裝設定。Hub 現在只接受明確的 Tailscale listener IP，
-而且所有 UI/API 都要求 Tailscale grants app capability：
+Missing operator auth installation configuration. Hub now only accepts explicit Tailscale listener IP,
+and all UI/API require Tailscale grants app capability:
 
-  ./ops/install-hub.sh \
-    --listen 100.x.y.z:8787 \
+  ./ops/install-hub.sh \\
+    --listen 100.x.y.z:8787 \\
     --operator-capability-prefix example.com/cap/clawctl
 
-8787 只是慣例範例埠，不是 Hub 預設。grant dst、CLAWCTL_PUBLIC_URL、agent --hub、tunnel origin 必須與 --listen 同一個埠。
-請先照 docs/OPERATOR-AUTH.md 把三個 capability grant 存進 Tailscale；
-安裝腳本不會替你改 tailnet policy，也不會退回無認證的 loopback console。
+8787 is only a conventional example port, not Hub default. grant dst, CLAWCTL_PUBLIC_URL, agent --hub, tunnel origin must use the same port as --listen.
+Please add the three capability grants to Tailscale per docs/OPERATOR-AUTH.md first;
+the installation script will not modify tailnet policy for you, nor fall back to unauthenticated loopback console.
 EOF
   exit 2
 fi
@@ -205,44 +205,44 @@ if [[ -z "$BUNDLE_SRC" ]]; then
 fi
 if [[ ! -f "$BIN_SRC" ]]; then
   cat >&2 <<EOF
-找不到 clawctl-hub binary：$BIN_SRC
+Cannot find clawctl-hub binary: $BIN_SRC
 
-要自己編的話，這台機器需要 **Go $(grep -m1 '^go ' "$HERE/../go.mod" 2>/dev/null | awk '{print $2}')**（go.mod 訂的）。
-Ubuntu 的 apt 版本太舊，不要用 apt install golang-go：
+To build yourself, this machine requires Go $(grep -m1 '^go ' "$HERE/../go.mod" 2>/dev/null | awk '{print $2}') (specified in go.mod).
+Ubuntu apt version is too old, do not use apt install golang-go:
 
   sudo apt-get update && sudo apt-get install -y make ca-certificates curl
   curl -fsSL https://go.dev/dl/go1.27.1.linux-amd64.tar.gz | tar -C "\$HOME/.local" -xzf -
-  make            # Makefile 會自己找 ~/.local/go/bin/go
+  make            # Makefile will look for ~/.local/go/bin/go
 
-⚠ 或者根本不要在這台編。產物是 CGO_ENABLED=0 的靜態執行檔 ——
-   在別台編好，scp 過來，再用 --binary 指給我。
+⚠ Or do not build on this machine at all. Artifact is a CGO_ENABLED=0 static executable —
+   build on another machine, scp over, then pass with --binary.
 EOF
   exit 1
 fi
 BUNDLE_VERSION="$(timeout 5 "$BIN_SRC" version 2>/dev/null)" || {
-  echo "clawctl-hub binary 無法回報版本。" >&2
+  echo "clawctl-hub binary cannot report version" >&2
   exit 1
 }
 if [[ ! "$BUNDLE_VERSION" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$ ]]; then
-  echo "clawctl-hub binary 版本格式不正確。" >&2
+  echo "clawctl-hub binary version format invalid" >&2
   exit 1
 fi
 for arch in amd64 arm64; do
   bundle="$BUNDLE_SRC/clawctl-agent-bootstrap-linux-$arch.tar.gz"
-  [[ -f "$bundle" && ! -L "$bundle" ]] || { echo "找不到 Agent bootstrap：$bundle" >&2; exit 1; }
+  [[ -f "$bundle" && ! -L "$bundle" ]] || { echo "Cannot find Agent bootstrap: $bundle" >&2; exit 1; }
 done
 if [[ -e "$BUNDLE_SRC/clawctl-agent-bootstrap-darwin-amd64.tar.gz" || -L "$BUNDLE_SRC/clawctl-agent-bootstrap-darwin-amd64.tar.gz" ||
       -e "$BUNDLE_SRC/clawctl-agent-bootstrap-darwin-arm64.tar.gz" || -L "$BUNDLE_SRC/clawctl-agent-bootstrap-darwin-arm64.tar.gz" ]]; then
   for arch in amd64 arm64; do
     bundle="$BUNDLE_SRC/clawctl-agent-bootstrap-darwin-$arch.tar.gz"
-    [[ -f "$bundle" && ! -L "$bundle" ]] || { echo "找不到 Agent bootstrap：$bundle" >&2; exit 1; }
+    [[ -f "$bundle" && ! -L "$bundle" ]] || { echo "Cannot find Agent bootstrap: $bundle" >&2; exit 1; }
   done
 fi
 if [[ -e "$BUNDLE_SRC/clawctl-agent-bootstrap-windows-amd64.tar.gz" || -L "$BUNDLE_SRC/clawctl-agent-bootstrap-windows-amd64.tar.gz" ||
       -e "$BUNDLE_SRC/clawctl-agent-bootstrap-windows-arm64.tar.gz" || -L "$BUNDLE_SRC/clawctl-agent-bootstrap-windows-arm64.tar.gz" ]]; then
   for arch in amd64 arm64; do
     bundle="$BUNDLE_SRC/clawctl-agent-bootstrap-windows-$arch.tar.gz"
-    [[ -f "$bundle" && ! -L "$bundle" ]] || { echo "找不到 Agent bootstrap：$bundle" >&2; exit 1; }
+    [[ -f "$bundle" && ! -L "$bundle" ]] || { echo "Cannot find Agent bootstrap: $bundle" >&2; exit 1; }
   done
 fi
 
@@ -267,14 +267,14 @@ fi
 HUBS="$(ps -eo comm | grep -cx clawctl-hub || true)"
 if [[ "$HUBS" -gt 0 ]]; then
   cat >&2 <<EOF
-⚠ 這台機器上已經有 $HUBS 個 clawctl-hub 在跑。
+⚠ Already $HUBS clawctl-hub processes running on this machine.
 
-兩個 Hub 開同一個 SQLite，兩邊都會是綠燈，而判決會來回跳。先確認那是什麼：
+Two Hubs opening the same SQLite will both show green, but judgements will flap back and forth. First check what they are:
 
   ps -eo pid,etime,args | awk '\$3 ~ /clawctl-hub/'
 
-如果是舊版要換版，用 ops/upgrade-hub.sh（它會停服務、備份、驗收、必要時回退），
-不要用這支。這支是給乾淨機器的。
+If upgrading an old version, use ops/upgrade-hub.sh (it stops service, backs up, verifies, rollbacks if needed),
+do not use this script. This script is for clean machines.
 EOF
   exit 1
 fi
@@ -293,21 +293,21 @@ fi
 # 兩支安裝腳本對同一件事有兩種順序，就是其中一支是錯的。
 LINGER=0
 if loginctl show-user "$USER" --property=Linger 2>/dev/null | grep -q 'Linger=yes'; then
-  LINGER=1; echo "✓ linger 已啟用"
+  LINGER=1; echo "✓ linger enabled"
 elif loginctl enable-linger "$USER" 2>/dev/null; then
-  LINGER=1; echo "✓ linger 已啟用"
+  LINGER=1; echo "✓ linger enabled"
 else
   # 實測（乾淨 Ubuntu 24.04）：一般使用者跑會拿到 `Could not enable linger: Access denied`。
   # ⚠ 這一步失敗**不中止安裝**，但它的後果是延遲發作的：Hub 會在你登出的
   #    那一刻死掉，而那時候沒有人在看畫面。所以它要講得比其他步驟大聲。
   cat >&2 <<EOF
 
-⚠⚠ 無法啟用 linger（實測訊息：Could not enable linger: Access denied）。請執行：
+⚠⚠ Cannot enable linger (tested message: Could not enable linger: Access denied). Please run:
 
     sudo loginctl enable-linger $USER
 
-沒有 linger，Hub 會在你 **登出的那一刻停掉** —— 而且是安靜地停。
-整個機隊會同時失聯，早報不會來，死人之鐘會在隔天叫。
+Without linger, Hub will stop the moment you log out — and quietly.
+The entire fleet will lose connection simultaneously, daily reports will not arrive, deadman switch will trigger tomorrow.
 EOF
 fi
 
@@ -321,15 +321,15 @@ if ! systemctl --user is-system-running >/dev/null 2>&1; then
   case "$(systemctl --user is-system-running 2>&1)" in
     *"connect to bus"*)
       cat >&2 <<EOF
-⚠ systemctl --user 連不上 user bus（XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-<空>}）。
+⚠ systemctl --user cannot connect to user bus (XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-<empty>}).
 
-這幾乎都是「這個 session 不是經過 pam_systemd 建起來的」。先確認：
+This almost always means "this session was not established through pam_systemd". First verify:
 
-    dpkg -l libpam-systemd            # 沒裝的話 user manager 起不來
-    loginctl list-users               # 你的帳號要在裡面
+    dpkg -l libpam-systemd            # if not installed user manager cannot start
+    loginctl list-users               # your account must be listed
 
-然後**重新登入一次**。不要手動 export XDG_RUNTIME_DIR —— 那會做出一個
-指向不存在的 bus 的環境變數，於是每個 systemctl --user 換一種方式失敗。
+Then log in again. Do not manually export XDG_RUNTIME_DIR — that creates
+an environment variable pointing to a non-existent bus, causing systemctl --user to fail in a different way.
 EOF
       exit 1 ;;
   esac
@@ -372,10 +372,10 @@ ensure_operator_config_directory || exit 1
 #
 # ⚠ 一定是 $HOME/.local/bin，因為 unit 的 ExecStart 寫的是 %h/.local/bin。
 # 文件原本叫人裝到 /usr/local/bin —— 兩邊各自看都對，放在一起才是錯的，
-# 而這個 repo 裡沒有任何東西會同時讀那兩個檔案。現在有了：
+## 而這個 repo 裡沒有任何東西會同時讀那兩個檔案。現在有了：
 # cmd/clawctl-hub/install_doc_test.go。
 install -m 0755 "$BIN_SRC" "$BIN_DIR/clawctl-hub"
-echo "✓ binary → $BIN_DIR/clawctl-hub（$("$BIN_DIR/clawctl-hub" version 2>/dev/null || echo '版本讀不出來')）"
+echo "✓ binary → $BIN_DIR/clawctl-hub ($("$BIN_DIR/clawctl-hub" version 2>/dev/null || echo 'cannot read version'))"
 
 # --- 7. unit
 install -m 0644 "$HERE/clawctl-hub.service" "$UNIT"
@@ -400,7 +400,7 @@ echo "✓ CLAWCTL_OPERATOR_CAPABILITY_PREFIX=$CAP_PREFIX → $ENV_FILE"
 #   does not exist.` —— 一個聽起來像「檔案沒複製成功」的訊息。
 systemctl --user daemon-reload
 systemctl --user enable --now clawctl-hub.service
-echo "✓ unit 已啟用並啟動"
+echo "✓ unit enabled and started"
 
 # --- 8. 驗收
 #
@@ -453,13 +453,13 @@ done
 if [[ "$ok" -ne 1 ]]; then
   cat >&2 <<EOF
 
-✗ 服務起來了，但 http://$ADDR/healthz 沒有回 alive。
+✗ Service started, but http://$ADDR/healthz did not return alive.
 
   systemctl --user status clawctl-hub --no-pager
   journalctl --user -u clawctl-hub -n 50 --no-pager
 
-⚠ 這比「啟動失敗」更值得查：unit 是 active 的，所以每一個只看 systemctl
-  的人都會以為它好了。
+⚠ Worth checking more than "startup failure": unit is active, so anyone
+  who only checks systemctl will think it succeeded.
 EOF
   exit 1
 fi
@@ -479,14 +479,14 @@ done
 if [[ "$operator_ok" -ne 1 ]]; then
   cat >&2 <<EOF
 
-✗ /healthz 正常，但 operator 首頁沒有回 200。
+✗ /healthz ok, but operator homepage did not return 200.
 
-這通常表示 Tailscale grant 尚未包含 $CAP_PREFIX-view，或目前 node/user 不是 grant 的 src。
-請先用 Tailscale policy editor 驗證 docs/OPERATOR-AUTH.md 的 grant，再看：
+This usually indicates Tailscale grant does not yet include $CAP_PREFIX-view, or current node/user is not the grant src.
+Please verify the grant in docs/OPERATOR-AUTH.md using Tailscale policy editor, then check:
 
   journalctl --user -u clawctl-hub -n 50 --no-pager
 
-腳本不會因 healthz 綠燈就把一個進不去的控制台宣告成安裝成功。
+Script will not declare installation successful with an inaccessible console just because healthz is green.
 EOF
   exit 1
 fi
@@ -499,13 +499,13 @@ if ! chmod 0600 "$OPERATOR_TMP" ||
    ! printf '{"hub_url":"http://%s"}\n' "$ADDR" >"$OPERATOR_TMP" ||
    ! mv -fT -- "$OPERATOR_TMP" "$OPERATOR_CONFIG"; then
   rm -f -- "$OPERATOR_TMP"
-  echo "✗ Hub 已啟動，但無法安全寫入 CLI discovery：$OPERATOR_CONFIG" >&2
+  echo "✗ Hub started, but cannot safely write CLI discovery: $OPERATOR_CONFIG" >&2
   exit 1
 fi
 echo "✓ CLI operator discovery → $OPERATOR_CONFIG"
 
 RESTARTS="$(systemctl --user show clawctl-hub.service -p NRestarts --value)"
-[[ "$RESTARTS" == "0" ]] || echo "⚠ 已經重啟過 $RESTARTS 次：journalctl --user -u clawctl-hub -n 50" >&2
+[[ "$RESTARTS" == "0" ]] || echo "⚠ Restarted $RESTARTS times already: journalctl --user -u clawctl-hub -n 50" >&2
 
 # ⚠⚠ 沒有 linger 的話，**不准說「裝好了」**。
 #
@@ -519,42 +519,42 @@ RESTARTS="$(systemctl --user show clawctl-hub.service -p NRestarts --value)"
 if [[ "$LINGER" -ne 1 ]]; then
   cat >&2 <<EOF
 
-⚠⚠ 現在跑起來了（http://$ADDR/healthz 回了 alive），但**它撐不過你登出**。
+⚠⚠ Running now (http://$ADDR/healthz returned alive), but it will not survive logout.
 
-linger 沒有開，所以你的 user manager 會在 session 結束時被收掉，
-Hub 跟著一起走 —— 安靜地，沒有錯誤訊息。實測就是這樣：裝完全綠，
-session 一結束 \`ps\` 就找不到它了。
+linger is not enabled, so your user manager will be terminated when session ends,
+Hub along with it — quietly, without error messages. Tested behavior: install fully green,
+once session ends \`ps\` can no longer find it.
 
     sudo loginctl enable-linger $USER
     systemctl --user start clawctl-hub
 
-⚠ 先做完這兩行再關掉這個視窗。這一步沒做，上面每一個 ✓ 都只在這個 session 裡成立。
+⚠ Complete these two lines before closing this window. Without this step, every ✓ above only holds within this session.
 EOF
   exit 1
 fi
 
 cat <<EOF
 
-裝好了；http://$ADDR/healthz=alive，operator 首頁通過 Tailscale app-cap 驗證。
+Installed; http://$ADDR/healthz=alive, operator homepage passed Tailscale app-cap verification.
 
-  打開：  http://$ADDR/
-  名冊：  $BIN_DIR/clawctl-hub machines
-  日誌：  journalctl --user -u clawctl-hub -f
+  Open:   http://$ADDR/
+  Fleet:  $BIN_DIR/clawctl-hub machines
+  Logs:   journalctl --user -u clawctl-hub -f
 
-接下來：
+Next steps:
 
-  1. 現在只綁在 Tailscale 位址 $ADDR。不要改成 0.0.0.0、LAN/public IP 或
-     localhost；Hub 會拒絕啟動，operator authority 也不准從 HTTP Host 猜。
+  1. Currently bound to Tailscale address $ADDR only. Do not change to 0.0.0.0, LAN/public IP or
+     localhost; Hub will refuse to start, operator authority must not be guessed from HTTP Host.
 
-  2. 先從另一台已授權的 tailnet 裝置打開 http://$ADDR/，
-     確認 top bar 的 login、device 與 capability。然後開一張票：
-       $BIN_DIR/clawctl-hub enroll-token <機器名>
+  2. Open http://$ADDR/ from another authorized tailnet device first,
+     verify login, device and capability in top bar. Then issue a token:
+       $BIN_DIR/clawctl-hub enroll-token <machine-name>
 
-  3. 早報跟死人之鐘：把設定寫進 $ENV_FILE（0600），然後 restart。
-     ⚠ 不要在服務跑著的時候另外開 serve process。純
-       clawctl-hub --notify-cmd 現在會因 loopback/missing app-cap 在開 DB 前失敗；
-       但若另行明示有效 tailnet listener 與 prefix，仍可產生第二 writer。
-       改設定請寫 hub.env 後 restart unit。
+  3. Daily reports and deadman switch: write settings to $ENV_FILE (0600), then restart.
+     ⚠ Do not run another serve process while service is running. Bare
+       clawctl-hub --notify-cmd now fails before opening DB due to loopback/missing app-cap;
+       but specifying valid tailnet listener and prefix can still produce a second writer.
+       To change settings edit hub.env and restart unit.
 
        # Preferred: built-in Telegram/webhook channels (ops/notify.env.example).
        CLAWCTL_NOTIFY_ENV=\$HOME/.config/clawctl/notify.env
@@ -562,6 +562,6 @@ cat <<EOF
        # CLAWCTL_NOTIFY_CMD=\$HOME/.local/libexec/clawctl/notify-telegram.sh
        # ops/notify-telegram.sh stays for ops/deadman.sh and Alertmanager.
 
-  4. ⚠ Hub 不可以裝在它自己管的機器上，也不可以自己監看自己。
-     外部死人之鐘要跑在**另一台**上：ops/deadman.sh
+  4. ⚠ Hub must not be installed on machines it manages, nor monitor itself.
+     External deadman switch must run on another machine: ops/deadman.sh
 EOF

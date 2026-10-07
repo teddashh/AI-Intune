@@ -190,7 +190,7 @@ func (c *Client) applyDeploymentAction(ctx context.Context, deploymentID, action
 func validateDeploymentActionIdempotencyKey(value string) error {
 	if value != strings.TrimSpace(value) ||
 		validateDeploymentClientText("Idempotency-Key", value, 200, false) != nil {
-		return errors.New("operator client: Idempotency-Key 不可省略、含首尾空白/控制字元或超過 200 bytes")
+		return errors.New("operator client: Idempotency-Key is required, cannot contain leading/trailing whitespace or control characters, and cannot exceed 200 bytes")
 	}
 	return nil
 }

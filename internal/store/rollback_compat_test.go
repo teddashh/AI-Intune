@@ -34,7 +34,7 @@ func TestCheckRollbackCompatibleRejectsRunningDeployment(t *testing.T) {
 	}
 
 	err = CheckRollbackCompatible(path)
-	if !errors.Is(err, ErrRollbackNotQuiescent) || !strings.Contains(err.Error(), "1 個 active deployment") {
+	if !errors.Is(err, ErrRollbackNotQuiescent) || !strings.Contains(err.Error(), "1 active deployment") {
 		t.Fatalf("running deployment compatibility err=%v", err)
 	}
 }
@@ -61,7 +61,7 @@ func TestCheckRollbackCompatibleRejectsPausedDeployment(t *testing.T) {
 	}
 
 	err = CheckRollbackCompatible(path)
-	if !errors.Is(err, ErrRollbackNotQuiescent) || !strings.Contains(err.Error(), "1 個 active deployment") {
+	if !errors.Is(err, ErrRollbackNotQuiescent) || !strings.Contains(err.Error(), "1 active deployment") {
 		t.Fatalf("paused deployment compatibility err=%v", err)
 	}
 }
@@ -86,7 +86,7 @@ func TestCheckRollbackCompatibleRejectsNonTerminalJob(t *testing.T) {
 	}
 
 	err = CheckRollbackCompatible(path)
-	if !errors.Is(err, ErrRollbackNotQuiescent) || !strings.Contains(err.Error(), "1 個非終態 job") {
+	if !errors.Is(err, ErrRollbackNotQuiescent) || !strings.Contains(err.Error(), "1 non-terminal job") {
 		t.Fatalf("nonterminal job compatibility err=%v", err)
 	}
 }
@@ -106,7 +106,7 @@ func TestCheckRollbackCompatibleRejectsActiveArtifactFetchAndAllowsTerminal(t *t
 		t.Fatal(err)
 	}
 	if err := CheckRollbackCompatible(path); !errors.Is(err, ErrRollbackNotQuiescent) ||
-		!strings.Contains(err.Error(), "1 個 active artifact fetch") {
+		!strings.Contains(err.Error(), "1 active artifact fetch") {
 		t.Fatalf("queued artifact fetch compatibility err=%v", err)
 	}
 	claim, err := s.ClaimArtifactFetchOperation(queued.Operation.OperationID, false)
@@ -114,7 +114,7 @@ func TestCheckRollbackCompatibleRejectsActiveArtifactFetchAndAllowsTerminal(t *t
 		t.Fatal(err)
 	}
 	if err := CheckRollbackCompatible(path); !errors.Is(err, ErrRollbackNotQuiescent) ||
-		!strings.Contains(err.Error(), "1 個 active artifact fetch") {
+		!strings.Contains(err.Error(), "1 active artifact fetch") {
 		t.Fatalf("running artifact fetch compatibility err=%v", err)
 	}
 	if _, err := s.FailArtifactFetchOperation(claim.Operation.OperationID, claim.RunToken,

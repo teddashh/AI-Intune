@@ -171,7 +171,7 @@ func (s *Server) previewMachineNotes(w http.ResponseWriter, r *http.Request) {
 			status, detail = http.StatusNotFound, "找不到這台機器。"
 		}
 		if status == http.StatusInternalServerError {
-			log.Printf("operator machine notes preview 失敗 machine=%s: %v", id, err)
+			log.Printf("operator machine notes preview failed machine=%s: %v", id, err)
 		}
 		s.renderActionStatus(w, r, status, id, "沒有建立名冊備註預覽", detail, "/machines/"+id)
 		return
@@ -202,7 +202,7 @@ func (s *Server) applyMachineNotes(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status, _, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator machine notes apply 失敗 machine=%s: %v", id, err)
+			log.Printf("operator machine notes apply failed machine=%s: %v", id, err)
 		}
 		s.renderActionStatus(w, r, status, id, "沒有更新名冊備註", detail, "/machines/"+id)
 		return
@@ -227,7 +227,7 @@ func (s *Server) previewMachineRename(w http.ResponseWriter, r *http.Request) {
 			status, detail = http.StatusNotFound, "找不到這台機器。"
 		}
 		if status == http.StatusInternalServerError {
-			log.Printf("operator machine rename preview 失敗 machine=%s: %v", id, err)
+			log.Printf("operator machine rename preview failed machine=%s: %v", id, err)
 		}
 		s.renderActionStatus(w, r, status, id, "沒有建立重新命名預覽", detail, "/machines/"+id)
 		return
@@ -258,7 +258,7 @@ func (s *Server) applyMachineRename(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status, _, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator machine rename apply 失敗 machine=%s: %v", id, err)
+			log.Printf("operator machine rename apply failed machine=%s: %v", id, err)
 		}
 		s.renderActionStatus(w, r, status, id, "沒有重新命名", detail, "/machines/"+id)
 		return
@@ -508,7 +508,7 @@ func (s *Server) doMachineChannel(w http.ResponseWriter, r *http.Request) {
 			detail = "這是原 request 的回放判決，未重新評估目前狀態：" + detail
 		}
 		if status == http.StatusInternalServerError {
-			log.Printf("operator machine channel 失敗 machine=%s: %v", id, err)
+			log.Printf("operator machine channel failed machine=%s: %v", id, err)
 		}
 		s.renderActionStatus(w, r, status, id,
 			"沒有改 channel", detail, "/machines/"+id)
@@ -546,14 +546,14 @@ func (s *Server) previewEnrollToken(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status, _, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator enroll preview 失敗: %v", err)
+			log.Printf("operator enroll preview failed: %v", err)
 		}
 		s.renderActionStatus(w, r, status, strings.TrimSpace(r.FormValue("name")),
 			"沒有建立 enroll 預覽", detail, "/machines/enrollment")
 		return
 	}
 	if err := validateEnrollPreviewRenderResult(preview); err != nil {
-		log.Printf("operator enroll preview 回傳不一致：%v", err)
+		log.Printf("operator enroll preview returned inconsistent result: %v", err)
 		s.renderActionStatus(w, r, http.StatusInternalServerError, preview.DisplayName,
 			"沒有建立 enroll 預覽", "預覽結果不符合一次性憑證與名冊影響契約。", "/machines/enrollment")
 		return
@@ -561,7 +561,7 @@ func (s *Server) previewEnrollToken(w http.ResponseWriter, r *http.Request) {
 
 	key, err := operator.NewIdempotencyKey("web-enroll-token")
 	if err != nil {
-		log.Printf("operator enroll preview 產生 idempotency key 失敗: %v", err)
+		log.Printf("operator enroll preview failed to generate idempotency key: %v", err)
 		s.renderActionStatus(w, r, http.StatusInternalServerError, preview.DisplayName,
 			"沒有建立 enroll 預覽", "無法產生這次確認所需的 request key。請回機器註冊後重試。", "/machines/enrollment")
 		return
@@ -630,7 +630,7 @@ func (s *Server) doEnrollToken(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status, _, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator enroll create 失敗: %v", err)
+			log.Printf("operator enroll create failed: %v", err)
 		}
 		s.renderActionStatus(w, r, status, strings.TrimSpace(r.FormValue("name")),
 			"沒有開 enroll 票", detail, "/machines/enrollment")
@@ -639,7 +639,7 @@ func (s *Server) doEnrollToken(w http.ResponseWriter, r *http.Request) {
 	if err := validateEnrollTokenRenderResult(result); err != nil {
 		// Never log the result: a malformed fresh result may contain the one-time
 		// secret.  The flags below are enough to diagnose a service-contract bug.
-		log.Printf("operator enroll create 回傳不一致：%v（replayed=%t secret_available=%t recovery_required=%t）",
+		log.Printf("operator enroll create returned inconsistent result: %v (replayed=%t secret_available=%t recovery_required=%t)",
 			err, result.Replayed, result.SecretAvailable, result.RecoveryRequired)
 		s.renderActionStatus(w, r, http.StatusInternalServerError, result.DisplayName,
 			"沒有顯示 enroll 票", "建立結果不符合一次性 secret 契約；請從 audit 確認結果，勿直接重送。", "/machines/enrollment")
@@ -697,14 +697,14 @@ func (s *Server) previewRevokeToken(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status, _, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator pending enrollment ticket revocation preview 失敗 machine=%s: %v", id, err)
+			log.Printf("operator pending enrollment ticket revocation preview failed machine=%s: %v", id, err)
 		}
 		s.renderActionStatus(w, r, status, id,
 			"沒有建立待兌換 enroll 票的撤銷預覽", detail, "/machines/"+id)
 		return
 	}
 	if err := validateEnrollTokenRevocationPreviewRenderResult(id, preview); err != nil {
-		log.Printf("operator pending enrollment ticket revocation preview 回傳不一致 machine=%s: %v", id, err)
+		log.Printf("operator pending enrollment ticket revocation preview returned inconsistent result machine=%s: %v", id, err)
 		s.renderActionStatus(w, r, http.StatusInternalServerError, id,
 			"沒有建立待兌換 enroll 票的撤銷預覽",
 			"預覽結果不符合名冊、管理分母與 agent credential 影響契約。", "/machines/"+id)
@@ -713,7 +713,7 @@ func (s *Server) previewRevokeToken(w http.ResponseWriter, r *http.Request) {
 
 	key, err := operator.NewIdempotencyKey("web-enroll-token-revoke")
 	if err != nil {
-		log.Printf("operator pending enrollment ticket revocation preview 產生 idempotency key 失敗 machine=%s: %v", id, err)
+		log.Printf("operator pending enrollment ticket revocation preview failed to generate idempotency key machine=%s: %v", id, err)
 		s.renderActionStatus(w, r, http.StatusInternalServerError, preview.DisplayName,
 			"沒有建立待兌換 enroll 票的撤銷預覽",
 			"無法產生這次確認所需的 request key；請回機器頁重試。", "/machines/"+id)
@@ -780,7 +780,7 @@ func (s *Server) doRevokeToken(w http.ResponseWriter, r *http.Request) {
 			detail = "這是原 request 的回放判決，沒有再次變更 pending enrollment ticket：" + detail
 		}
 		if status == http.StatusInternalServerError {
-			log.Printf("operator pending enrollment ticket revocation 失敗 machine=%s: %v", id, err)
+			log.Printf("operator pending enrollment ticket revocation failed machine=%s: %v", id, err)
 		}
 		s.renderActionStatus(w, r, status, id,
 			"沒有撤銷待兌換的 enroll 票", detail, "/machines/"+id)
@@ -932,14 +932,14 @@ func (s *Server) previewMachineLifecycle(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		status, _, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator lifecycle preview 失敗 machine=%s: %v", id, err)
+			log.Printf("operator lifecycle preview failed machine=%s: %v", id, err)
 		}
 		s.renderActionStatus(w, r, status, id, "沒有建立生命週期預覽", detail, "/machines/"+id)
 		return
 	}
 	key, err := operator.NewIdempotencyKey("web-machine-lifecycle")
 	if err != nil {
-		log.Printf("operator lifecycle preview 產生 idempotency key 失敗 machine=%s: %v", id, err)
+		log.Printf("operator lifecycle preview failed to generate idempotency key machine=%s: %v", id, err)
 		s.renderActionStatus(w, r, http.StatusInternalServerError, preview.DisplayName,
 			"沒有建立生命週期預覽", "無法產生這次確認所需的 request key。請重新預覽。", "/machines/"+id)
 		return
@@ -1002,13 +1002,13 @@ func (s *Server) applyMachineLifecycle(w http.ResponseWriter, r *http.Request, d
 			detail = "這是原 request 的回放判決，未重新評估目前狀態：" + detail
 		}
 		if status == http.StatusInternalServerError {
-			log.Printf("operator lifecycle apply 失敗 machine=%s desired=%s: %v", id, desired, err)
+			log.Printf("operator lifecycle apply failed machine=%s desired=%s: %v", id, desired, err)
 		}
 		s.renderActionStatus(w, r, status, id, "沒有變更機器生命週期", detail, "/machines/"+id)
 		return
 	}
 	if result.MachineID != id || result.State != desired || result.DisplayName == "" {
-		log.Printf("operator lifecycle apply 回傳不一致 machine=%s desired=%s", id, desired)
+		log.Printf("operator lifecycle apply returned inconsistent result machine=%s desired=%s", id, desired)
 		s.renderActionStatus(w, r, http.StatusInternalServerError, id,
 			"沒有確認機器生命週期結果", "控制面回傳的 canonical receipt 不一致。", "/machines/"+id)
 		return

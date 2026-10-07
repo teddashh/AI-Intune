@@ -25,10 +25,10 @@ ADDR="${ADDR:-127.0.0.1}"
 PORT="${CLAWCTL_GRAFANA_PORT:-3000}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-command -v docker >/dev/null || { echo "沒有 docker" >&2; exit 1; }
-docker info >/dev/null 2>&1 || { echo "連不上 docker daemon（example-user 在 docker group 裡嗎？）" >&2; exit 1; }
+command -v docker >/dev/null || { echo "Docker not found" >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo "Cannot connect to docker daemon (is example-user in the docker group?)" >&2; exit 1; }
 
-echo "══ 1/4 設定檔 → $HOME_DIR"
+echo "══ 1/4 Configuration files → $HOME_DIR"
 # ⚠ 設定檔抄一份到 $HOME_DIR，不要直接 mount git worktree ——
 #   容器的生命週期不該綁在某個人的 checkout 上（分支一切走，儀表板就空了）。
 install -d -m 0755 "$HOME_DIR"/provisioning/datasources "$HOME_DIR"/provisioning/dashboards "$HOME_DIR"/dashboards
@@ -36,7 +36,7 @@ install -m 0644 "$HERE/grafana/datasource.yml"         "$HOME_DIR/provisioning/d
 install -m 0644 "$HERE/grafana/dashboard-provider.yml" "$HOME_DIR/provisioning/dashboards/clawctl.yml"
 install -m 0644 "$HERE/grafana/clawctl.json"           "$HOME_DIR/dashboards/clawctl.json"
 
-echo "══ 2/4 起容器（$IMAGE，綁 $ADDR:$PORT）"
+echo "══ 2/4 Starting container ($IMAGE, bound to $ADDR:$PORT)"
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 docker run -d --name "$NAME" \
 	--network host \
@@ -50,33 +50,33 @@ docker run -d --name "$NAME" \
 	-v "$HOME_DIR/dashboards":/var/lib/grafana/dashboards:ro \
 	"$IMAGE" >/dev/null
 
-echo "══ 3/4 等它起來"
+echo "══ 3/4 Waiting for it to start"
 for i in $(seq 1 60); do
 	code="$(curl -s -o /dev/null -w '%{http_code}' -m 3 "http://$ADDR:$PORT/api/health" || true)"
 	[ "$code" = "200" ] && break
 	sleep 2
 done
-[ "${code:-}" = "200" ] || { echo "Grafana 沒起來（最後 HTTP $code）。docker logs $NAME" >&2; exit 1; }
+[ "${code:-}" = "200" ] || { echo "Grafana did not start (last HTTP $code). docker logs $NAME" >&2; exit 1; }
 curl -s "http://$ADDR:$PORT/api/health"; echo
 
-echo "══ 4/4 驗 provisioning 真的生效"
+echo "══ 4/4 Verifying provisioning took effect"
 # ⚠⚠ 這一段是重點。uid 對不上的話 Grafana **不會報錯**，它會畫出一整頁
 #    空面板 —— 正好是這個專案最痛恨的那種失敗：看起來像「機隊很安靜」。
 #    所以不看「容器起來了沒」，看「資料源在不在、那一頁在不在」。
 ds="$(curl -s -u "${GF_ADMIN:-admin}:${GF_PASS:-admin}" "http://$ADDR:$PORT/api/datasources/uid/clawctl-prom" || true)"
-echo "$ds" | grep -q '"uid":"clawctl-prom"' || { echo "資料源 clawctl-prom 沒 provision 進去：$ds" >&2; exit 1; }
-echo "   資料源 clawctl-prom ✓"
+echo "$ds" | grep -q '"uid":"clawctl-prom"' || { echo "Data source clawctl-prom was not provisioned: $ds" >&2; exit 1; }
+echo "   Data source clawctl-prom ✓"
 dash="$(curl -s -u "${GF_ADMIN:-admin}:${GF_PASS:-admin}" "http://$ADDR:$PORT/api/search?query=" || true)"
-echo "$dash" | grep -q 'clawctl' || { echo "儀表板沒 provision 進去：$dash" >&2; exit 1; }
-echo "   儀表板 ✓"
+echo "$dash" | grep -q 'clawctl' || { echo "Dashboard was not provisioned: $dash" >&2; exit 1; }
+echo "   Dashboard ✓"
 
 cat <<MSG
 
 Grafana  http://$ADDR:$PORT/d/clawctl-fleet
-帳號     admin / admin（第一次登入會強制改密碼）
+Credentials  admin / admin (password change enforced on first login)
 
-設定來源：ops/prometheus/grafana/clawctl.json（allowUiUpdates: false）
-更新指令：./ops/prometheus/install-grafana-docker.sh
+Config source: ops/prometheus/grafana/clawctl.json (allowUiUpdates: false)
+Update command: ./ops/prometheus/install-grafana-docker.sh
 
-驗證：./ops/prometheus/check-dashboard.sh
+Verification: ./ops/prometheus/check-dashboard.sh
 MSG

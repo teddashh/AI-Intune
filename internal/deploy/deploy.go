@@ -135,7 +135,7 @@ const (
 func Advance(j Job, ev Event) (JobState, error) {
 	from := j.State
 	if IsTerminal(from) {
-		return from, fmt.Errorf("終態 %q 不能再接受事件 %q", from, ev)
+		return from, fmt.Errorf("terminal state %q cannot accept event %q", from, ev)
 	}
 
 	switch {
@@ -156,7 +156,7 @@ func Advance(j Job, ev Event) (JobState, error) {
 	case (from == Claimed || from == Running || from == Verifying) && ev == Timeout:
 		return OnFailure(j.Irreversible), nil
 	default:
-		return from, fmt.Errorf("狀態 %q 不能接受事件 %q", from, ev)
+		return from, fmt.Errorf("state %q cannot accept event %q", from, ev)
 	}
 }
 

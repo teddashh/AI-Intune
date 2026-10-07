@@ -34,33 +34,33 @@ func runJobReadCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 	deps machineCommandDeps,
 ) error {
 	if len(argv) == 0 || (argv[0] != "list" && argv[0] != "show" && argv[0] != "evidence") {
-		return errors.New("job read: 必須指定 list、show 或 evidence")
+		return errors.New("job read: must specify list, show, or evidence")
 	}
 	action := argv[0]
 	fs := flag.NewFlagSet("job "+action, flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub job list [filters] [--json] [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "      clawctl-hub job show [--json] [--hub-url URL | --db PATH] <job-id>")
-		fmt.Fprintln(errOut, "      clawctl-hub job evidence [--limit N] [--json] [--hub-url URL | --db PATH] <job-id>")
-		fmt.Fprintln(errOut, "  正常模式走 HTTP operator API；--db 僅供 Hub 完全停止時的 fenced break-glass。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub job list [filters] [--json] [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "       clawctl-hub job show [--json] [--hub-url URL | --db PATH] <job-id>")
+		fmt.Fprintln(errOut, "       clawctl-hub job evidence [--limit N] [--json] [--hub-url URL | --db PATH] <job-id>")
+		fmt.Fprintln(errOut, "  Normal mode uses HTTP operator API; --db is only for fenced break-glass when Hub is completely stopped.")
 		fs.PrintDefaults()
 	}
-	hubURL := fs.String("hub-url", "", "HTTP operator API base URL（省略時自動發現）")
-	dbPath := fs.String("db", "", "stopped-service direct DB break-glass 的既有 SQLite 檔位置")
-	machine := fs.String("machine", "", "HTTP: machine_id；direct DB: display_name 或 machine_id")
-	deploymentID := fs.String("deployment", "", "只看這個 deployment_id")
-	resourceKind := fs.String("resource-kind", "", "只看這個 resource kind")
-	resourceID := fs.String("resource-id", "", "只看這個 resource id（必須搭配 --resource-kind）")
+	hubURL := fs.String("hub-url", "", "HTTP operator API base URL (auto-discovered if omitted)")
+	dbPath := fs.String("db", "", "existing SQLite database path for stopped-service direct DB break-glass")
+	machine := fs.String("machine", "", "HTTP: machine_id; direct DB: display_name or machine_id")
+	deploymentID := fs.String("deployment", "", "filter by this deployment_id")
+	resourceKind := fs.String("resource-kind", "", "filter by this resource kind")
+	resourceID := fs.String("resource-id", "", "filter by this resource id (requires --resource-kind)")
 	defaultLimit := operator.DefaultJobReadLimit
 	if action == "evidence" {
 		defaultLimit = 0
 	}
-	limit := fs.Int("limit", defaultLimit, "每頁／每個 evidence section 的項目上限（1..100）")
-	cursor := fs.String("cursor", "", "上一頁回傳的 opaque next cursor")
-	jsonOutput := fs.Bool("json", false, "輸出 stable operator JSON DTO")
+	limit := fs.Int("limit", defaultLimit, "maximum items per page or evidence section (1..100)")
+	cursor := fs.String("cursor", "", "opaque next cursor returned from previous page")
+	jsonOutput := fs.Bool("json", false, "output stable operator JSON DTO")
 	var stateValues repeatedJobStates
-	fs.Var(&stateValues, "state", "只看這個 canonical state；可重複")
+	fs.Var(&stateValues, "state", "filter by this canonical state; repeatable")
 	parseArgs := argv[1:]
 	// The evidence command's documented shape puts job-id first. flag.FlagSet
 	// stops at the first positional argument, so normalize that one form while
@@ -74,52 +74,52 @@ func runJobReadCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 	seen := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
 	if seen["hub-url"] && seen["db"] {
-		return errors.New("job read: --hub-url（HTTP mode）與 --db（direct mode）不可同時明示")
+		return errors.New("job read: --hub-url (HTTP mode) and --db (direct mode) cannot both be specified")
 	}
 	if seen["hub-url"] && strings.TrimSpace(*hubURL) == "" {
-		return errors.New("job read: --hub-url 不可為空")
+		return errors.New("job read: --hub-url cannot be empty")
 	}
 	if seen["db"] && strings.TrimSpace(*dbPath) == "" {
-		return errors.New("job read: --db 不可為空")
+		return errors.New("job read: --db cannot be empty")
 	}
 	if action == "show" {
 		for _, name := range []string{"machine", "deployment", "resource-kind", "resource-id", "limit", "cursor", "state"} {
 			if seen[name] {
-				return fmt.Errorf("job show: 不接受 --%s", name)
+				return fmt.Errorf("job show: --%s is not accepted", name)
 			}
 		}
 		if fs.NArg() != 1 || strings.TrimSpace(fs.Arg(0)) == "" {
-			return errors.New("job show: 必須提供一個 job-id")
+			return errors.New("job show: must provide a job-id")
 		}
 		if err := validateJobReadCLIValue("job-id", fs.Arg(0), 256); err != nil ||
 			strings.Contains(fs.Arg(0), "/") || fs.Arg(0) == "." || fs.Arg(0) == ".." {
-			return errors.New("job show: job-id 不可含首尾空白、控制字元、dot segment 或斜線，且長度不可超過 256 bytes")
+			return errors.New("job show: job-id cannot contain leading or trailing whitespace, control characters, dot segments, or slashes, and must not exceed 256 bytes")
 		}
 		return runJobShow(ctx, fs.Arg(0), *hubURL, *dbPath, seen, *jsonOutput, out, deps)
 	}
 	if action == "evidence" {
 		for _, name := range []string{"machine", "deployment", "resource-kind", "resource-id", "cursor", "state"} {
 			if seen[name] {
-				return fmt.Errorf("job evidence: 不接受 --%s", name)
+				return fmt.Errorf("job evidence: --%s is not accepted", name)
 			}
 		}
 		if fs.NArg() != 1 || strings.TrimSpace(fs.Arg(0)) == "" {
-			return errors.New("job evidence: 必須提供一個 job-id")
+			return errors.New("job evidence: must provide a job-id")
 		}
 		if err := validateJobReadCLIValue("job-id", fs.Arg(0), 256); err != nil ||
 			strings.Contains(fs.Arg(0), "/") || fs.Arg(0) == "." || fs.Arg(0) == ".." {
-			return errors.New("job evidence: job-id 不可含首尾空白、控制字元、dot segment 或斜線，且長度不可超過 256 bytes")
+			return errors.New("job evidence: job-id cannot contain leading or trailing whitespace, control characters, dot segments, or slashes, and must not exceed 256 bytes")
 		}
 		if seen["limit"] && (*limit < 1 || *limit > operator.JobEvidenceDefaultLimit) {
-			return fmt.Errorf("job evidence: --limit 必須介於 1 與 %d", operator.JobEvidenceDefaultLimit)
+			return fmt.Errorf("job evidence: --limit must be between 1 and %d", operator.JobEvidenceDefaultLimit)
 		}
 		return runJobEvidence(ctx, fs.Arg(0), *limit, *hubURL, *dbPath, seen, *jsonOutput, out, deps)
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("job list: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("job list: positional arguments not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	if seen["limit"] && (*limit < 1 || *limit > operator.MaxJobReadLimit) {
-		return fmt.Errorf("job list: --limit 必須介於 1 與 %d", operator.MaxJobReadLimit)
+		return fmt.Errorf("job list: --limit must be between 1 and %d", operator.MaxJobReadLimit)
 	}
 	for _, input := range []struct {
 		name, value string
@@ -138,7 +138,7 @@ func runJobReadCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 		}
 	}
 	if *resourceID != "" && *resourceKind == "" {
-		return errors.New("job list: --resource-id 必須搭配 --resource-kind")
+		return errors.New("job list: --resource-id requires --resource-kind")
 	}
 	request := operator.JobListRequest{
 		MachineID: *machine, DeploymentID: *deploymentID,
@@ -149,7 +149,7 @@ func runJobReadCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 	for _, value := range stateValues {
 		state := deploy.JobState(value)
 		if !deploy.IsKnownJobState(state) || seenStates[state] {
-			return fmt.Errorf("job list: --state %q 不是 canonical state 或重複", value)
+			return fmt.Errorf("job list: --state %q is not a canonical state or is duplicated", value)
 		}
 		seenStates[state] = true
 		request.States = append(request.States, state)
@@ -163,7 +163,7 @@ func runJobReadCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 	}
 	result, err := client.Jobs(ctx, request)
 	if err != nil {
-		return fmt.Errorf("讀取 job list 失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read job list (HTTP operator API): %w", err)
 	}
 	return writeJobList(out, result, *jsonOutput, "HTTP operator API")
 }
@@ -175,7 +175,7 @@ func runJobEvidence(ctx context.Context, jobID string, limit int, hubURL, dbPath
 		return withDirectOperatorStore(ctx, "job evidence", dbPath, deps, func(st *store.Store) error {
 			result, err := operator.New(st).JobEvidence(operator.JobEvidenceRequest{JobID: jobID, Limit: limit}, time.Now().UTC())
 			if err != nil {
-				return fmt.Errorf("讀取 job evidence 失敗（direct DB operator service）：%w", err)
+				return fmt.Errorf("failed to read job evidence (direct DB operator service): %w", err)
 			}
 			return writeJobEvidence(out, result, jsonOutput, "direct DB operator service")
 		})
@@ -186,18 +186,18 @@ func runJobEvidence(ctx context.Context, jobID string, limit int, hubURL, dbPath
 	}
 	result, err := client.JobEvidence(ctx, jobID, limit)
 	if err != nil {
-		return fmt.Errorf("讀取 job evidence 失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read job evidence (HTTP operator API): %w", err)
 	}
 	return writeJobEvidence(out, result, jsonOutput, "HTTP operator API")
 }
 
 func validateJobReadCLIValue(name, value string, maxBytes int) error {
 	if value == "" || value != strings.TrimSpace(value) || len(value) > maxBytes {
-		return fmt.Errorf("job read: --%s 不可為空、過長或含首尾空白", name)
+		return fmt.Errorf("job read: --%s cannot be empty, too long, or contain leading/trailing whitespace", name)
 	}
 	for _, char := range value {
 		if unicode.IsControl(char) || unicode.Is(unicode.Cf, char) {
-			return fmt.Errorf("job read: --%s 不可含控制或隱形格式字元", name)
+			return fmt.Errorf("job read: --%s cannot contain control or invisible formatting characters", name)
 		}
 	}
 	return nil
@@ -210,7 +210,7 @@ func runJobShow(ctx context.Context, jobID, hubURL, dbPath string, seen map[stri
 		return withDirectOperatorStore(ctx, "job show", dbPath, deps, func(st *store.Store) error {
 			result, err := operator.New(st).JobDetail(jobID, time.Now().UTC())
 			if err != nil {
-				return fmt.Errorf("讀取 job detail 失敗（direct DB operator service）：%w", err)
+				return fmt.Errorf("failed to read job detail (direct DB operator service): %w", err)
 			}
 			return writeJobDetail(out, result, jsonOutput, "direct DB operator service")
 		})
@@ -221,7 +221,7 @@ func runJobShow(ctx context.Context, jobID, hubURL, dbPath string, seen map[stri
 	}
 	result, err := client.Job(ctx, jobID)
 	if err != nil {
-		return fmt.Errorf("讀取 job detail 失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read job detail (HTTP operator API): %w", err)
 	}
 	return writeJobDetail(out, result, jsonOutput, "HTTP operator API")
 }
@@ -239,7 +239,7 @@ func runJobListDirect(ctx context.Context, request operator.JobListRequest, dbPa
 		}
 		result, err := operator.New(st).ListJobs(request, time.Now().UTC())
 		if err != nil {
-			return fmt.Errorf("讀取 job list 失敗（direct DB operator service）：%w", err)
+			return fmt.Errorf("failed to read job list (direct DB operator service): %w", err)
 		}
 		return writeJobList(out, result, jsonOutput, "direct DB operator service")
 	})
@@ -248,27 +248,27 @@ func runJobListDirect(ctx context.Context, request operator.JobListRequest, dbPa
 func jobHTTPClient(explicitURL string, explicit bool, deps machineCommandDeps) (*operatorclient.Client, error) {
 	if explicit {
 		if deps.newOperatorClient == nil {
-			return nil, errors.New("job read: operator HTTP client 未初始化")
+			return nil, errors.New("job read: operator HTTP client not initialized")
 		}
 		client, err := deps.newOperatorClient(explicitURL)
 		if err != nil {
-			return nil, fmt.Errorf("job read: 建立 HTTP operator client 失敗：%w", err)
+			return nil, fmt.Errorf("job read: failed to create HTTP operator client: %w", err)
 		}
 		return client, nil
 	}
 	if deps.discoverHubURL == nil {
-		return nil, errors.New("job read: Hub discovery 未初始化")
+		return nil, errors.New("job read: Hub discovery not initialized")
 	}
 	discovered, err := deps.discoverHubURL()
 	if err != nil {
-		return nil, fmt.Errorf("job read: 無法發現 Hub：%w", err)
+		return nil, fmt.Errorf("job read: failed to discover Hub: %w", err)
 	}
 	if deps.newOperatorClient == nil {
-		return nil, errors.New("job read: operator HTTP client 未初始化")
+		return nil, errors.New("job read: operator HTTP client not initialized")
 	}
 	client, err := deps.newOperatorClient(discovered)
 	if err != nil {
-		return nil, fmt.Errorf("job read: 建立 discovered HTTP operator client 失敗：%w", err)
+		return nil, fmt.Errorf("job read: failed to create discovered HTTP operator client: %w", err)
 	}
 	return client, nil
 }
@@ -277,12 +277,12 @@ func writeJobList(out io.Writer, result operator.JobListResult, jsonOutput bool,
 	if jsonOutput {
 		return writeJobJSON(out, result)
 	}
-	if _, err := fmt.Fprintf(out, "%s；Hub 評估時間 %s；符合 %d 張。\n",
+	if _, err := fmt.Fprintf(out, "%s; Hub evaluation time %s; %d matched.\n",
 		source, result.EvaluatedAt.Format(time.RFC3339Nano), result.Total); err != nil {
 		return err
 	}
 	if len(result.Items) == 0 {
-		_, err := fmt.Fprintln(out, "沒有符合 filter 的工作單。")
+		_, err := fmt.Fprintln(out, "No jobs matched the filter.")
 		return err
 	}
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
@@ -328,7 +328,7 @@ func writeJobDetail(out io.Writer, result operator.JobDetailResult, jsonOutput b
 		digest = terminalSafe(*job.ArtifactDigest)
 	}
 	_, err := fmt.Fprintf(out,
-		"%s；Hub 評估時間 %s。\njob_id: %s\nmachine: %s (%s)\ndeployment: %s\nresource: %s/%s\nrevision: %d\nstate: %s\nlease: %s%s\ncreated_at: %s\nterminal_at: %s\nartifact: %s\nirreversible: %t\nevents: %d\nverifications: %d (%d passed / %d failed)\n",
+		"%s; Hub evaluation time %s.\njob_id: %s\nmachine: %s (%s)\ndeployment: %s\nresource: %s/%s\nrevision: %d\nstate: %s\nlease: %s%s\ncreated_at: %s\nterminal_at: %s\nartifact: %s\nirreversible: %t\nevents: %d\nverifications: %d (%d passed / %d failed)\n",
 		source, result.EvaluatedAt.Format(time.RFC3339Nano), terminalSafe(job.JobID),
 		terminalSafe(job.DisplayName), terminalSafe(job.MachineID), deployment,
 		terminalSafe(job.ResourceKind), terminalSafe(job.ResourceID), job.Revision, job.State,
@@ -343,7 +343,7 @@ func writeJobEvidence(out io.Writer, result operator.JobEvidenceResult, jsonOutp
 		return writeJobJSON(out, result)
 	}
 	if _, err := fmt.Fprintf(out,
-		"%s；Hub 評估時間 %s。\njob: %s；machine: %s (%s)；state: %s\nevent_provenance_recording_enabled: %t；verification_producer: %s\nindependent_verifier: %t；verification_provenance_recording_enabled: %t；verification_received_at_recording_enabled: %t\nlimit: %d；max_field_bytes: %d\n",
+		"%s; Hub evaluation time %s.\njob: %s; machine: %s (%s); state: %s\nevent_provenance_recording_enabled: %t; verification_producer: %s\nindependent_verifier: %t; verification_provenance_recording_enabled: %t; verification_received_at_recording_enabled: %t\nlimit: %d; max_field_bytes: %d\n",
 		terminalSafe(source), result.EvaluatedAt.Format(time.RFC3339Nano),
 		terminalSafe(result.JobID), terminalSafe(result.DisplayName), terminalSafe(result.MachineID), result.State,
 		result.Disclosure.EventProvenanceRecordingEnabled,
@@ -355,7 +355,7 @@ func writeJobEvidence(out io.Writer, result operator.JobEvidenceResult, jsonOutp
 	}
 	desired := result.Desired
 	if _, err := fmt.Fprintf(out,
-		"desired: %s；scope: %s/%s；resource: %s/%s；revision: %d；created_at: %s\n",
+		"desired: %s; scope: %s/%s; resource: %s/%s; revision: %d; created_at: %s\n",
 		terminalSafe(desired.DesiredID), terminalSafe(desired.ScopeType), terminalSafe(desired.ScopeID),
 		terminalSafe(desired.ResourceKind), terminalSafe(desired.ResourceID), desired.Revision,
 		desired.CreatedAt.Format(time.RFC3339Nano)); err != nil {
@@ -390,7 +390,7 @@ func writeJobEvidence(out io.Writer, result operator.JobEvidenceResult, jsonOutp
 		}
 	} else {
 		rejection := result.Rejection
-		if _, err := fmt.Fprintf(out, "rejection: seq=%d；payload_decodable=%t；code=%s%s；code_known=%t\n",
+		if _, err := fmt.Fprintf(out, "rejection: seq=%d; payload_decodable=%t; code=%s%s; code_known=%t\n",
 			rejection.Seq, rejection.PayloadDecodable, terminalSafe(rejection.Code.Text),
 			jobEvidenceTextSuffix(rejection.Code), rejection.CodeKnown); err != nil {
 			return err
@@ -398,7 +398,7 @@ func writeJobEvidence(out io.Writer, result operator.JobEvidenceResult, jsonOutp
 		if err := writeJobEvidenceText(out, "rejection detail", rejection.Detail); err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(out, "producer=%s/%s；role=%s；authority=%s；provenance_recorded=%t\n",
+		if _, err := fmt.Fprintf(out, "producer=%s/%s; role=%s; authority=%s; provenance_recorded=%t\n",
 			terminalSafe(rejection.Producer.Kind), terminalSafe(rejection.Producer.ProducerID),
 			terminalSafe(rejection.Producer.EvidenceRole), terminalSafe(rejection.Producer.Authority),
 			rejection.Producer.ProvenanceRecorded); err != nil {
@@ -420,7 +420,7 @@ func writeJobEvidence(out io.Writer, result operator.JobEvidenceResult, jsonOutp
 			receivedAt = verification.ReceivedAt.Format(time.RFC3339Nano)
 		}
 		if _, err := fmt.Fprintf(out,
-			"verification %s；rule=%s%s；exit=%s；passed=%t；reported_verified_at=%s；received_at=%s\nproducer=%s/%s；role=%s；authority=%s；provenance_recorded=%t；independent_verifier=false\n",
+			"verification %s; rule=%s%s; exit=%s; passed=%t; reported_verified_at=%s; received_at=%s\nproducer=%s/%s; role=%s; authority=%s; provenance_recorded=%t; independent_verifier=false\n",
 			terminalSafe(verification.VerificationID), terminalSafe(verification.RuleID.Text),
 			jobEvidenceTextSuffix(verification.RuleID), exit, verification.Passed,
 			verification.ReportedVerifiedAt.Format(time.RFC3339Nano), receivedAt,
@@ -460,14 +460,14 @@ func writeJobIndependentEvidence(out io.Writer, section *operator.JobIndependent
 		terminalAt = section.TerminalAt.Format(time.RFC3339Nano)
 	}
 	if _, err := fmt.Fprintf(out,
-		"independent: %d (%d live producers)%s\nindependent_verdict: %s —— %s\njob artifact_digest: %s；expected_version: %s；job terminal_at: %s\n",
+		"independent: %d (%d live producers)%s\nindependent_verdict: %s - %s\njob artifact_digest: %s; expected_version: %s; job terminal_at: %s\n",
 		section.Total, section.LiveProducers, jobEvidencePageSuffix(section.Truncated),
 		terminalSafe(section.Verdict), jobIndependentVerdictStatement(section.Verdict),
 		terminalSafe(digest), terminalSafe(valueOrNone(section.ExpectedVersion)), terminalAt); err != nil {
 		return err
 	}
 	if len(section.Assignments) == 0 {
-		if _, err := fmt.Fprintf(out, "assignments: 0 —— 還沒有 verifier 被指派來看這張工作單\n"); err != nil {
+		if _, err := fmt.Fprintf(out, "assignments: 0 - no verifiers have been assigned to this job yet\n"); err != nil {
 			return err
 		}
 	} else {
@@ -480,7 +480,7 @@ func writeJobIndependentEvidence(out io.Writer, section *operator.JobIndependent
 				reportedAt = assignment.ReportedAt.Format(time.RFC3339Nano)
 			}
 			if _, err := fmt.Fprintf(out,
-				"assignment verifier=%s；display_name=%s%s；failure_domain=%s%s\nstate=%s —— %s；assigned_at=%s；reported_at=%s\n",
+				"assignment verifier=%s; display_name=%s%s; failure_domain=%s%s\nstate=%s - %s; assigned_at=%s; reported_at=%s\n",
 				terminalSafe(assignment.VerifierID),
 				terminalSafe(assignment.DisplayName.Text), jobEvidenceTextSuffix(assignment.DisplayName),
 				terminalSafe(assignment.FailureDomain.Text), jobEvidenceTextSuffix(assignment.FailureDomain),
@@ -504,7 +504,7 @@ func writeJobIndependentEvidence(out io.Writer, section *operator.JobIndependent
 			observedVersion = "not reported"
 		}
 		if _, err := fmt.Fprintf(out,
-			"independent verification %s；rule=%s%s；exit=%s；passed=%t\nproducer=%s/%s；display_name=%s%s；failure_domain=%s%s；state=%s；role=%s；authority=%s\nVERIFIED_AT(verifier)=%s；RECEIVED_AT(Hub)=%s\nobserved_digest=%s；digest_matches_job=%t；observed_version=%s；version_matches_job=%t\n",
+			"independent verification %s; rule=%s%s; exit=%s; passed=%t\nproducer=%s/%s; display_name=%s%s; failure_domain=%s%s; state=%s; role=%s; authority=%s\nVERIFIED_AT(verifier)=%s; RECEIVED_AT(Hub)=%s\nobserved_digest=%s; digest_matches_job=%t; observed_version=%s; version_matches_job=%t\n",
 			terminalSafe(row.VerificationID), terminalSafe(row.RuleID.Text),
 			jobEvidenceTextSuffix(row.RuleID), exit, row.Passed,
 			terminalSafe(row.Producer.Kind), terminalSafe(row.Producer.VerifierID),
@@ -537,24 +537,24 @@ func writeJobIndependentEvidence(out io.Writer, section *operator.JobIndependent
 func jobIndependentVerdictStatement(verdict string) string {
 	switch store.IndependentVerdict(verdict) {
 	case store.IndependentAbsent:
-		return "沒有第二個 producer 為這張單寫過證據"
+		return "no second producer has recorded evidence for this job"
 	case store.IndependentProducerRevoked:
-		return "寫過這些證據的 producer 都已撤銷"
+		return "producers that recorded this evidence have been revoked"
 	case store.IndependentDigestMismatch:
-		return "第二個 producer 看到的 artifact digest 與這張單的不同"
+		return "artifact digest observed by second producer differs from this job"
 	case store.IndependentReleaseMismatch:
-		return "第二個 producer 看到的 OpenClaw 版本與這張單的不同"
+		return "OpenClaw version observed by second producer differs from this job"
 	case store.IndependentReleaseUnreported:
-		return "第二個 producer 沒有回報可與這張單比較的結構化 OpenClaw 版本"
+		return "second producer did not report a structured OpenClaw version comparable to this job"
 	case store.IndependentStale:
-		return "第二個 producer 的證據都在這張單結束前送達"
+		return "evidence from second producer was received before this job ended"
 	case store.IndependentFailed:
-		return "第二個 producer 回報至少一條規則失敗"
+		return "second producer reported at least one rule failure"
 	case store.IndependentPassed:
 		// ⚠ 見 internal/web 的同一句：沒有回報 digest 的列也會落到 passed。
-		return "第二個 producer 回報的規則全部通過，沒有一列的 digest 與這張單相衝突"
+		return "all rules reported by second producer passed, with no digest conflicting with this job"
 	default:
-		return "這個 verdict 不在已知的八種之內"
+		return "verdict is not among the eight known verdicts"
 	}
 }
 
@@ -564,15 +564,15 @@ func jobIndependentVerdictStatement(verdict string) string {
 func jobAssignmentStateStatement(state string) string {
 	switch state {
 	case operator.JobAssignmentReported:
-		return "已送出獨立證據"
+		return "independent evidence submitted"
 	case operator.JobAssignmentProducerRevoked:
-		return "指派的 verifier 已撤銷，不會再回報"
+		return "assigned verifier revoked, will not report"
 	case operator.JobAssignmentWaitingForJob:
-		return "等這張工作單結束才會發出"
+		return "waiting for job completion before dispatch"
 	case operator.JobAssignmentAwaitingReport:
-		return "已發出，等它回報"
+		return "dispatched, awaiting report"
 	default:
-		return "這個 state 不在已知的四種之內"
+		return "state is not among the four known states"
 	}
 }
 

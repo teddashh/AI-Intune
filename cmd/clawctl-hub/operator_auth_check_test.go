@@ -131,8 +131,8 @@ func TestOperatorAuthCheckUsesSameSuccessContractAsHTTPBoundary(t *testing.T) {
 				"--operator-auth-check", "--listen", "100.64.200.2:8787",
 				"--operator-capability-prefix", prefix,
 			}, &bytes.Buffer{}, func(operatorauth.Config) (operatorRequestAuthorizer, error) { return fake, nil })
-			if err == nil || (!strings.Contains(err.Error(), "success 判決不完整") &&
-				!strings.Contains(err.Error(), "不一致的拒絕判決")) {
+			if err == nil || (!strings.Contains(err.Error(), "success decision is incomplete") &&
+				!strings.Contains(err.Error(), "inconsistent denial decision")) {
 				t.Fatalf("contradictory success err=%v", err)
 			}
 		})
@@ -158,13 +158,13 @@ func TestOperatorAuthCheckFailsClosedForMissingIndependentCapability(t *testing.
 				"--operator-capability-prefix", prefix,
 			}, &bytes.Buffer{}, func(operatorauth.Config) (operatorRequestAuthorizer, error) { return fake, nil })
 			if permission == operatorauth.Admin {
-				if err == nil || !strings.Contains(err.Error(), "success 判決不完整") {
+				if err == nil || !strings.Contains(err.Error(), "success decision is incomplete") {
 					t.Fatalf("missing required admin grant err=%v", err)
 				}
 				return
 			}
 			if err == nil || !strings.Contains(err.Error(), permission.String()+" capability") ||
-				!strings.Contains(err.Error(), "不做程式內權限繼承") {
+				!strings.Contains(err.Error(), "no in-process permission inheritance") {
 				t.Fatalf("missing independent capability err=%v", err)
 			}
 		})
@@ -194,7 +194,7 @@ func TestOperatorAuthCheckRejectsContradictoryDenial(t *testing.T) {
 		"--operator-auth-check", "--listen", "100.64.200.2:8787",
 		"--operator-capability-prefix", "example.com/cap/clawctl",
 	}, &bytes.Buffer{}, func(operatorauth.Config) (operatorRequestAuthorizer, error) { return fake, nil })
-	if err == nil || !strings.Contains(err.Error(), "不一致的拒絕判決") {
+	if err == nil || !strings.Contains(err.Error(), "inconsistent denial decision") {
 		t.Fatalf("contradictory denial err=%v", err)
 	}
 }
@@ -219,7 +219,7 @@ func TestOperatorAuthCheckSharesServePublicAuthorityValidation(t *testing.T) {
 		called = true
 		return nil, errors.New("must not be reached")
 	})
-	if err == nil || !strings.Contains(err.Error(), "CLAWCTL_PUBLIC_URL") || !strings.Contains(err.Error(), "不一致") {
+	if err == nil || !strings.Contains(err.Error(), "CLAWCTL_PUBLIC_URL") || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("public authority conflict err=%v", err)
 	}
 	if called {

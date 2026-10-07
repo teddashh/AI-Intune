@@ -54,8 +54,8 @@ if [ -n "${CLAWCTL_PY:-}" ]; then
   if usable_py "$CLAWCTL_PY"; then
     PY="$CLAWCTL_PY"
   else
-    echo "⚠ CLAWCTL_PY=$CLAWCTL_PY 不能用（不存在，或裡面沒有 prometheus_client）。" >&2
-    echo "  這支腳本沒有跑，不是「通過了」。要換一個就改 CLAWCTL_PY，要自動找就不要設它。" >&2
+    echo "⚠ CLAWCTL_PY=$CLAWCTL_PY is unusable (does not exist, or missing prometheus_client)" >&2
+    echo "  This script did not run, not 'passed'. To change it set CLAWCTL_PY, to find automatically leave it unset" >&2
     exit 2
   fi
 fi
@@ -66,7 +66,7 @@ if [ -z "$PY" ]; then
 fi
 if [ -z "$PY" ]; then
   cat >&2 <<'EOF'
-找不到裝了 prometheus_client 的 python —— 這支腳本沒有跑，不是「通過了」。
+Cannot find python with prometheus_client installed — this script did not run, not 'passed'.
 
   python3 -m venv /tmp/promv && /tmp/promv/bin/pip install prometheus_client
   CLAWCTL_PY=/tmp/promv/bin/python ops/check-metrics.sh
@@ -74,11 +74,11 @@ EOF
   exit 2
 fi
 
-echo "== 抓 $URL"
+echo "== Fetching $URL"
 body="$(mktemp)"; trap 'rm -f "$body"' EXIT
 code="$(curl -sS -o "$body" -w '%{http_code}' --max-time 10 "$URL")"
 if [ "$code" != "200" ]; then
-  echo "HTTP $code —— 不是 200。內文前幾行：" >&2
+  echo "HTTP $code — not 200. First lines of body:" >&2
   head -3 "$body" >&2
   exit 1
 fi
@@ -97,7 +97,7 @@ raw = open(sys.argv[1], encoding="utf-8").read()
 broken = 'x{bad="unclosed 1\n'
 try:
     list(text_string_to_metric_families(broken))
-    print("反向對照失敗：parser 連壞掉的輸入都收 —— 它的綠燈不能信", file=sys.stderr)
+    print("Negative control failed: parser accepts broken input — its green light cannot be trusted", file=sys.stderr)
     sys.exit(3)
 except Exception:
     pass
@@ -105,7 +105,7 @@ except Exception:
 fams = list(text_string_to_metric_families(raw))
 samples = [s for f in fams for s in f.samples]
 if not fams:
-    print("parser 讀完是空的 —— 一頁沒有任何指標的 metrics", file=sys.stderr)
+    print("Parser output is empty — a metrics page with no metrics", file=sys.stderr)
     sys.exit(1)
 
 # ⚠ 重複的 series 會讓 Prometheus 丟掉整頁。兩台同名機器就會中。
@@ -116,18 +116,18 @@ for s in samples:
 dupes = [k for k, n in seen.items() if n > 1]
 if dupes:
     for k in dupes:
-        print(f"重複的 series：{k}", file=sys.stderr)
-    print("⚠ Prometheus 會把整頁丟掉，不是只丟這幾行。", file=sys.stderr)
+        print(f"Duplicate series: {k}", file=sys.stderr)
+    print("⚠ Prometheus will drop the entire page, not just these lines", file=sys.stderr)
     sys.exit(1)
 
 # ⚠ 這一頁不准宣稱健康。理由見 metrics.go 開頭：Hub 死掉的時候這個端點
 # 不是回傳壞消息，它是連線失敗。自證不算數。
 for f in fams:
     if f.name.endswith(("_up", "_healthy", "_ok", "_alive")):
-        print(f"{f.name}：這一頁不准宣稱健康", file=sys.stderr)
+        print(f"{f.name}: this page must not assert health", file=sys.stderr)
         sys.exit(1)
 
-print(f"官方 parser 讀過了：{len(fams)} 個指標、{len(samples)} 行 sample")
+print(f"Official parser parsed: {len(fams)} metrics, {len(samples)} samples")
 machines = sorted({s.labels.get("machine", "") for s in samples if "machine" in s.labels})
-print(f"名冊上 {len(machines)} 台：{', '.join(machines)}")
+print(f"{len(machines)} machines in inventory: {', '.join(machines)}")
 PYEOF

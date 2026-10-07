@@ -61,7 +61,7 @@ func TestARepeatedActionIsNamedInTheRefusal(t *testing.T) {
 			{Kind: ActionBlockJobs, GraceSeconds: 120}}}
 	err := p.Validate()
 	if err == nil || !strings.Contains(err.Error(), string(ActionBlockJobs)) ||
-		!strings.Contains(err.Error(), "兩次") {
+		!strings.Contains(err.Error(), "twice") {
 		t.Fatalf("沒說清楚是哪個後果重複：%v", err)
 	}
 }

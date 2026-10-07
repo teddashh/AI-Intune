@@ -60,7 +60,7 @@ func (c *Client) PreviewMachineRename(ctx context.Context, machineID string,
 		out.PreviewedAt.IsZero() || out.PreviewedAt.Location() != time.UTC ||
 		!out.MachineIDPreserved || !out.AgentUnaffected || !out.ExpectationKeyChanges ||
 		!validSHA256Digest(out.PreviewDigest) {
-		return MachineRenamePreviewResponse{}, errors.New("operator client: machine rename preview 不符合 target 與影響契約")
+		return MachineRenamePreviewResponse{}, errors.New("operator client: machine rename preview does not conform to target and effect contract")
 	}
 	if err := validateRenameText(out.CurrentDisplayName); err != nil {
 		return MachineRenamePreviewResponse{}, err
@@ -76,7 +76,7 @@ func (c *Client) PutMachineRename(ctx context.Context, machineID, idempotencyKey
 		validateRenameText(body.DisplayName) != nil || validateRenameText(body.ConfirmDisplayName) != nil ||
 		!validSHA256Digest(body.PreviewDigest) || strings.TrimSpace(body.Reason) == "" ||
 		body.Reason != strings.TrimSpace(body.Reason) || len(body.Reason) > 500 {
-		return out, errors.New("operator client: machine rename apply request 不完整或不合法")
+		return out, errors.New("operator client: machine rename apply request is incomplete or invalid")
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -108,7 +108,7 @@ func (c *Client) PutMachineRename(ctx context.Context, machineID, idempotencyKey
 		!out.MachineIDPreserved || !out.AgentUnaffected || !out.ExpectationKeyChanged ||
 		out.PreviewDigest != body.PreviewDigest ||
 		out.Replayed != replayed {
-		return MachineRenameResponse{}, errors.New("operator client: machine rename result 不符合 request 與影響契約")
+		return MachineRenameResponse{}, errors.New("operator client: machine rename result does not conform to request and effect contract")
 	}
 	return out, nil
 }
@@ -119,7 +119,7 @@ func validateRenameText(value string) error {
 		return err
 	}
 	if value != strings.TrimSpace(value) {
-		return errors.New("operator client: machine display_name 前後不可有空白")
+		return errors.New("operator client: machine display_name cannot have leading or trailing whitespace")
 	}
 	return nil
 }

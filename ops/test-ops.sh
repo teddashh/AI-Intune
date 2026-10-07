@@ -657,7 +657,7 @@ operator_auth_failure_handoff_fixture() {
 	rm -rf "$fixture"
 	mkdir -p "$fixture"
 	printf 'candidate\n' >"$fixture/clawctl-hub.new"
-	source="$(sed -n '/^echo "→ 預檢 Tailscale operator grant/,/^stop_hub_for_database_move || exit 1$/p' "$UPGRADE_HUB")"
+	source="$(sed -n '/^echo "→ Preflight Tailscale operator grant/,/^stop_hub_for_database_move || exit 1$/p' "$UPGRADE_HUB")"
 	(
 		set -euo pipefail
 		BIN="$fixture/clawctl-hub"
@@ -1238,9 +1238,9 @@ expect 'agent bundle publisher shell syntax valid' 0 is_silent
 run agent_bundle_publisher_fixture
 expect 'agent bundle publisher atomically admits one immutable complete release' 0 has 'different bytes'
 run non_elf_agent_bundle_publisher_fixture
-expect 'agent bundle publisher 不准把 macOS binary 當 Linux agent 出貨' 1 has 'Invalid Agent ELF'
+expect 'agent bundle publisher does not ship macOS binary as Linux agent' 1 has 'Invalid Agent ELF'
 run wrong_arch_agent_bundle_publisher_fixture
-expect 'agent bundle publisher 不准把 arm64 binary 當 amd64 出貨' 1 has 'Agent architecture mismatch'
+expect 'agent bundle publisher does not ship arm64 binary as amd64' 1 has 'Agent architecture mismatch'
 
 for darwin_case in valid partial wrong-arch non-executable elf plist installer version symlink membership changed existing-partial; do
 	run darwin_publisher_fixture "$darwin_case"
@@ -1298,13 +1298,13 @@ run agent_installer_complete_fixture
 expect 'agent installer completes Tailscale, enrollment, service and Hub receipt in one run' 0 has 'Managed: agent=test-version tailscale=100.64.0.77 service=active jobs=enabled'
 
 run macos_agent_installer_complete_fixture
-expect 'macOS 安裝腳本把 launchd plist 的佔位符全部代換掉' 0 true
+expect 'macOS install script substitutes all placeholders in launchd plist' 0 true
 
 run macos_installer_rejects_linux_fixture
-expect 'macOS 安裝腳本在 Linux 上指出該跑哪一支' 1 has 'On Linux run ./install-agent.sh'
+expect 'macOS install script indicates which script to run on Linux' 1 has 'On Linux run ./install-agent.sh'
 
 run linux_installer_names_macos_fixture
-expect 'Linux 安裝腳本在 macOS 上指出該跑哪一支' 1 has 'ops/install-agent-macos.sh'
+expect 'Linux install script indicates which script to run on macOS' 1 has 'ops/install-agent-macos.sh'
 
 run appears_in_order3 'got="$(timeout 5 "$bin.new" version' 'sudo mv -f "$system_unit.new" "$system_unit"' 'sudo systemctl restart clawctl-agent.service' "$UPGRADE_AGENT"
 expect 'agent upgrade validates binary before publishing unit and restarting' 0 is_silent
@@ -1365,7 +1365,7 @@ untrusted_install_home="$TMP/install-caller-controlled-home"
 mkdir -p "$untrusted_install_home"
 run env HOME="$untrusted_install_home" XDG_CONFIG_HOME="$untrusted_install_home/xdg" \
 	bash "$INSTALL_HUB" --listen 100.64.0.1:8787 --operator-capability-prefix example.test/cap/clawctl
-expect 'installer rejects caller-controlled HOME before resolving installation paths' 1 has_both 'canonical home' '尚未建立或修改'
+expect 'installer rejects caller-controlled HOME before resolving installation paths' 1 has_both 'canonical home' 'no installation paths created or modified'
 run file_absent "$untrusted_install_home/.local"
 expect 'installer HOME rejection creates no local lifecycle tree' 0 is_silent
 run file_absent "$untrusted_install_home/xdg"
@@ -1456,20 +1456,20 @@ run grep -F 'git show "$revision:ops/clawctl-hub.service"' "$STAGE_HUB_UNIT"
 expect 'unit staging refuses to overwrite files outside tracked unit history' 0 has 'git show'
 
 run stage_checked_in_unit_fixture success
-expect 'unit staging atomically reloads an exact contract without changing process identity' 0 has '沒有 restart'
+expect 'unit staging atomically reloads an exact contract without changing process identity' 0 has 'no restart'
 
 run stage_checked_in_unit_fixture worktree-drift
-expect 'unit staging reads the captured content-addressed HEAD blob after verification' 0 has '沒有 restart'
+expect 'unit staging reads the captured content-addressed HEAD blob after verification' 0 has 'no restart'
 run cmp -s -- "$TMP/stage-function-worktree-drift/committed" "$TMP/stage-function-worktree-drift/unit"
 expect 'a worktree TOCTOU change cannot become the staged unit bytes' 0 is_silent
 
 run stage_checked_in_unit_fixture reload-fail
-expect 'daemon-reload failure reports a monotonic rerun path and returns non-zero' 1 has_both '留在磁碟' '重跑'
+expect 'daemon-reload failure reports a monotonic rerun path and returns non-zero' 1 has_both 'left on disk' 'Rerun'
 run cmp -s -- "$TMP/stage-function-reload-fail/desired" "$TMP/stage-function-reload-fail/unit"
 expect 'daemon-reload failure leaves the desired unit on disk instead of rolling backward' 0 is_silent
 
 run stage_checked_in_unit_fixture fail-rerun
-expect 'rerunning after daemon-reload failure converges without a service restart' 0 has_both '重跑' '沒有 restart'
+expect 'rerunning after daemon-reload failure converges without a service restart' 0 has_both 'Rerun' 'no restart'
 
 run stage_checked_in_unit_fixture interrupt
 expect 'interruption immediately after atomic mv exits with the signal status' 143 is_silent
@@ -1504,7 +1504,7 @@ run verify_fixture 200 "$good_metrics" 0
 expect 'all six Hub verification gates accept an exact healthy candidate' 0 is_silent
 
 run verify_fixture 200 "$good_metrics" 0 200 alive 200 '<html></html>' 1 0 clawctl-hub 0
-expect 'candidate without a process-lifetime writer lock cannot pass verification' 1 has '沒有持有'
+expect 'candidate without a process-lifetime writer lock cannot pass verification' 1 has 'does not hold'
 
 run verify_fixture 200 "$good_metrics" 1 200 alive 200 '<html></html>' 1 0 clawctl-hub 0
 expect 'legacy rollback explicitly discloses its relaxed writer-lock gate' 0 has 'legacy recovery'
@@ -1513,10 +1513,10 @@ run verify_fixture 500 "$good_metrics" 0
 expect 'metrics HTTP 500 cannot pass with a forged correct build_info body' 1 has 'HTTP 500'
 
 run verify_fixture 404 '' 0
-expect 'candidate metrics 404 is a hard failure' 1 has '版本證據'
+expect 'candidate metrics 404 is a hard failure' 1 has 'version evidence'
 
 run verify_fixture 404 '' 1
-expect 'explicit legacy verification may disclose and tolerate metrics 404' 0 has '這一版沒有 /metrics'
+expect 'explicit legacy verification may disclose and tolerate metrics 404' 0 has 'This version has no /metrics'
 
 duplicate_metrics="$good_metrics
 $good_metrics"
@@ -1527,21 +1527,21 @@ run verify_fixture 200 "$good_metrics" 0 500 alive
 expect 'healthz HTTP 500 cannot pass with body alive' 1 has 'healthz'
 
 run verify_fixture 200 "$good_metrics" 0 200 alive 500 '<html></html>'
-expect 'homepage HTTP 500 cannot pass with a complete-looking body' 1 has '首頁'
+expect 'homepage HTTP 500 cannot pass with a complete-looking body' 1 has 'Homepage'
 
 run verify_fixture 200 "$good_metrics" 0 200 alive 200 '<html></html>' 0
 expect 'a manually started Hub cannot pass while the systemd unit is inactive' 1 has 'systemd'
 
 run verify_fixture 200 "$good_metrics" 0 200 alive 200 '<html></html>' 1 0 $'clawctl-hub\nclawctl-hub.pre'
-expect 'verification counts renamed Hub binaries as a second process' 1 has '2 個 clawctl-hub'
+expect 'verification counts renamed Hub binaries as a second process' 1 has '2 clawctl-hub'
 
 run drain_fixture 'clawctl-hub.pre'
-expect 'database drain rejects a renamed Hub binary' 1 has '沒有真的停乾淨'
+expect 'database drain rejects a renamed Hub binary' 1 has 'not cleanly stopped'
 
 run grep -F 'check_rollback_compatibility "$PREV_PROBE"' "$UPGRADE_HUB"
 expect 'manual rollback requires previous binary capability through a private probe' 0 has 'check_rollback_compatibility'
 
-run appears_in_order3 'check_rollback_compatibility "$BIN" "目前版本 $current"' 'check_rollback_compatibility "$PREV_PROBE" "上一版 $prev"' 'begin_upgrade_maintenance "$BIN"' "$UPGRADE_HUB"
+run appears_in_order3 'check_rollback_compatibility "$BIN" "current version $current"' 'check_rollback_compatibility "$PREV_PROBE" "previous version $prev"' 'begin_upgrade_maintenance "$BIN"' "$UPGRADE_HUB"
 expect 'manual rollback checks forward-only work with current binary before consulting previous binary' 0 is_silent
 
 run grep -F 'restore_binary_after_snapshot_failure "$BIN.failed" "$current" "$rollback_snapshot"' "$UPGRADE_HUB"
@@ -1578,12 +1578,12 @@ run binary_restore_fixture install-failure
 expect 'binary install failure leaves the installed path unchanged and fails closed' 0 has 'install'
 
 run binary_restore_fixture missing
-expect 'missing saved binary leaves the installed path unchanged and fails closed' 0 has '找不到'
+expect 'missing saved binary leaves the installed path unchanged and fails closed' 0 has 'cannot find'
 
 run grep -F 'cp "$BIN.prev" "$BIN"' "$UPGRADE_HUB"
 expect 'automatic rollback cannot silently continue after an unchecked binary copy' 1 is_silent
 
-run grep -F 'fail_closed_binary_restore "automatic rollback 找不到 $BIN.prev' "$UPGRADE_HUB"
+run grep -F 'fail_closed_binary_restore "automatic rollback cannot find $BIN.prev' "$UPGRADE_HUB"
 expect 'automatic rollback missing previous binary is explicitly fail closed' 0 has 'fail_closed_binary_restore'
 
 run grep -F 'restore_binary_after_handoff_refusal "$BIN.failed" "$current"' "$UPGRADE_HUB"
@@ -1595,7 +1595,7 @@ expect 'candidate verification requires metrics evidence' 0 has 'verify "$VERSIO
 run grep -F -- '--operator-auth-check' "$UPGRADE_HUB"
 expect 'upgrade invokes the candidate-owned LocalAPI grant preflight' 0 has '--operator-auth-check'
 
-run appears_in_order3 'if run_operator_auth_preflight "$BIN.new"; then' 'echo "→ 停 Hub"' 'create_rollback_snapshot "$CANDIDATE_PROBE"' "$UPGRADE_HUB"
+run appears_in_order3 'if run_operator_auth_preflight "$BIN.new"; then' 'echo "→ Stopping Hub"' 'create_rollback_snapshot "$CANDIDATE_PROBE"' "$UPGRADE_HUB"
 expect 'operator grant preflight runs before Hub stop and database snapshot' 0 is_silent
 
 run operator_auth_preflight_fixture success
@@ -1622,22 +1622,22 @@ run operator_auth_preflight_fixture deny
 expect 'candidate denial keeps its non-zero status through the set-e-safe capture path' 42 has_both 'exit 42' 'OPERATOR_CAPABILITY_REQUIRED'
 
 run operator_auth_preflight_fixture empty
-expect 'exit zero without the versioned sentinel fails closed' 1 has '預檢失敗'
+expect 'exit zero without the versioned sentinel fails closed' 1 has 'preflight failed'
 
 run operator_auth_preflight_fixture wrong-version
-expect 'an unknown sentinel version fails closed' 1 has '預檢失敗'
+expect 'an unknown sentinel version fails closed' 1 has 'preflight failed'
 
 run operator_auth_preflight_fixture different-source
-expect 'a successful probe for anything except the Hub self-source fails closed' 1 has '預檢失敗'
+expect 'a successful probe for anything except the Hub self-source fails closed' 1 has 'preflight failed'
 
 run operator_auth_preflight_fixture multiline
-expect 'extra candidate output cannot be mistaken for the single success sentinel' 1 has '預檢失敗'
+expect 'extra candidate output cannot be mistaken for the single success sentinel' 1 has 'preflight failed'
 
 run operator_auth_preflight_fixture hang
 expect 'a wedged transient manager/client path is bounded and fails closed' 124 has 'exit 124'
 
 run operator_auth_failure_handoff_fixture
-expect 'preflight denial exits before the exact rollout segment can stop Hub' 42 has '預檢'
+expect 'preflight denial exits before the exact rollout segment can stop Hub' 42 has 'Preflight'
 run file_absent "$TMP/operator-auth-handoff/clawctl-hub.new"
 expect 'preflight denial removes only the unactivated candidate' 0 is_silent
 run file_absent "$TMP/operator-auth-handoff/stop-called"
@@ -1692,7 +1692,7 @@ expect 'manual rollback proves the exact stopped unit and recursive cgroup after
 run appears_in_order3 'acquire_database_writer_lock || exit 1' 'verify_stopped_hub_contract "$BIN"' 'check_rollback_compatibility "$PREV_PROBE"' "$UPGRADE_HUB"
 expect 'manual rollback owns both locks and proves stopped state before its first DB read' 0 is_silent
 
-run appears_in_order3 'echo "→ 停 Hub"' 'acquire_database_writer_lock || exit 1' 'check_rollback_compatibility "$BIN.new"' "$UPGRADE_HUB"
+run appears_in_order3 'echo "→ Stopping Hub"' 'acquire_database_writer_lock || exit 1' 'check_rollback_compatibility "$BIN.new"' "$UPGRADE_HUB"
 expect 'forward rollout owns the writer lock before compatibility and snapshot reads' 0 is_silent
 
 run appears_in_order3 'acquire_database_writer_lock || exit 1' 'verify_stopped_hub_contract "$BIN.new"' 'check_rollback_compatibility "$BIN.new"' "$UPGRADE_HUB"
@@ -1735,7 +1735,7 @@ run appears_before 'quarantine_failed_database "$quarantine"' 'restore_preupgrad
 expect 'automatic rollback quarantines migrated DB before restoring backup' 0 is_silent
 
 run awk '
-	/automatic rollback 無法隔離失敗 candidate/ { in_auto=1 }
+	/automatic rollback failed to isolate failed candidate/ { in_auto=1 }
 	in_auto && /quarantine_failed_database "\$quarantine"/ { quarantine=NR }
 	in_auto && /restore_preupgrade_database "\$PREUPGRADE_DB_BACKUP"/ { restore=NR }
 	END { exit !(in_auto && quarantine > 0 && restore > quarantine) }
@@ -1754,7 +1754,7 @@ expect 'verified candidate ledger is durable before maintenance writes reopen' 0
 run appears_in_order3 'restore_preupgrade_database "$PREUPGRADE_DB_BACKUP"' 'systemctl --user start "$UNIT"' 'durably_sync_path "$(dirname "$DB")" "verified automatic rollback ledger state"' "$UPGRADE_HUB"
 expect 'automatic rollback keeps maintenance across restored Hub start and verification' 0 is_silent
 
-run appears_in_order3 'durably_sync_path "$(dirname "$DB")" "verified automatic rollback ledger state"' 'remove_upgrade_maintenance_marker' '已經回到 $was' "$UPGRADE_HUB"
+run appears_in_order3 'durably_sync_path "$(dirname "$DB")" "verified automatic rollback ledger state"' 'remove_upgrade_maintenance_marker' 'Already rolled back to $was' "$UPGRADE_HUB"
 expect 'automatic rollback reopens writes only after restored Hub verification' 0 is_silent
 
 run appears_in_order3 'durably_sync_path "$BIN.new" "staged candidate binary"' 'mv -fT -- "$BIN.new" "$BIN"' 'systemctl --user start "$UNIT"' "$UPGRADE_HUB"
@@ -1763,7 +1763,7 @@ expect 'candidate bytes are durable before activation and service start' 0 is_si
 run appears_before 'for dormant in "${stale_binary_artifacts[@]}"; do' 'if ! verify_no_stale_maintenance_marker; then' "$UPGRADE_HUB"
 expect 'interrupted binary artifacts are disabled before stale marker refusal' 0 is_silent
 
-run grep -F 'make_dormant_binary_non_executable "$BIN.new" "未啟用 candidate binary"' "$UPGRADE_HUB"
+run grep -F 'make_dormant_binary_non_executable "$BIN.new" "unactivated candidate binary"' "$UPGRADE_HUB"
 expect 'every pre-activation exit makes a staged candidate non-executable' 0 has 'BIN.new'
 
 run function_body_appears_in_order3 fail_closed_started_recovery 'make_dormant_binary_non_executable "$BIN"' 'systemctl --user stop "$UNIT"' 'if ! assert_no_hub_process; then' "$UPGRADE_HUB"
@@ -1809,13 +1809,13 @@ done
 run bash "$UPGRADE_HUB"
 touch "$lock_release"
 wait "$lock_holder"
-expect 'a second upgrade process fails immediately on the lifecycle lock' 1 has_both '另一支' 'upgrade'
+expect 'a second upgrade process fails immediately on the lifecycle lock' 1 has_both 'Another' 'upgrade'
 
 stale_marker="$TMP/clawctl.sqlite.upgrade-maintenance"
 printf 'interrupted\n' >"$stale_marker"
 stale_source="$(sed -n '/^verify_no_stale_maintenance_marker() {$/,/^}$/p' "$UPGRADE_HUB")"
 run bash -c 'MAINTENANCE_MARKER=$1; eval "$2"; verify_no_stale_maintenance_marker' _ "$stale_marker" "$stale_source"
-expect 'stale upgrade marker fails closed before build or DB handling' 1 has_both '遺留' '下一步'
+expect 'stale upgrade marker fails closed before build or DB handling' 1 has_both 'leftover' 'Next step'
 
 untrusted_home="$TMP/caller-controlled-home"
 systemctl_called="$TMP/systemctl-called"
@@ -1825,7 +1825,7 @@ printf '#!/usr/bin/env bash\n: >"$SYSTEMCTL_CALLED"\nexit 88\n' >"$home_guard_bi
 chmod +x "$home_guard_bin/systemctl"
 run env HOME="$untrusted_home" SYSTEMCTL_CALLED="$systemctl_called" \
 	PATH="$home_guard_bin:/usr/bin:/bin" bash "$UPGRADE_HUB"
-expect 'caller-controlled HOME is rejected before lifecycle paths are resolved' 1 has_both 'canonical home' '尚未建立 lock'
+expect 'caller-controlled HOME is rejected before lifecycle paths are resolved' 1 has_both 'canonical home' 'no lock created'
 run file_absent "$systemctl_called"
 expect 'HOME rejection cannot reach systemctl' 0 is_silent
 run file_absent "$untrusted_home/.local"
@@ -1836,34 +1836,34 @@ now=$(date -u +%s)
 
 printf '%s\n' "$now" >"$stamp"
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=cat "$DEADMAN" "$stamp"
-expect '新鮮時間戳安靜通過' 0 is_silent
+expect 'fresh timestamp passes silently' 0 is_silent
 
 printf '%s\n' "$((now - 25 * 3600))" >"$stamp"
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=cat "$DEADMAN" "$stamp"
-expect '門檻內時間戳安靜通過' 0 is_silent
+expect 'timestamp within threshold passes silently' 0 is_silent
 
 printf '%s\n' "$((now - 30 * 3600))" >"$stamp"
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=cat "$DEADMAN" "$stamp"
-expect '過期時間戳指出時數與上限' 1 has_both '已經 30 小時' '上限 26'
+expect 'expired timestamp reports hours and threshold' 1 has_both '已經 30 小時' '上限 26'
 
 printf '%s\n' "$((now + 7200))" >"$stamp"
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=cat "$DEADMAN" "$stamp"
-expect '未來時間戳拒絕通過' 1 has '未來'
+expect 'future timestamp is rejected' 1 has '未來'
 
 rm -f "$stamp"
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=cat "$DEADMAN" "$stamp"
-expect '缺少時間戳拒絕通過' 1 has '找不到時間戳'
+expect 'missing timestamp is rejected' 1 has '找不到時間戳'
 
 printf '%s\n' 'not-a-number' >"$stamp"
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=cat "$DEADMAN" "$stamp"
-expect '非數字時間戳拒絕通過' 1 has '不是一個 unix 時間'
+expect 'non-numeric timestamp is rejected' 1 has '不是一個 unix 時間'
 
 printf '%s\n' "$((now - 30 * 3600))" >"$stamp"
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=false "$DEADMAN" "$stamp"
-expect '告警管道失效保留原訊息' 1 has_both '已經 30 小時' '告警通道失敗'
+expect 'alert channel failure preserves original message' 1 has_both '已經 30 小時' 'alert channel failed'
 
 run env -u DEADMAN_ALERT_CMD PATH="$TMP/bin:/usr/bin:/bin" "$DEADMAN" "$stamp"
-expect '未設定告警指令不冒充管道失效' 1 lacks '回傳非零'
+expect 'unset alert command does not masquerade as channel failure' 1 lacks '回傳非零'
 
 # --- 手動執行要在**訊息裡**說自己是手動的。
 #
@@ -1876,22 +1876,22 @@ expect '未設定告警指令不冒充管道失效' 1 lacks '回傳非零'
 printf '%s\n' "$((now - 30 * 3600))" >"$stamp"
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=cat \
 	SSH_CONNECTION='10.0.0.1 22 10.0.0.2 22' "$DEADMAN" "$stamp"
-expect '手動執行的告警會標示 manual 來源' 1 has_both '已經 30 小時' '來源：manual'
+expect 'manual alert execution tags manual source' 1 has_both '已經 30 小時' '來源：manual'
 
 # ⚠⚠ 反面，而且這一條比上面那條重要：cron 的真告警**不准**被加上這句話。
 # 一則真的半夜告警如果寫著「這是有人手動跑的」，人就不會去看機隊 ——
 # 那比沒有標記更糟。cron 沒有 TTY、也沒有 SSH_*。
 run env -i PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=cat "$DEADMAN" "$stamp" </dev/null
-expect '排程告警不會被誤標成手動' 1 lacks '來源：manual'
-expect '排程告警本身還是照常發出' 1 has '已經 30 小時'
+expect 'scheduled alert is not tagged as manual' 1 lacks '來源：manual'
+expect 'scheduled alert itself is still delivered' 1 has '已經 30 小時'
 
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=cat "$DEADMAN" --test
-expect '--test 成功送出測試訊息' 0 has 'clawctl deadman 測試'
-expect '--test 講出平日健檢沒設' 0 has '平日健檢：未啟用'
+expect '--test sends test message successfully' 0 has 'clawctl deadman 測試'
+expect '--test reports daily health check disabled' 0 has 'Daily health check: disabled'
 
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=cat \
 	DEADMAN_ALERT_CHECK_CMD=true "$DEADMAN" --test
-expect '--test 講出平日健檢有設' 0 has '平日健檢：已啟用'
+expect '--test reports daily health check enabled' 0 has 'Daily health check: enabled'
 
 # --- 平日健檢：早報正常，但告警管道自己壞了。
 #
@@ -1901,41 +1901,41 @@ expect '--test 講出平日健檢有設' 0 has '平日健檢：已啟用'
 printf '%s\n' "$now" >"$stamp"
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=cat \
 	DEADMAN_ALERT_CHECK_CMD=true "$DEADMAN" "$stamp"
-expect '健檢過了就維持安靜' 0 is_silent
+expect 'passing health check stays silent' 0 is_silent
 
 # ⚠ 時間戳是新鮮的 —— 舊的判斷邏輯到這裡會 exit 0 而且一個字都不印。
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=cat \
 	DEADMAN_ALERT_CHECK_CMD=false "$DEADMAN" "$stamp"
-expect '早報正常但管道壞掉不准安靜' 1 has '告警通道健檢失敗'
-expect '健檢失敗只回報當前狀態' 1 lacks '下一次真的出事'
+expect 'healthy report but broken channel is not silent' 1 has '告警通道健檢失敗'
+expect 'health check failure only reports current status' 1 lacks '下一次真的出事'
 # ⚠ `false` 什麼都不印。沒有這一條的話訊息會是「壞了：」後面空一片，
 # 收到的人會先去查訊息怎麼被截斷了，而不是去查管道。
-expect '健檢沒留話時要講「沒留話」' 1 has '健檢沒有印任何訊息'
+expect 'health check with no output notes lack of message' 1 has '健檢沒有印任何訊息'
 
 # ⚠ 健檢的輸出要帶進訊息裡，否則人只知道「壞了」不知道壞在哪。
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=cat \
-	DEADMAN_ALERT_CHECK_CMD='echo token 被撤銷了; exit 1' "$DEADMAN" "$stamp"
-expect '把健檢講的原因帶進告警' 1 has 'token 被撤銷了'
+	DEADMAN_ALERT_CHECK_CMD='echo token revoked; exit 1' "$DEADMAN" "$stamp"
+expect 'includes health check reason in alert' 1 has 'token revoked'
 
 # ⚠ 沒設健檢是選配，不是每天警告一次的理由。
 run env -u DEADMAN_ALERT_CHECK_CMD PATH="$TMP/bin:/usr/bin:/bin" \
 	DEADMAN_ALERT_CMD=cat "$DEADMAN" "$stamp"
-expect '沒設健檢時不要每天囉嗦' 0 is_silent
+expect 'unset health check does not warn daily' 0 is_silent
 
 # ⚠⚠ 健檢**不准**擋住真告警。過期的時間戳才是這支腳本的主要工作；
 # 一個「因為健檢先失敗所以沒講早報沒來」的死人之鐘是本末倒置。
 printf '%s\n' "$((now - 30 * 3600))" >"$stamp"
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=cat \
 	DEADMAN_ALERT_CHECK_CMD=false "$DEADMAN" "$stamp"
-expect '健檢不准擋住真告警' 1 has '已經 30 小時'
+expect 'health check must not block real alert' 1 has '已經 30 小時'
 printf '%s\n' "$now" >"$stamp"
 
 # ⚠ 這兩個狀態的修法不同；只驗「非零」會把操作指引也一起弄丟。
 run env PATH="$TMP/bin:/usr/bin:/bin" DEADMAN_ALERT_CMD=false "$DEADMAN" --test
-expect '--test 管道失效回傳 1' 1 has '告警通道失敗'
+expect '--test returns 1 on channel failure' 1 has 'Alert channel failed'
 
 run env -u DEADMAN_ALERT_CMD PATH="$TMP/bin:/usr/bin:/bin" "$DEADMAN" --test
-expect '--test 未設定回傳 2' 2 has '告警通道未設定'
+expect '--test returns 2 when not configured' 2 has 'Alert channel not configured'
 
 # --- ops/prometheus/rules/*.yml：判斷搬到規則那一側之後，規則檔就是程式碼。
 #
@@ -1946,13 +1946,13 @@ expect '--test 未設定回傳 2' 2 has '告警通道未設定'
 # CI 設 CLAWCTL_REQUIRE_PROMTOOL=1 時，沒有 promtool 仍然是失敗。
 if command -v promtool >/dev/null 2>&1; then
 	run promtool check rules "$ROOT"/ops/prometheus/rules/*.yml
-	expect 'promtool 讀得懂 rules/*.yml' 0 has 'SUCCESS'
-	expect 'rules/*.yml 沒有一份是壞的' 0 lacks 'FAILED'
+	expect 'promtool parses rules/*.yml' 0 has 'SUCCESS'
+	expect 'no rules/*.yml file is broken' 0 lacks 'FAILED'
 elif [ "${CLAWCTL_REQUIRE_PROMTOOL:-}" = "1" ]; then
-	rc=127; output='promtool 不在 PATH 上'
-	fail 'promtool 讀得懂 rules/*.yml（CLAWCTL_REQUIRE_PROMTOOL=1，沒有 promtool 不能過）'
+	rc=127; output='promtool not in PATH'
+	fail 'promtool parses rules/*.yml (CLAWCTL_REQUIRE_PROMTOOL=1, cannot pass without promtool)'
 else
-	echo "skip: promtool 不在 PATH 上，略過 ops/prometheus/rules/*.yml。CI 設 CLAWCTL_REQUIRE_PROMTOOL=1 時這條必須失敗。"
+	echo "skip: promtool not in PATH, skipping ops/prometheus/rules/*.yml. Must fail in CI when CLAWCTL_REQUIRE_PROMTOOL=1."
 fi
 
 # --- ops/prometheus/install.sh only calls stage scripts that exist.
@@ -1991,10 +1991,10 @@ expect 'install-prometheus.sh refuses a missing Prometheus config' 1 has 'not fo
 # 一個測試需要那麼用力才問得到某條路徑，通常是那條路徑本身有問題 ——
 # 所以修的是腳本，不是測試。現在指一個不能用的 python 就夠了。
 run env CLAWCTL_PY=/bin/false "$CHECK_METRICS"
-expect '缺少 prometheus parser 明確回傳 2' 2 has '不是「通過了」'
+expect 'missing prometheus parser explicitly returns 2' 2 has "not 'passed'"
 # ⚠ 而且要在**碰網路之前**就退出。這一條在防的是「驗證失敗了，
 # 但它已經先去打了一輪線上 Hub」—— 測試不該有能力去戳正式環境。
-expect '缺 parser 時不准碰網路' 2 lacks '== 抓'
+expect 'missing parser must not touch network' 2 lacks '== Fetching'
 
 # --- ops/notify-telegram.sh：它必須講出自己要用哪一份設定。
 #
@@ -2017,21 +2017,21 @@ printf 'TELEGRAM_BOT_TOKEN=fake-a\nTELEGRAM_CHAT_ID=1\n' >"$NT/.config/clawctl/n
 printf 'TELEGRAM_BOT_TOKEN=fake-b\nTELEGRAM_CHAT_ID=2\n' >"$NT/.config/heartbeat-patrol.env"
 
 run env -u CLAWCTL_NOTIFY_ENV HOME="$NT" "$NOTIFY" </dev/null
-expect '沒指定時挑 notify.env' 1 has 'clawctl/notify.env'
-expect '沒指定時要講這是 fallback' 1 has '沒有指定 CLAWCTL_NOTIFY_ENV'
+expect 'defaults to notify.env when unspecified' 1 has 'clawctl/notify.env'
+expect 'notes fallback when unspecified' 1 has 'CLAWCTL_NOTIFY_ENV not specified'
 
 run env HOME="$NT" CLAWCTL_NOTIFY_ENV="$NT/.config/heartbeat-patrol.env" "$NOTIFY" </dev/null
-expect '明講時就用明講的那個' 1 has 'heartbeat-patrol.env'
-expect '明講時不要多嘴警告' 1 lacks '沒有指定 CLAWCTL_NOTIFY_ENV'
+expect 'uses explicitly specified env file' 1 has 'heartbeat-patrol.env'
+expect 'does not warn when explicitly specified' 1 lacks 'CLAWCTL_NOTIFY_ENV not specified'
 
 # sampleagent2 的實況：只有 heartbeat-patrol.env，沒有 notify.env
 rm -f "$NT/.config/clawctl/notify.env"
 run env -u CLAWCTL_NOTIFY_ENV HOME="$NT" "$NOTIFY" </dev/null
-expect '只剩 heartbeat-patrol 時要指名道姓' 1 has 'heartbeat-patrol.env'
-expect '那種情況一定要警告可能送錯收件人' 1 has '以外的 bot 或聊天室'
+expect 'names heartbeat-patrol explicitly when only option' 1 has 'heartbeat-patrol.env'
+expect 'warns about possible unintended recipient' 1 has 'different bot or chat than expected'
 
 # ⚠ 這一條是上面每一條的前提：它們不准真的送出任何東西。
-expect '解析設定的過程不准碰網路' 1 has '拒絕送出'
+expect 'config resolution does not touch network' 1 has 'refusing to send'
 
 # --- ops/notify-telegram.sh --check：不送訊息，只問管道通不通。
 #
@@ -2088,31 +2088,31 @@ ck() { # $1=FAKE_CURL 模式
 }
 
 ck ok
-expect '--check 通過時講出 bot 是誰' 0 has 'Fake_Bot'
-expect '--check 通過時講出送得進哪裡' 0 has 'Tester'
+expect '--check reports bot username on success' 0 has 'Fake_Bot'
+expect '--check reports delivery target on success' 0 has 'Tester'
 
 # ⚠ token 被撤銷是這個模式存在的唯一理由。它必須 exit 非零 ——
 # 一個「檢查完說沒事」的健檢，跟沒有健檢是同一件事。
 ck unauthorized
-expect '--check 抓到 token 被撤銷' 1 has 'Unauthorized'
+expect '--check catches revoked token' 1 has 'Unauthorized'
 
 # ⚠ getMe 過了不代表送得進去：bot 被踢出群組時 getMe 完全正常。
 ck kicked
-expect '--check 抓到 bot 送不進聊天室' 1 has 'kicked'
-expect '--check 指出踢出群/刪群/id 打錯都長這樣' 1 has '都會長這樣'
+expect '--check catches bot cannot deliver to chat' 1 has 'kicked'
+expect '--check explains kicked/deleted/typo symptoms' 1 has 'all look like this'
 
 ck netfail
-expect '--check 把網路不通講成網路不通' 1 has '連不上 Telegram'
+expect '--check reports network failure as network failure' 1 has 'cannot reach Telegram'
 
 # ⚠⚠ 這一條守的是這個 repo 的紅線：curl 的錯誤訊息含整個 URL，URL 裡有 token。
 # 這則輸出會被寫進 Hub 的 notifications 表、會進 syslog。
-expect '--check 永遠不准印出 token' 1 lacks "$SEKRIT"
+expect '--check never prints token' 1 lacks "$SEKRIT"
 
 # ⚠ --check 必須用跟真的送出**同一份設定**。一支自己去找設定的健檢程式，
 # 驗的是它自己那條路，不是半夜真的會走的那條 —— 那正是這一段要防的 bug。
 printf 'TELEGRAM_BOT_TOKEN=fake-a\nTELEGRAM_CHAT_ID=1\n' >"$NT/.config/clawctl/notify.env"
 run env -u CLAWCTL_NOTIFY_ENV PATH="$TMP/bin:/usr/bin:/bin" HOME="$NT" "$NOTIFY" --check
-expect '--check 走的是同一套設定解析' 0 has 'clawctl/notify.env'
+expect '--check uses identical config resolution' 0 has 'clawctl/notify.env'
 
 # --- notify-telegram.sh：token 不准出現在 curl 的 argv。
 #
@@ -2126,8 +2126,8 @@ argv_clean() { [ -s "$ARGV_LOG" ] && ! grep -qF "$SEKRIT" "$ARGV_LOG"; }
 : >"$ARGV_LOG"
 run env PATH="$TMP/bin:/usr/bin:/bin" FAKE_CURL=ok FAKE_CURL_ARGV="$ARGV_LOG" \
 	TELEGRAM_BOT_TOKEN="$SEKRIT" TELEGRAM_CHAT_ID=1 "$NOTIFY" --check
-expect '--check 從 stdin 拿到 URL 也照樣通過' 0 has 'Fake_Bot'
-expect '--check 的 curl argv 裡沒有 token' 0 argv_clean
+expect '--check passes when receiving URL from stdin' 0 has 'Fake_Bot'
+expect '--check curl argv does not contain token' 0 argv_clean
 
 nsend() { # $1=FAKE_CURL 模式；訊息從 stdin 進來
 	: >"$ARGV_LOG"
@@ -2136,18 +2136,18 @@ nsend() { # $1=FAKE_CURL 模式；訊息從 stdin 進來
 }
 
 nsend ok
-expect '送出成功時 exit 0' 0 true
-expect '送出時 curl argv 裡沒有 token' 0 argv_clean
+expect 'exits 0 on successful delivery' 0 true
+expect 'delivery curl argv does not contain token' 0 argv_clean
 argv_has_text() { grep -qF 'text=早報測試' "$ARGV_LOG"; }
-expect '送出時訊息內容照舊交給 curl' 0 argv_has_text
+expect 'delivery passes message content to curl' 0 argv_has_text
 
 nsend unauthorized
-expect 'Telegram 拒絕時 exit 1 並講出理由' 1 has 'Telegram 拒絕了這則訊息：Unauthorized'
-expect 'Telegram 拒絕時 curl argv 裡也沒有 token' 1 argv_clean
+expect 'exits 1 and reports reason when Telegram rejects' 1 has 'Telegram rejected message: Unauthorized'
+expect 'rejection curl argv does not contain token' 1 argv_clean
 
 nsend netfail
-expect '送出時網路不通 exit 1' 1 has 'curl 失敗（exit 6）'
-expect '送出失敗時永遠不准印出 token' 1 lacks "$SEKRIT"
+expect 'exits 1 on delivery network failure' 1 has 'curl failed (exit 6)'
+expect 'delivery failure never prints token' 1 lacks "$SEKRIT"
 
 if bash "$ROOT/ops/test-disk-clean.sh"; then
 	passed=$((passed + 1))
@@ -2155,7 +2155,7 @@ else
 	failed=$((failed + 1))
 fi
 
-printf '\n通過：%s，失敗：%s\n' "$passed" "$failed"
+printf '\npassed: %s, failed: %s\n' "$passed" "$failed"
 if [ "$failed" -ne 0 ]; then
 	exit 1
 fi

@@ -445,7 +445,7 @@ func TestDeploymentMutationCLIDirectDBHonorsExactMaintenanceFence(t *testing.T) 
 	}
 	var out, errOut bytes.Buffer
 	err := runDeploymentMutationCommandWithDeps(t.Context(), args, &out, &errOut, deps)
-	if err == nil || !strings.Contains(err.Error(), "升級維護") || out.Len() != 0 {
+	if err == nil || !strings.Contains(err.Error(), "upgrade maintenance") || out.Len() != 0 {
 		t.Fatalf("exact maintenance fence err=%v stdout=%q stderr=%q", err, out.String(), errOut.String())
 	}
 }

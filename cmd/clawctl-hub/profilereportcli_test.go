@@ -157,10 +157,10 @@ func TestProfileCLIPrintsWhatWasPublishedAndWhatWasAssigned(t *testing.T) {
 	text := runProfileCLI(t)
 	for _, want := range []string{
 		operator.ProfileReportCaveat,
-		"版已發佈的 profile", "revision", "機隊上", "已退役", "發佈的時刻", "下一步",
-		"套件", "版號", "指派過幾次", "最後一次指派", "看到幾台",
+		"published profile revisions", "revision", "in fleet", "retired", "published at", "next step",
+		"package", "version", "assignments", "last assigned", "seen on",
 		"openclaw-standard", "legacy-standard", "2026.5.20", "2026.9.2", "0.1.0",
-		"old-box", "已退役",
+		"old-box", "retired",
 		operator.ProfileStateTitle(operator.ProfileInUse),
 		operator.ProfileStateTitle(operator.ProfileRetiredOnly),
 		operator.ProfileStateTitle(operator.ProfileUnassigned),
@@ -211,7 +211,7 @@ func TestProfileCLIKeepsARetiredWearerOutOfTheFleetCount(t *testing.T) {
 	if !found {
 		t.Fatalf("輸出沒有 legacy-standard 那一列：\n%s", text)
 	}
-	if !strings.Contains(text, "old-box") || !strings.Contains(text, "已退役") {
+	if !strings.Contains(text, "old-box") || !strings.Contains(text, "retired") {
 		t.Fatalf("輸出沒有講出那台退役的機器是誰：\n%s", text)
 	}
 }
@@ -284,7 +284,7 @@ func TestProfileCLIRefusesTwoOutputFormatsAtOnce(t *testing.T) {
 	if err == nil {
 		t.Fatalf("--json --csv 同時給沒有被拒絕：%s", out.String())
 	}
-	if !strings.Contains(err.Error(), "不可同時使用") {
+	if !strings.Contains(err.Error(), "cannot be used together") {
 		t.Fatalf("err=%v", err)
 	}
 	if out.Len() != 0 {
@@ -311,8 +311,8 @@ func TestProfileCLIRefusesPositionalArguments(t *testing.T) {
 // 「指派過這一版，機隊上也看得到」讀成收工——而那一格的證據量在一份沒有人在跑的安裝上。
 func TestProfileCLILeadsWithTheSeenEvidenceThatIsNotRunning(t *testing.T) {
 	text := runProfileCLI(t)
-	head := strings.Index(text, "格看得到的版號量的是沒在跑的那一份")
-	table := strings.Index(text, "版已發佈的 profile")
+	head := strings.Index(text, "1 visible versions measure an installation that is not running")
+	table := strings.Index(text, "published profile revisions")
 	if head < 0 {
 		t.Fatalf("輸出沒有那一段：\n%s", text)
 	}
@@ -320,13 +320,13 @@ func TestProfileCLILeadsWithTheSeenEvidenceThatIsNotRunning(t *testing.T) {
 		t.Errorf("已發佈那張表排在那一段前面：%d < %d\n%s", table, head, text)
 	}
 	section := text[head:table]
-	if !strings.Contains(section, "1 格看得到的版號量的是沒在跑的那一份") {
+	if !strings.Contains(section, "1 visible versions measure an installation that is not running") {
 		t.Errorf("那一段沒有數出 1 格：\n%s", section)
 	}
 	for _, want := range []string{
-		"看到幾台", "其中量錯", "openclaw-standard", "2026.5.20",
+		"seen on", "measured wrong", "openclaw-standard", "2026.5.20",
 		operator.ProfilePackageStateTitle(operator.ProfilePackageAssignedAndSeen),
-		"要看那幾台量的是哪一份檔案",
+		"To see which file those machines measured",
 	} {
 		if !strings.Contains(section, want) {
 			t.Errorf("那一段少了 %q：\n%s", want, section)
@@ -361,7 +361,7 @@ func TestProfileCLILeadsWithTheSeenEvidenceThatIsNotRunning(t *testing.T) {
 // 逐版那一段的「看到幾台」自己要帶著這件事。直接捲到某一份 profile 的人只看那一張表。
 func TestProfileCLISaysHowManyOfTheSeenMachinesMeasuredADeadFile(t *testing.T) {
 	text := runProfileCLI(t)
-	detail := text[strings.Index(text, "種套件狀態"):]
+	detail := text[strings.Index(text, "package states"):]
 	var found bool
 	for _, line := range strings.Split(detail, "\n") {
 		fields := strings.Fields(line)
@@ -378,7 +378,7 @@ func TestProfileCLISaysHowManyOfTheSeenMachinesMeasuredADeadFile(t *testing.T) {
 	if !found {
 		t.Fatalf("逐版那一段沒有 openclaw 2026.5.20 那一列：\n%s", detail)
 	}
-	if !strings.Contains(text, "其中量錯") {
+	if !strings.Contains(text, "measured wrong") {
 		t.Errorf("逐版那張表沒有那一欄：\n%s", text)
 	}
 }

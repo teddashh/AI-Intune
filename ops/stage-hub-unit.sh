@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 if [[ $EUID -eq 0 ]]; then
-	echo "⚠ 不要用 root 跑這支 —— Hub 是 user unit。" >&2
+	echo "⚠ Do not run this as root — Hub is a user unit" >&2
 	exit 2
 fi
 
@@ -24,7 +24,7 @@ canonical_home() {
 }
 
 if ! canonical_home; then
-	echo "✗ caller HOME 與 EUID=$EUID 的 canonical passwd home 不一致；尚未建立 lock 或呼叫 systemctl。" >&2
+	echo "✗ caller HOME does not match canonical passwd home for EUID=$EUID; no lock created and systemctl not called" >&2
 	exit 1
 fi
 
@@ -38,17 +38,17 @@ source "$PWD/ops/safe-upgrade-lock.sh"
 lock_rc=0
 acquire_upgrade_lock "$UPGRADE_LOCK" || lock_rc=$?
 if [[ $lock_rc -eq 75 ]]; then
-	echo "✗ 另一支 clawctl-hub upgrade/rollback/unit staging 正在進行；沒有改 unit。" >&2
+	echo "✗ Another clawctl-hub upgrade/rollback/unit staging is in progress; unit unchanged" >&2
 	exit 1
 elif [[ $lock_rc -ne 0 ]]; then
 	exit 1
 fi
 if [[ -e "$MAINTENANCE_MARKER" || -L "$MAINTENANCE_MARKER" ]]; then
-	echo "✗ 有 upgrade maintenance marker；先完成人工復原，沒有改 unit。" >&2
+	echo "✗ Upgrade maintenance marker exists; complete manual recovery first, unit unchanged" >&2
 	exit 1
 fi
 if [[ ! -f "$DESIRED" || -L "$DESIRED" || ! -f "$UNIT" || -L "$UNIT" || ! -O "$UNIT" ]]; then
-	echo "✗ desired/installed unit 必須是非 symlink regular file，且 installed unit 由目前使用者持有。" >&2
+	echo "✗ desired/installed unit must be non-symlink regular files, and installed unit owned by current user" >&2
 	exit 1
 fi
 
@@ -72,7 +72,7 @@ read_loaded_contract() {
 }
 
 if ! read_loaded_contract; then
-	echo "✗ 讀不到唯一的 loaded unit contract；沒有改 unit。" >&2
+	echo "✗ Cannot read unique loaded unit contract; unit unchanged" >&2
 	exit 1
 fi
 if [[ "${LOADED[LoadState]}" != loaded || "${LOADED[FragmentPath]}" != "$UNIT" || -n "${LOADED[DropInPaths]}" ||
@@ -81,13 +81,13 @@ if [[ "${LOADED[LoadState]}" != loaded || "${LOADED[FragmentPath]}" != "$UNIT" |
 	! "${LOADED[MainPID]}" =~ ^[1-9][0-9]*$ ||
 	! "${LOADED[NRestarts]}" =~ ^[0-9]+$ ||
 	! "${LOADED[InvocationID]}" =~ ^[0-9a-f]{32}$ ]]; then
-	echo "✗ Hub unit 不是單一、已載入且 active 的 installer-managed unit；沒有改 unit。" >&2
+	echo "✗ Hub unit is not a single, loaded and active installer-managed unit; unit unchanged" >&2
 	exit 1
 fi
 
 if ! DESIRED_BLOB="$(git rev-parse --verify HEAD:ops/clawctl-hub.service 2>/dev/null)" ||
 	[[ "$(git cat-file -t "$DESIRED_BLOB" 2>/dev/null)" != blob ]]; then
-	echo "✗ HEAD 沒有可識別的 checked-in unit blob；沒有改 unit。" >&2
+	echo "✗ HEAD has no identifiable checked-in unit blob; unit unchanged" >&2
 	exit 1
 fi
 
@@ -101,7 +101,7 @@ desired_unit_matches_head() {
 }
 
 if ! desired_unit_matches_head; then
-	echo "✗ checked-in unit 尚未 commit；拒絕把無法以 revision 識別的設定放到 live disk。" >&2
+	echo "✗ Checked-in unit is not yet committed; refusing to place settings that cannot be identified by revision onto live disk" >&2
 	exit 1
 fi
 
@@ -122,7 +122,7 @@ installed_unit_is_managed() {
 }
 
 if ! installed_unit_is_managed; then
-	echo "✗ installed unit 不是 repo 內任何受控版本；拒絕覆蓋可能的本機 customization。" >&2
+	echo "✗ installed unit is not any tracked version in repo; refusing to overwrite possible local customization" >&2
 	exit 1
 fi
 
@@ -147,12 +147,12 @@ stage_checked_in_unit() {
 		! chmod 0644 -- "$stage_tmp" || ! mv -- "$stage_tmp" "$UNIT"; then
 		rm -f -- "$stage_tmp"
 		trap - HUP INT TERM
-		echo "✗ unit atomic staging 失敗；尚未要求 systemd reload。" >&2
+		echo "✗ Unit atomic staging failed; systemd reload not requested" >&2
 		return 1
 	fi
 	trap - HUP INT TERM
 	if ! /usr/bin/timeout --kill-after=2s 10s /usr/bin/systemctl --user daemon-reload; then
-		echo "✗ desired unit 已安全留在磁碟，但 daemon-reload 沒完成；Hub 沒有 restart。重跑本腳本即可收斂。" >&2
+		echo "✗ desired unit safely left on disk, but daemon-reload not completed; Hub not restarted. Rerun this script to converge" >&2
 		return 1
 	fi
 	if ! read_loaded_contract ||
@@ -163,10 +163,10 @@ stage_checked_in_unit() {
 			"${LOADED[MainPID]}" != "$before_pid" || "${LOADED[NRestarts]}" != "$before_restarts" ||
 			"${LOADED[InvocationID]}" != "$before_invocation" ]] ||
 		! desired_blob_equals_file "$UNIT"; then
-		echo "✗ desired unit 已留在磁碟，但 loaded contract 尚未收斂；Hub 沒有由本腳本 restart。請重跑並檢查 systemctl show。" >&2
+		echo "✗ desired unit left on disk, but loaded contract not converged; Hub was not restarted by this script. Please rerun and check systemctl show" >&2
 		return 1
 	fi
-	echo "✓ 已原子更新並 daemon-reload $UNIT；PID=$before_pid、NRestarts=$before_restarts，沒有 restart。"
+	echo "✓ Atomically updated and daemon-reloaded $UNIT; PID=$before_pid, NRestarts=$before_restarts, no restart"
 }
 
 stage_checked_in_unit

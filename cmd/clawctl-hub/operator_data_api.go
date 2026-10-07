@@ -23,7 +23,7 @@ func (h *hub) handleGetOperatorDataDisclosure(w http.ResponseWriter, r *http.Req
 	}
 	disclosure, err := operator.DataDisclosureFor(h.retention, time.Now().UTC())
 	if err != nil {
-		log.Printf("讀取 operator data disclosure 失敗: %v", err)
+		log.Printf("failed to read operator data disclosure: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取資料揭露面失敗")
 		return
 	}
@@ -57,7 +57,7 @@ func writeOperatorMachineDataError(w http.ResponseWriter, err error, machineID s
 	case errors.As(err, &rejection) && rejection.Code == store.OperatorCodeMachineNotFound:
 		writeErr(w, http.StatusNotFound, store.OperatorCodeMachineNotFound, "找不到這台機器")
 	default:
-		log.Printf("讀取 operator machine data 失敗 machine=%q: %v", machineID, err)
+		log.Printf("failed to read operator machine data machine=%q: %v", machineID, err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取單機資料揭露面失敗")
 	}
 }

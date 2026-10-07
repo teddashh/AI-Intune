@@ -36,24 +36,24 @@ func runInstallReportCommandWithDeps(ctx context.Context, argv []string, out, er
 	fs := flag.NewFlagSet("report install", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub report install [--json | --csv] [--hub-url URL]")
-		fmt.Fprintln(errOut, "  列出每一台最後被指派裝什麼、Hub 在它上面看到什麼、哪幾台對不起來、哪幾台沒被指派過。")
-		fmt.Fprintln(errOut, "  discovery：--hub-url、CLAWCTL_HUB_URL、operator.json。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub report install [--json | --csv] [--hub-url URL]")
+		fmt.Fprintln(errOut, "  List what each machine was last assigned to install, what the Hub observed on it, which machines differ, and which machines were never assigned.")
+		fmt.Fprintln(errOut, "  discovery: --hub-url, CLAWCTL_HUB_URL, operator.json.")
 		fs.PrintDefaults()
 	}
 	var hubURL auditStringFlag
 	var jsonOutput, csvOutput auditBoolFlag
-	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL（省略時自動發現）")
-	fs.Var(&jsonOutput, "json", "輸出 stable operator JSON DTO")
-	fs.Var(&csvOutput, "csv", "輸出安全的 UTF-8 CSV")
+	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL (discovered automatically when omitted)")
+	fs.Var(&jsonOutput, "json", "output stable operator JSON DTO")
+	fs.Var(&csvOutput, "csv", "output safe UTF-8 CSV")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("report install: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("report install: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	if jsonOutput.value && csvOutput.value {
-		return errors.New("report install: --json 與 --csv 不可同時使用")
+		return errors.New("report install: --json and --csv cannot be used together")
 	}
 	if hubURL.set {
 		if err := validateReportChangeCLIText("hub-url", hubURL.value, 2048); err != nil {
@@ -66,7 +66,7 @@ func runInstallReportCommandWithDeps(ctx context.Context, argv []string, out, er
 	}
 	report, err := client.InstallReport(ctx)
 	if err != nil {
-		return fmt.Errorf("讀取每機安裝狀態失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read per-machine install report (HTTP operator API): %w", err)
 	}
 	if jsonOutput.value {
 		return writeOperatorJSON(out, report)
@@ -74,7 +74,7 @@ func runInstallReportCommandWithDeps(ctx context.Context, argv []string, out, er
 	if csvOutput.value {
 		body, err := operator.ReportCSV(operator.InstallReportCSV(report))
 		if err != nil {
-			return fmt.Errorf("產生每機安裝狀態 CSV 失敗：%w", err)
+			return fmt.Errorf("failed to generate per-machine install report CSV: %w", err)
 		}
 		_, err = io.WriteString(out, body)
 		return err
@@ -122,12 +122,12 @@ func writeInstallMisattributed(out io.Writer, report operator.InstallReport) err
 	if report.Misattributed == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintf(out, "\n%d 格看到的版號量的不是正在跑的那一份\n",
+	if _, err := fmt.Fprintf(out, "\n%d visible versions measure an installation that is not running\n",
 		report.Misattributed); err != nil {
 		return err
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "資源\t機器\t指派的\t看到的\t這一格是什麼\t量版號的那個檔案\t正在跑的那個檔案\t下一步")
+	fmt.Fprintln(table, "resource\tmachine\tassigned\tobserved\tstate\tmeasured file\trunning file\tnext step")
 	for _, resource := range report.Resources {
 		for _, row := range resource.Rows {
 			if row.Runtime == nil || !operator.ToolRuntimeMisattributed(row.Runtime.State) {
@@ -153,11 +153,11 @@ func writeInstallResources(out io.Writer, report operator.InstallReport) error {
 	if len(report.Resources) == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintf(out, "\n%d 個資源\n", len(report.Resources)); err != nil {
+	if _, err := fmt.Fprintf(out, "\n%d resources\n", len(report.Resources)); err != nil {
 		return err
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "資源\t被指派過\t一樣\t不一樣\t對不起來\t版號不是跑的那一份\t沒被指派過\t下一步")
+	fmt.Fprintln(table, "resource\tassigned\tmatches\tdiffers\tunresolved\twrong version source\tunassigned\tnext step")
 	for _, resource := range report.Resources {
 		unknown := resource.AssignedOn - resource.MatchingOn - resource.DifferingOn
 		fmt.Fprintf(table, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
@@ -181,11 +181,11 @@ func writeInstallStates(out io.Writer, report operator.InstallReport) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintf(out, "\n%d 種狀態\n", len(rows)); err != nil {
+	if _, err := fmt.Fprintf(out, "\n%d states\n", len(rows)); err != nil {
 		return err
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "這一格是什麼\t幾格\t意思\t下一步")
+	fmt.Fprintln(table, "state\tcells\tmeaning\tnext step")
 	for _, state := range rows {
 		fmt.Fprintf(table, "%s\t%d\t%s\t%s\n", state.Title, state.Count, state.Meaning, state.NextStep)
 	}
@@ -207,11 +207,11 @@ func writeInstallRuntimes(out io.Writer, report operator.InstallReport) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintf(out, "\n看到的版號講的是哪一份：%d 種\n", len(rows)); err != nil {
+	if _, err := fmt.Fprintf(out, "\nObserved version source: %d states\n", len(rows)); err != nil {
 		return err
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "這一格是什麼\t幾格\t意思\t下一步")
+	fmt.Fprintln(table, "state\tcells\tmeaning\tnext step")
 	for _, state := range rows {
 		fmt.Fprintf(table, "%s\t%d\t%s\t%s\n", state.Title, state.Count, state.Meaning, state.NextStep)
 	}
@@ -231,7 +231,7 @@ func writeInstallMatrix(out io.Writer, report operator.InstallReport) error {
 			return err
 		}
 		table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(table, "機器\t這一格是什麼\t指派的\t看到的\t版號講的是哪一份\t指派來源\tHub 收到的時刻\t下一步")
+		fmt.Fprintln(table, "machine\tstate\tassigned\tobserved\tversion source\tassignment source\treceived at\tnext step")
 		for _, row := range resource.Rows {
 			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				row.DisplayName, row.Title, installCellOrDash(row.Assigned),
@@ -255,7 +255,7 @@ func installObservedCell(row operator.InstallRow) string {
 		return "—"
 	}
 	if row.FromDisk {
-		return row.Observed + "（檔案上讀的）"
+		return row.Observed + " (read from file)"
 	}
 	return row.Observed
 }

@@ -25,7 +25,7 @@ func (h *hub) handleGetOperatorDailyReport(w http.ResponseWriter, r *http.Reques
 	}
 	result, err := h.dailyReportAt(jobNow(), window)
 	if err != nil {
-		log.Printf("讀取 operator daily report 失敗: %v", err)
+		log.Printf("failed to read operator daily report: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "產生每日早報失敗")
 		return
 	}
@@ -35,7 +35,7 @@ func (h *hub) handleGetOperatorDailyReport(w http.ResponseWriter, r *http.Reques
 func (h *hub) dailyReportAt(now time.Time, window time.Duration) (operator.DailyReportResult, error) {
 	var result operator.DailyReportResult
 	if window < time.Second || window > operator.MaxDailyReportWindow || window%time.Second != 0 {
-		return result, errors.New("daily report window 不合法")
+		return result, errors.New("invalid daily report window")
 	}
 	now = now.UTC().Truncate(time.Second)
 	since := now.Add(-window)
@@ -45,11 +45,11 @@ func (h *hub) dailyReportAt(now time.Time, window time.Duration) (operator.Daily
 	}
 	if body == "" || len(body) > operator.MaxDailyReportBodyBytes || !utf8.ValidString(body) ||
 		!strings.HasSuffix(body, "\n") {
-		return result, errors.New("daily report 本文為空、超過上限、編碼不合法或沒有結尾換行")
+		return result, errors.New("daily report body is empty, exceeds limit, has invalid encoding, or is missing trailing newline")
 	}
 	for _, char := range body {
 		if char != '\n' && (unicode.IsControl(char) || unicode.Is(unicode.Cf, char)) {
-			return result, errors.New("daily report 本文含控制或格式字元")
+			return result, errors.New("daily report body contains control or formatting characters")
 		}
 	}
 	return operator.DailyReportResult{
@@ -102,7 +102,7 @@ func (h *hub) handleGetOperatorReports(w http.ResponseWriter, r *http.Request) {
 	}
 	index, err := h.operatorReportService().ReportIndex(h.retention, time.Now().UTC())
 	if err != nil {
-		log.Printf("讀取 operator reports 失敗: %v", err)
+		log.Printf("failed to read operator reports: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取報告清單失敗")
 		return
 	}
@@ -126,7 +126,7 @@ func (h *hub) handleGetOperatorEnrollmentReport(w http.ResponseWriter, r *http.R
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "名冊現在的狀態產不出註冊報告")
 			return
 		}
-		log.Printf("讀取 operator enrollment report 失敗: %v", err)
+		log.Printf("failed to read operator enrollment report: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取註冊報告失敗")
 		return
 	}
@@ -150,7 +150,7 @@ func (h *hub) handleGetOperatorSoftwareReport(w http.ResponseWriter, r *http.Req
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "機隊現在的狀態產不出軟體清查")
 			return
 		}
-		log.Printf("讀取 operator software report 失敗: %v", err)
+		log.Printf("failed to read operator software report: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取軟體清查失敗")
 		return
 	}
@@ -175,7 +175,7 @@ func (h *hub) handleGetOperatorInstallReport(w http.ResponseWriter, r *http.Requ
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "機隊現在的狀態產不出每機安裝狀態")
 			return
 		}
-		log.Printf("讀取 operator install report 失敗: %v", err)
+		log.Printf("failed to read operator install report: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取每機安裝狀態失敗")
 		return
 	}
@@ -199,7 +199,7 @@ func (h *hub) handleGetOperatorProfileReport(w http.ResponseWriter, r *http.Requ
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "機隊現在的狀態產不出發佈與指派對照")
 			return
 		}
-		log.Printf("讀取 operator profile report 失敗: %v", err)
+		log.Printf("failed to read operator profile report: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取發佈與指派對照失敗")
 		return
 	}
@@ -269,7 +269,7 @@ func writeOperatorMachineTimelineError(w http.ResponseWriter, err error, machine
 	case errors.As(err, &rejection) && rejection.Code == store.OperatorCodeMachineNotFound:
 		writeErr(w, http.StatusNotFound, store.OperatorCodeMachineNotFound, "找不到這台機器")
 	default:
-		log.Printf("讀取 operator machine timeline 失敗 machine=%q: %v", machineID, err)
+		log.Printf("failed to read operator machine timeline machine=%q: %v", machineID, err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取單機事件時間軸失敗")
 	}
 }

@@ -77,7 +77,7 @@ func TestParseGatewayExecStartRejectsWrongShapeAndEmpty(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "/usr/bin/openclaw gateway") {
 		t.Fatalf("錯誤沒有保留原文：結果 %+v，錯誤 %v", got, err)
 	}
-	if _, err := parseGatewayExecStart(""); err == nil || !strings.Contains(err.Error(), "空") {
+	if _, err := parseGatewayExecStart(""); err == nil || !strings.Contains(err.Error(), "empty") {
 		t.Fatalf("空字串錯誤 = %v", err)
 	}
 }

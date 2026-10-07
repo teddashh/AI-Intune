@@ -100,7 +100,7 @@ func (h *hub) requireAuditedJSON(w http.ResponseWriter, r *http.Request,
 func writeSettingErr(w http.ResponseWriter, what string, err error) {
 	status, code, detail := operator.HTTPError(err)
 	if status == http.StatusInternalServerError {
-		log.Printf("operator %s 失敗: %v", what, err)
+		log.Printf("operator %s failed: %v", what, err)
 	}
 	// A cached rejection is still a replay: the caller retried a key that was
 	// already decided, and the client must be able to tell that apart from a

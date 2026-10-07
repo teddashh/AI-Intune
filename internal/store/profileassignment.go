@@ -71,7 +71,7 @@ SELECT a.machine_id, a.assignment_id, a.assignment_revision, a.profile_id, a.pro
         WHERE newest.machine_id = a.machine_id)
  ORDER BY a.machine_id, p.position`)
 	if err != nil {
-		return nil, fmt.Errorf("store: 讀全機隊 profile 指派: %w", err)
+		return nil, fmt.Errorf("store: read fleet profile assignments: %w", err)
 	}
 	defer rows.Close()
 
@@ -90,7 +90,7 @@ SELECT a.machine_id, a.assignment_id, a.assignment_revision, a.profile_id, a.pro
 		if err := rows.Scan(&row.MachineID, &row.AssignmentID, &row.AssignmentRevision,
 			&row.ProfileID, &row.ProfileRevision, &row.ProfileDigest, &assignedAt, &row.AssignedBy,
 			&position, &packageID, &version, &desiredID, &jobID, &direct); err != nil {
-			return nil, fmt.Errorf("store: scan 全機隊 profile 指派: %w", err)
+			return nil, fmt.Errorf("store: scan fleet profile assignments: %w", err)
 		}
 		row.AssignedAt = parseTime(assignedAt)
 		if len(out) == 0 || out[len(out)-1].AssignmentID != row.AssignmentID {
@@ -111,7 +111,7 @@ SELECT a.machine_id, a.assignment_id, a.assignment_revision, a.profile_id, a.pro
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: 讀全機隊 profile 指派: %w", err)
+		return nil, fmt.Errorf("store: read fleet profile assignments: %w", err)
 	}
 	return out, nil
 }

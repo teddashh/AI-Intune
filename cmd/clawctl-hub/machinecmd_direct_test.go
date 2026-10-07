@@ -160,7 +160,7 @@ func TestMachineChannelDirectInvalidTargetCreatesNoSidecarsOrSafetyCalls(t *test
 			}
 			var out, errOut bytes.Buffer
 			err := runMachineCommandWithDeps(t.Context(), directChannelArgs(dbPath, "machine-id"), &out, &errOut, deps)
-			if err == nil || !strings.Contains(err.Error(), "pre-open 拒絕") {
+			if err == nil || !strings.Contains(err.Error(), "pre-open rejected") {
 				t.Fatalf("invalid target error=%v", err)
 			}
 			for _, sidecar := range []string{
@@ -202,7 +202,7 @@ func TestMachineChannelDirectRejectsNonLedgerAfterLockingAndBeforeSystemdOrWrita
 			}
 			var out, errOut bytes.Buffer
 			err := runMachineCommandWithDeps(t.Context(), directChannelArgs(dbPath, "machine-id"), &out, &errOut, deps)
-			if err == nil || !strings.Contains(err.Error(), "不是可遷移的 clawctl ledger") {
+			if err == nil || !strings.Contains(err.Error(), "is not a migratable clawctl ledger") {
 				t.Fatalf("non-ledger error=%v", err)
 			}
 			for _, lockPath := range []string{ledgerlock.UpgradePath(dbPath), ledgerlock.WriterPath(dbPath)} {
@@ -285,7 +285,7 @@ func TestMachineChannelDirectContentionAndMaintenanceNeverOpenStore(t *testing.T
 			if err == nil {
 				t.Fatal("unsafe direct mode succeeded")
 			}
-			if mode == "maintenance" && !strings.Contains(err.Error(), "維護") {
+			if mode == "maintenance" && !strings.Contains(err.Error(), "maintenance") {
 				t.Fatalf("maintenance error=%v", err)
 			}
 		})

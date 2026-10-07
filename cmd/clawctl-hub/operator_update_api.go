@@ -26,7 +26,7 @@ func (h *hub) handleGetOperatorUpdates(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "update filter 或 cursor 不合法")
 			return
 		}
-		log.Printf("讀取 operator updates 失敗: %v", err)
+		log.Printf("failed to read operator updates: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 updates 失敗")
 		return
 	}

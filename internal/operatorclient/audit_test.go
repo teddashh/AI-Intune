@@ -327,7 +327,7 @@ func TestAuditClientKeepsDedicatedResponseLimitBounded(t *testing.T) {
 	defer server.Close()
 	if _, err := operatorClientForServer(t, server).AuditEvents(
 		t.Context(), operator.AuditListRequest{},
-	); err == nil || !strings.Contains(err.Error(), "超過 4 MiB") {
+	); err == nil || !strings.Contains(err.Error(), "exceeds 4 MiB") {
 		t.Fatalf("audit client did not enforce dedicated response bound: %v", err)
 	}
 }

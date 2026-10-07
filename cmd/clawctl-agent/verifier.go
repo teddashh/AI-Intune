@@ -145,11 +145,11 @@ func judgeCurrentRelease(res sshResult) verifierJudgement {
 		return verifierJudgement{}
 	}
 	if link == "" {
-		return verifierJudgement{Observed: true, Summary: "current 不存在，這台沒有 clawctl 管的 OpenClaw 安裝"}
+		return verifierJudgement{Observed: true, Summary: "current does not exist, machine has no clawctl-managed OpenClaw installation"}
 	}
 	version, ok := strings.CutPrefix(link, "releases/")
 	if !ok || version == "" || strings.Contains(version, "/") {
-		return verifierJudgement{Observed: true, Summary: "current 指到 releases 以外：" + link}
+		return verifierJudgement{Observed: true, Summary: "current points outside releases: " + link}
 	}
 	return verifierJudgement{Observed: true, Passed: true, ObservedVersion: version,
 		Summary: "current=releases/" + version}
@@ -171,7 +171,7 @@ func judgeGatewayHTTP(res sshResult) verifierJudgement {
 	}
 	if code == 0 {
 		return verifierJudgement{Observed: true,
-			Summary: fmt.Sprintf("127.0.0.1:%d 沒有答", verifierGatewayPort)}
+			Summary: fmt.Sprintf("127.0.0.1:%d did not respond", verifierGatewayPort)}
 	}
 	return verifierJudgement{Observed: true, Passed: code == http.StatusOK,
 		Summary: fmt.Sprintf("http_code=%d", code)}
@@ -232,18 +232,18 @@ func runVerifier(args []string) {
 	dryRun := fs.Bool("dry-run", false, "measure and print, send nothing to the Hub")
 	_ = fs.Parse(args)
 	if fs.NArg() != 0 {
-		log.Fatal("verifier 不接受位置參數")
+		log.Fatal("verifier does not accept positional arguments")
 	}
 	if *hub == "" || *tokenFile == "" || *targetsPath == "" {
-		log.Fatal("verifier 需要 --hub、--token-file 與 --targets")
+		log.Fatal("verifier requires --hub, --token-file, and --targets")
 	}
 	token, err := readSecretFile(*tokenFile)
 	if err != nil {
-		log.Fatalf("讀取 verifier token 失敗：%v", err)
+		log.Fatalf("failed to read verifier token: %v", err)
 	}
 	targets, err := loadVerifierTargets(*targetsPath)
 	if err != nil {
-		log.Fatalf("讀取 %s 失敗：%v", *targetsPath, err)
+		log.Fatalf("failed to read %s: %v", *targetsPath, err)
 	}
 
 	run := verifierRun{
@@ -295,14 +295,14 @@ func waitVerifierInterval(ctx context.Context, duration time.Duration) bool {
 func (v verifierRun) once(ctx context.Context) error {
 	var resp model.VerificationAssignmentsResponse
 	if err := doJSON(ctx, http.MethodGet, v.hubURL+"/v1/verification-assignments", v.token, nil, &resp); err != nil {
-		return fmt.Errorf("讀取派工失敗：%w", err)
+		return fmt.Errorf("failed to read assignments: %w", err)
 	}
 	if resp.SchemaVersion != model.SchemaVersion {
-		return fmt.Errorf("Hub 回的 schema_version=%d，這個 verifier 認得的是 %d；請升級",
+		return fmt.Errorf("Hub returned schema_version=%d, this verifier only understands %d; please upgrade",
 			resp.SchemaVersion, model.SchemaVersion)
 	}
 	if len(resp.Assignments) == 0 {
-		fmt.Fprintln(v.out, "沒有指名給這個 verifier 的工作單。")
+		fmt.Fprintln(v.out, "No jobs assigned to this verifier.")
 		return nil
 	}
 
@@ -313,7 +313,7 @@ func (v verifierRun) once(ctx context.Context) error {
 		}
 	}
 	if stuck > 0 {
-		return fmt.Errorf("%d 張派工沒有送出證據，仍留在「等它回報」；修好上面說的原因再跑一次", stuck)
+		return fmt.Errorf("%d assignments failed to submit evidence and remain in pending report; fix the reasons above and run again", stuck)
 	}
 	return nil
 }
@@ -325,11 +325,11 @@ func (v verifierRun) report(ctx context.Context, assignment model.VerificationAs
 	if name == "" {
 		name = assignment.MachineID
 	}
-	fmt.Fprintf(v.out, "%s（%s）\n", assignment.JobID, name)
+	fmt.Fprintf(v.out, "%s (%s)\n", assignment.JobID, name)
 
 	destination, ok := v.targets[assignment.MachineID]
 	if !ok {
-		fmt.Fprintf(v.out, "  沒有送出證據：%s 不在 %s 裡。把它加進去再跑一次。\n",
+		fmt.Fprintf(v.out, "  No evidence submitted: %s is not in %s. Add it and run again.\n",
 			assignment.MachineID, v.targetsPath)
 		return false
 	}
@@ -355,13 +355,13 @@ func (v verifierRun) report(ctx context.Context, assignment model.VerificationAs
 	evidence := make([]model.IndependentVerificationRequest, 0, len(verifierRules))
 	for _, measurement := range measurements {
 		if !measurement.judgement.Observed {
-			fmt.Fprintf(v.out, "  %-26s 量不到  %s\n", measurement.rule.ID, unobservedReason(measurement.result))
+			fmt.Fprintf(v.out, "  %-26s unobserved  %s\n", measurement.rule.ID, unobservedReason(measurement.result))
 			continue
 		}
 		fmt.Fprintf(v.out, "  %-26s %s  %s\n", measurement.rule.ID,
 			passLabel(measurement.judgement.Passed), measurement.judgement.Summary)
 		if measurement.settledFor > 0 {
-			fmt.Fprintf(v.out, "  gateway 收斂窗：%s 後採用這次量測。\n", measurement.settledFor)
+			fmt.Fprintf(v.out, "  gateway settle window: adopting measurement after %s.\n", measurement.settledFor)
 		}
 		evidence = append(evidence, model.IndependentVerificationRequest{
 			SchemaVersion: model.IndependentVerificationSchemaVersion,
@@ -381,20 +381,20 @@ func (v verifierRun) report(ctx context.Context, assignment model.VerificationAs
 		})
 	}
 	if !complete {
-		fmt.Fprintf(v.out, "  沒有送出證據：%d 條規則裡有量不到的，整張留在「等它回報」。\n", len(verifierRules))
+		fmt.Fprintf(v.out, "  No evidence submitted: %d rules unobserved, assignment remains in pending report.\n", len(verifierRules))
 		return false
 	}
 	if v.dryRun {
-		fmt.Fprintf(v.out, "  --dry-run：量到 %d 條，沒有送出。\n", len(evidence))
+		fmt.Fprintf(v.out, "  --dry-run: observed %d rules, sent nothing.\n", len(evidence))
 		return true
 	}
 	for _, row := range evidence {
 		if err := postJSON(ctx, v.hubURL+"/v1/verifications", v.token, row, nil); err != nil {
-			fmt.Fprintf(v.out, "  送出 %s 失敗：%v\n", row.RuleID, err)
+			fmt.Fprintf(v.out, "  failed to submit %s: %v\n", row.RuleID, err)
 			return false
 		}
 	}
-	fmt.Fprintf(v.out, "  已送出 %d 列證據。\n", len(evidence))
+	fmt.Fprintf(v.out, "  Submitted %d rows of evidence.\n", len(evidence))
 	return true
 }
 
@@ -423,7 +423,7 @@ func (v verifierRun) settleGateway(ctx context.Context, destination string,
 	}
 	for elapsed := verifierGatewayRetryInterval; elapsed <= verifierGatewaySettleTimeout; elapsed += verifierGatewayRetryInterval {
 		if !wait(ctx, verifierGatewayRetryInterval) {
-			measurements[gateway].result = sshResult{Transport: true, Stderr: "gateway 收斂等待被取消"}
+			measurements[gateway].result = sshResult{Transport: true, Stderr: "gateway settle wait canceled"}
 			measurements[gateway].judgement = verifierJudgement{}
 			measurements[gateway].settledFor = elapsed - verifierGatewayRetryInterval
 			return measurements, false
@@ -448,22 +448,22 @@ func (v verifierRun) settleGateway(ctx context.Context, destination string,
 
 func passLabel(passed bool) string {
 	if passed {
-		return "通過"
+		return "passed"
 	}
-	return "沒通過"
+	return "failed"
 }
 
 // unobservedReason 說的是「為什麼量不到」，講給要去修的人聽。
 func unobservedReason(res sshResult) string {
 	switch {
 	case res.Transport:
-		return "ssh 走不到這台：" + excerpt(oneLine(res.Stderr), 200)
+		return "ssh cannot reach machine: " + excerpt(oneLine(res.Stderr), 200)
 	case res.ExitCode == verifierToolMissingExit:
-		return "這台缺了這條規則要用的指令"
+		return "machine is missing command required by this rule"
 	case res.ExitCode != 0:
-		return fmt.Sprintf("遠端回 exit %d：%s", res.ExitCode, excerpt(oneLine(res.Stderr), 200))
+		return fmt.Sprintf("remote returned exit %d: %s", res.ExitCode, excerpt(oneLine(res.Stderr), 200))
 	default:
-		return "輸出不是預期的 key=value：" + excerpt(oneLine(res.Stdout), 200)
+		return "output is not expected key=value: " + excerpt(oneLine(res.Stdout), 200)
 	}
 }
 
@@ -490,24 +490,24 @@ func parseVerifierTargets(raw []byte) (map[string]string, error) {
 		return nil, err
 	}
 	if file.SchemaVersion != verifierTargetsSchema {
-		return nil, fmt.Errorf("schema_version=%d，這個版本只認得 %d",
+		return nil, fmt.Errorf("schema_version=%d, this version only recognizes %d",
 			file.SchemaVersion, verifierTargetsSchema)
 	}
 	if len(file.Targets) == 0 {
-		return nil, errors.New("targets 是空的")
+		return nil, errors.New("targets is empty")
 	}
 	targets := make(map[string]string, len(file.Targets))
 	for _, target := range file.Targets {
 		if !validVerifierTargetValue(target.MachineID) {
-			return nil, fmt.Errorf("machine_id %q 不合法", target.MachineID)
+			return nil, fmt.Errorf("invalid machine_id %q", target.MachineID)
 		}
 		// ⚠ 以 - 開頭的 destination 會被 ssh 當成選項讀走。那不是一台機器，
 		// 那是一個讓別人替 ssh 加參數的洞。
 		if !validVerifierTargetValue(target.SSHDestination) || strings.HasPrefix(target.SSHDestination, "-") {
-			return nil, fmt.Errorf("%s 的 ssh_destination %q 不合法", target.MachineID, target.SSHDestination)
+			return nil, fmt.Errorf("invalid ssh_destination %q for %s", target.SSHDestination, target.MachineID)
 		}
 		if _, dup := targets[target.MachineID]; dup {
-			return nil, fmt.Errorf("machine_id %s 出現兩次", target.MachineID)
+			return nil, fmt.Errorf("duplicate machine_id %s", target.MachineID)
 		}
 		targets[target.MachineID] = target.SSHDestination
 	}
@@ -569,7 +569,7 @@ func runSSH(ctx context.Context, destination, command string) sshResult {
 		res.Transport = true
 		res.ExitCode = verifierSSHFailureExit
 		if res.Stderr == "" {
-			res.Stderr = "ssh 超過 " + verifierCommandTimeout.String() + " 沒有回來"
+			res.Stderr = "ssh timed out after " + verifierCommandTimeout.String() + " with no response"
 		}
 		return res
 	default:
@@ -583,7 +583,7 @@ func runSSH(ctx context.Context, destination, command string) sshResult {
 			if res.ExitCode < 0 {
 				res.ExitCode = verifierSSHFailureExit
 				if res.Stderr == "" {
-					res.Stderr = "ssh 在本地被訊號中止，沒有拿到遠端的結果"
+					res.Stderr = "ssh was terminated locally by a signal without receiving remote results"
 				}
 			}
 			return res

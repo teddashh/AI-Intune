@@ -142,7 +142,7 @@ func main() {
 		// Like the rollback handshakes below, this path must not open the store.
 		if os.Args[1] == "--operator-auth-check" {
 			if err := runOperatorAuthCheck(os.Args[1:], os.Stdout); err != nil {
-				log.Fatalf("operator auth preflight 失敗：%v", err)
+				log.Fatalf("operator auth preflight failed: %v", err)
 			}
 			return
 		}
@@ -151,37 +151,37 @@ func main() {
 		// script 因此不會把「程式跑得起來」誤當成「懂新版 rollback 契約」。
 		if os.Args[1] == "--rollback-compatible" {
 			if err := runRollbackCompatibility(os.Args[1:], os.Stdout); err != nil {
-				log.Fatalf("拒絕 rollback：%v", err)
+				log.Fatalf("rollback rejected: %v", err)
 			}
 			return
 		}
 		if os.Args[1] == "--rollback-snapshot" {
 			if err := runRollbackSnapshot(os.Args[1:], os.Stdout); err != nil {
-				log.Fatalf("拒絕 rollback snapshot：%v", err)
+				log.Fatalf("rollback snapshot rejected: %v", err)
 			}
 			return
 		}
 		if os.Args[1] == "--upgrade-maintenance-begin" {
 			if err := runUpgradeMaintenanceBegin(os.Args[1:], os.Stdout, disableCurrentExecutableForMaintenance); err != nil {
-				log.Fatalf("拒絕進入 upgrade maintenance：%v", err)
+				log.Fatalf("entering upgrade maintenance rejected: %v", err)
 			}
 			return
 		}
 		if os.Args[1] == "--upgrade-stopped-check" {
 			if err := runUpgradeStoppedCheck(context.Background(), os.Args[1:], os.Stdout); err != nil {
-				log.Fatalf("拒絕 upgrade stopped proof：%v", err)
+				log.Fatalf("upgrade stopped proof rejected: %v", err)
 			}
 			return
 		}
 		if os.Args[1] == "--upgrade-protocol-check" {
 			if err := runUpgradeProtocolCheck(os.Args[1:], os.Stdout); err != nil {
-				log.Fatalf("拒絕 upgrade protocol proof：%v", err)
+				log.Fatalf("upgrade protocol proof rejected: %v", err)
 			}
 			return
 		}
 		if os.Args[1] == "--upgrade-ledger-path-check" {
 			if err := runUpgradeLedgerPathCheck(os.Args[1:], os.Stdout); err != nil {
-				log.Fatalf("拒絕 upgrade ledger path proof：%v", err)
+				log.Fatalf("upgrade ledger path proof rejected: %v", err)
 			}
 			return
 		}
@@ -291,32 +291,32 @@ func runOperatorAuthCheckWithFactory(argv []string, out io.Writer,
 ) error {
 	fs := flag.NewFlagSet("operator-auth-check", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	check := fs.Bool("operator-auth-check", false, "在換版前驗證 operator app capabilities")
-	listen := fs.String("listen", os.Getenv("CLAWCTL_LISTEN"), "即將啟動的 literal Tailscale listener")
+	check := fs.Bool("operator-auth-check", false, "verify operator app capabilities before upgrading")
+	listen := fs.String("listen", os.Getenv("CLAWCTL_LISTEN"), "literal Tailscale listener to be started")
 	prefix := fs.String("operator-capability-prefix", os.Getenv("CLAWCTL_OPERATOR_CAPABILITY_PREFIX"),
-		"Tailscale grants app capability 前綴")
+		"Tailscale grants app capability prefix")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if !*check {
-		return errors.New("缺少 --operator-auth-check")
+		return errors.New("missing --operator-auth-check")
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("多餘參數：%s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	destination, err := operatorDestinationFromListen(*listen)
 	if err != nil {
-		return fmt.Errorf("operator console listener %q：%w", *listen, err)
+		return fmt.Errorf("operator console listener %q: %w", *listen, err)
 	}
 	authority, err := operatorAuthorityFromListen(*listen)
 	if err != nil {
-		return fmt.Errorf("operator console listener authority %q：%w", *listen, err)
+		return fmt.Errorf("operator console listener authority %q: %w", *listen, err)
 	}
 	if _, why := publicBase(*listen); why != "" {
-		return fmt.Errorf("operator console 位址設定不合法：%s", why)
+		return fmt.Errorf("invalid operator console address configuration: %s", why)
 	}
 	if !tsaddr.IsTailscaleIP(destination) {
-		return fmt.Errorf("listener destination %q 必須是明確的 Tailscale IP", destination)
+		return fmt.Errorf("listener destination %q must be an explicit Tailscale IP", destination)
 	}
 	// The rollout owner is fixed to the Hub node itself. An overridable source
 	// would let an operator prove a source/destination pair that the post-start
@@ -327,27 +327,27 @@ func runOperatorAuthCheckWithFactory(argv []string, out io.Writer,
 		Destination: destination, CapabilityPrefix: *prefix,
 	})
 	if err != nil {
-		return fmt.Errorf("operator auth 設定不合法：%w", err)
+		return fmt.Errorf("invalid operator auth configuration: %w", err)
 	}
 	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
 		"http://"+authority+"/", nil)
 	if err != nil {
-		return fmt.Errorf("建立 operator auth probe：%w", err)
+		return fmt.Errorf("create operator auth probe: %w", err)
 	}
 	request.RemoteAddr = net.JoinHostPort(source.String(), "1")
 	before := routingOf(request)
 	authed, decision := authorizer.Authorize(request, operatorauth.Admin)
 	if !decision.Allowed || authed == nil {
 		if decision.Allowed || authed != nil || !validAuthorizationDenial(decision) {
-			return fmt.Errorf("operator auth adapter 回傳不一致的拒絕判決：allowed=%t request_nil=%t status=%d code=%q",
+			return fmt.Errorf("operator auth adapter returned inconsistent denial decision: allowed=%t request_nil=%t status=%d code=%q",
 				decision.Allowed, authed == nil, decision.HTTPStatus, decision.Code)
 		}
-		return fmt.Errorf("source %s → destination %s 的 admin capability：%s（%s）",
+		return fmt.Errorf("admin capability for source %s -> destination %s: %s (%s)",
 			source, destination, decision.Code, decision.Detail)
 	}
 	principal, breach := validateAuthorizedResult(before, authed, decision, operatorauth.Admin)
 	if breach != "" {
-		return fmt.Errorf("operator auth adapter 的 success 判決不完整：%s", breach)
+		return fmt.Errorf("operator auth adapter success decision is incomplete: %s", breach)
 	}
 	// Authorize reads and validates the complete CapMap in one WhoIs response.
 	// Check all three keys from that coherent snapshot; three separate calls
@@ -355,7 +355,7 @@ func runOperatorAuthCheckWithFactory(argv []string, out io.Writer,
 	// capabilities that never existed together.
 	for _, permission := range []operatorauth.Permission{operatorauth.View, operatorauth.Operate, operatorauth.Admin} {
 		if !principal.Has(permission) {
-			return fmt.Errorf("source %s 缺少獨立的 %s capability；不做程式內權限繼承", source, permission)
+			return fmt.Errorf("source %s is missing independent %s capability; no in-process permission inheritance", source, permission)
 		}
 	}
 	fmt.Fprintf(out, "operator-auth-ready:v1 source=%s destination=%s authority=%s capabilities=view,operate,admin self-only=true\n",
@@ -378,7 +378,7 @@ func classifyTopLevel(argv []string) (string, error) {
 		"artifact", "catalog", "verifier", "settings", "compliance", "version", "notify-check":
 		return argv[0], nil
 	default:
-		return "", fmt.Errorf("不認得命令 %q；啟動 Hub 時只接受 --listen、--db 等 flags，或子指令（例如 notify-check）", argv[0])
+		return "", fmt.Errorf("unrecognized command %q; Hub accepts flags like --listen, --db, or subcommands (e.g. notify-check)", argv[0])
 	}
 }
 
@@ -388,27 +388,27 @@ func rejectUnexpectedServePositionals(argv []string) error {
 	if len(argv) == 0 {
 		return nil
 	}
-	return fmt.Errorf("serve 不接受 positional 參數：%q", strings.Join(argv, " "))
+	return fmt.Errorf("serve does not accept positional arguments: %q", strings.Join(argv, " "))
 }
 
 func runRollbackCompatibility(argv []string, out io.Writer) error {
 	fs := flag.NewFlagSet("rollback-compatible", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	capability := fs.Bool("rollback-compatible", false, "唯讀確認 ledger 已靜止，可安全交給支援此契約的舊 Hub")
-	dbPath := fs.String("db", defaultDB(), "SQLite 檔位置")
+	capability := fs.Bool("rollback-compatible", false, "read-only verification that ledger is quiescent and safe for older Hubs supporting this contract")
+	dbPath := fs.String("db", defaultDB(), "path to SQLite database")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if !*capability {
-		return errors.New("缺少 --rollback-compatible")
+		return errors.New("missing --rollback-compatible")
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("多餘參數：%s", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
 	}
 	if err := store.CheckRollbackCompatible(*dbPath); err != nil {
 		return err
 	}
-	fmt.Fprintln(out, "rollback-compatible：ledger 已靜止（0 active deployments（running/paused），0 非終態 jobs，0 active artifact fetches（queued/running））")
+	fmt.Fprintln(out, "rollback-compatible: ledger is quiescent (0 active deployments (running/paused), 0 non-terminal jobs, 0 active artifact fetches (queued/running))")
 	return nil
 }
 
@@ -416,20 +416,20 @@ func runRollbackCompatibility(argv []string, out io.Writer) error {
 
 func serve(argv []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	addr := fs.String("listen", "127.0.0.1:8770", "監聽位址（literal Tailscale IP:port；未指定時讀 $CLAWCTL_LISTEN）。旗標預設 127.0.0.1:8770 是 fail-closed placeholder，Hub 會拒絕。沒有正式環境預設埠；8787 只是文件裡的慣例範例，grant dst、CLAWCTL_PUBLIC_URL、agent --hub、tunnel origin 必須與這個位址同一個埠。")
-	dbPath := fs.String("db", defaultDB(), "SQLite 檔位置")
-	hubHost := fs.String("hub-host", hostname(), "這台的名字；用來偵測 Hub 是不是裝在它自己管的機器上")
+	addr := fs.String("listen", "127.0.0.1:8770", "listen address (literal Tailscale IP:port; reads $CLAWCTL_LISTEN when unset). Flag default 127.0.0.1:8770 is a fail-closed placeholder that Hub rejects. No production default port; 8787 is only a convention example in docs; grant dst, CLAWCTL_PUBLIC_URL, agent --hub, and tunnel origin must use the same port as this address")
+	dbPath := fs.String("db", defaultDB(), "path to SQLite database")
+	hubHost := fs.String("hub-host", hostname(), "name of this host; used to detect whether Hub is running on a machine it manages")
 	notify := fs.String("notify-cmd", os.Getenv("CLAWCTL_NOTIFY_CMD"), "legacy command that receives the report on stdin; when set, built-in channels are not used")
 	notifyEnv := fs.String("notify-env", os.Getenv("CLAWCTL_NOTIFY_ENV"), "path to the notify env file (Telegram/webhook secrets; never taken from flags or the process environment)")
-	reportAt := fs.String("report-at", "08:00", "每天送早報的本地時間 HH:MM")
+	reportAt := fs.String("report-at", "08:00", "local time HH:MM to send daily report each day")
 	stamp := fs.String("report-stamp", os.Getenv("CLAWCTL_REPORT_STAMP"),
-		"早報送達後把 unix 時間寫進這個檔；外部死人之鐘讀它（見 ops/deadman.sh）")
+		"write unix timestamp to this file after daily report delivery; read by external dead man's switch (see ops/deadman.sh)")
 	def := store.DefaultRetention()
-	keepObs := fs.Duration("keep-observations", def.Observations, "觀測留多久")
-	keepCheckins := fs.Duration("keep-checkins", def.Checkins, "心跳留多久")
-	keepOccupancy := fs.Duration("keep-occupancy", def.Occupancy, "票的占用帳留多久")
+	keepObs := fs.Duration("keep-observations", def.Observations, "how long to keep observations")
+	keepCheckins := fs.Duration("keep-checkins", def.Checkins, "how long to keep check-ins")
+	keepOccupancy := fs.Duration("keep-occupancy", def.Occupancy, "how long to keep ticket occupancy records")
 	operatorCapabilityPrefix := fs.String("operator-capability-prefix", os.Getenv("CLAWCTL_OPERATOR_CAPABILITY_PREFIX"),
-		"Tailscale grants app capability 前綴（<owned-domain>/cap/<application>）")
+		"Tailscale grants app capability prefix (<owned-domain>/cap/<application>)")
 	_ = fs.Parse(argv)
 	listenSet := false
 	fs.Visit(func(f *flag.Flag) { listenSet = listenSet || f.Name == "listen" })
@@ -441,30 +441,30 @@ func serve(argv []string) {
 	}
 	canonicalDBPath, err := canonicalServeDBPath(*dbPath)
 	if err != nil {
-		log.Fatalf("資料庫路徑無法 canonicalize：%v", err)
+		log.Fatalf("unable to canonicalize database path: %v", err)
 	}
 	*dbPath = canonicalDBPath
 	destination, err := operatorDestinationFromListen(*addr)
 	if err != nil {
-		log.Fatalf("operator auth 設定不合法：拒絕 --listen %q：%v", *addr, err)
+		log.Fatalf("invalid operator auth configuration: rejected --listen %q: %v", *addr, err)
 	}
 	operatorAuthority, err := operatorAuthorityFromListen(*addr)
 	if err != nil {
-		log.Fatalf("operator HTTP authority 拒絕 --listen %q：%v", *addr, err)
+		log.Fatalf("operator HTTP authority rejected --listen %q: %v", *addr, err)
 	}
 	operatorAuthorizer, err := operatorauth.New(operatorauth.Config{
 		Destination: destination, CapabilityPrefix: *operatorCapabilityPrefix,
 	})
 	if err != nil {
-		log.Fatalf("operator auth 設定不合法：%v；請設定 CLAWCTL_OPERATOR_CAPABILITY_PREFIX", err)
+		log.Fatalf("invalid operator auth configuration: %v; please set CLAWCTL_OPERATOR_CAPABILITY_PREFIX", err)
 	}
 	operatorBase, why := publicBase(*addr)
 	if why != "" {
-		log.Fatalf("operator console 位址設定不合法：%s", why)
+		log.Fatalf("invalid operator console address configuration: %s", why)
 	}
 	objectBlobs, objectBlobSummary, err := blobstore.FromEnv(os.Getenv)
 	if err != nil {
-		log.Fatalf("object storage 設定不合法：%v", err)
+		log.Fatalf("invalid object storage configuration: %v", err)
 	}
 	notifySetup, err := prepareNotify(*notify, *notifyEnv)
 	if err != nil {
@@ -479,7 +479,7 @@ func serve(argv []string) {
 	// ledger and only then discover EADDRNOTAVAIL.
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
-		log.Fatalf("監聽 %s 失敗（pre-open）：%v", *addr, err)
+		log.Fatalf("failed to listen on %s (pre-open): %v", *addr, err)
 	}
 	defer ln.Close()
 
@@ -489,21 +489,21 @@ func serve(argv []string) {
 	// direct operator from opening the same ledger at the same time.
 	writerGuard, err := ledgerlock.AcquireWriter(*dbPath)
 	if err != nil {
-		log.Fatalf("取得資料庫 writer lock 失敗（pre-open）%s：%v", ledgerlock.WriterPath(*dbPath), err)
+		log.Fatalf("failed to acquire database writer lock (pre-open) %s: %v", ledgerlock.WriterPath(*dbPath), err)
 	}
 	defer func() {
 		if err := writerGuard.Close(); err != nil {
-			log.Printf("釋放資料庫 writer lock 失敗 %s：%v", writerGuard.Path(), err)
+			log.Printf("failed to release database writer lock %s: %v", writerGuard.Path(), err)
 		}
 	}()
 
 	st, err := openServeStore(*dbPath)
 	if err != nil {
-		log.Fatalf("開不了資料庫 %s：%v", *dbPath, err)
+		log.Fatalf("cannot open database %s: %v", *dbPath, err)
 	}
 	defer st.Close()
 	if err := sweepOpenAgentSessionsOnStartup(st, log.Printf); err != nil {
-		log.Fatalf("無法確認 Hub 重新啟動後的終端狀態：Hub 不會開始服務；請修復資料庫後重新啟動：%v", err)
+		log.Fatalf("unable to verify terminal state after Hub restart: Hub will not start serving; repair database and restart: %v", err)
 	}
 
 	exps := loadExpectations(st)
@@ -511,7 +511,7 @@ func serve(argv []string) {
 	// 在開始接 observation 前把 service 真正載入的 policy 發布進同一個 DB，
 	// CLI 的 promote gate 才不會在 expects=nil 的另一個世界下判斷。
 	if err := st.PublishExpectationsPolicy(time.Now().UTC()); err != nil {
-		log.Fatalf("發布 workload expectations policy 失敗：%v", err)
+		log.Fatalf("failed to publish workload expectations policy: %v", err)
 	}
 
 	artifactsDir := artifactsDirFor(*dbPath)
@@ -545,29 +545,29 @@ func serve(argv []string) {
 	// 一個在凌晨三點才炸掉的設定錯誤，等於它上線的那天到炸掉的那天之間，
 	// 沒有任何東西被清 —— 而 log 裡不會有人看的那一行。
 	if err := h.retention.Validate(); err != nil {
-		log.Fatalf("保留期設定不合法：%v", err)
+		log.Fatalf("invalid retention policy configuration: %v", err)
 	}
-	log.Printf("保留期：觀測 %v、心跳 %v、票的占用帳 %v（每 %v 清一次，看 retention_log）",
+	log.Printf("retention: observations %v, check-ins %v, ticket occupancy %v (pruned every %v, see retention_log)",
 		h.retention.Observations, h.retention.Checkins, h.retention.Occupancy, pruneInterval)
 	// ⚠ 開機時把「失敗時會不會告警」講清楚。不講的話，一個帶 query string
 	// 的 URL 會讓失敗告警永遠靜音，而那件事只有在真的出事那天才會被發現。
 	if h.reportPingURL != "" {
 		switch {
 		case h.reportPingFailURL != "":
-			log.Print("外部死人之鐘：成功與失敗各有自己的 ping URL")
+			log.Print("external dead man's switch: separate ping URLs configured for success and failure")
 		case failPingURL(h.reportPingURL) != "":
-			log.Print("外部死人之鐘：失敗時會 ping <url>/fail（healthchecks 慣例）")
+			log.Print("external dead man's switch: will ping <url>/fail on failure (healthchecks convention)")
 		default:
-			log.Print("⚠ 外部死人之鐘：ping URL 帶了 query string，推不出失敗端點。" +
-				"早報送不出去時不會立即告警，只能等對方超時。" +
-				"要立即告警請設 CLAWCTL_REPORT_PING_FAIL_URL。")
+			log.Print("WARN external dead man's switch: ping URL contains a query string and cannot derive failure endpoint; " +
+				"delivery failures will not alert immediately and must wait for timeout; " +
+				"set CLAWCTL_REPORT_PING_FAIL_URL to alert immediately")
 		}
 	}
 	h.logNotifyConfigured()
 
 	ui, err := web.New(st, *hubHost)
 	if err != nil {
-		log.Fatalf("樣板載入失敗：%v", err)
+		log.Fatalf("failed to load templates: %v", err)
 	}
 	ui.SetDrillStampReader(func() (time.Time, bool) { return readDrillStamp(h.drillStamp) })
 	ui.SetTerminalLinks(h.agentLinks)
@@ -577,15 +577,15 @@ func serve(argv []string) {
 	ui.SetOperatorService(operatorService)
 	ui.SetHubBase(h.publicURL)
 	if err := ui.SetRetentionPolicy(h.retention); err != nil {
-		log.Fatalf("網頁保留期設定不合法：%v", err)
+		log.Fatalf("invalid web retention policy configuration: %v", err)
 	}
 	if err := ui.SetAgentBundles(filepath.Join(filepath.Dir(*dbPath), "agent-bootstrap", version), version); err != nil {
-		log.Fatalf("Agent bootstrap bundles 載入失敗：%v", err)
+		log.Fatalf("failed to load agent bootstrap bundles: %v", err)
 	}
 
 	handler, err := newHubHTTPHandler(h, ui, operatorAuthorizer, operatorAuthority)
 	if err != nil {
-		log.Fatalf("operator route policy 不完整：%v", err)
+		log.Fatalf("operator route policy incomplete: %v", err)
 	}
 
 	srv := &http.Server{
@@ -640,7 +640,7 @@ func serve(argv []string) {
 	go watchdogLoop(ctx, h)
 
 	go func() {
-		log.Printf("clawctl-hub %s 啟動於 http://%s（資料庫 %s）", version, *addr, *dbPath)
+		log.Printf("clawctl-hub %s started on http://%s (database %s)", version, *addr, *dbPath)
 		notifyReady()
 		// Artifact recovery above is intentionally local-only. Start registry and
 		// tarball work strictly after READY so an unavailable origin cannot keep the
@@ -648,12 +648,12 @@ func serve(argv []string) {
 		go artifactFetchWorkerLoop(ctx, h.operatorService)
 		go restoreDrillWorkerLoop(ctx, h.operatorService)
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("HTTP 服務停止：%v", err)
+			log.Fatalf("HTTP server stopped: %v", err)
 		}
 	}()
 
 	<-ctx.Done()
-	log.Print("收到停止訊號，正在收尾")
+	log.Print("shutdown signal received, winding down")
 	h.journal(store.HubStopping, "收到停止訊號（kill -9 不會有這一筆，那是預期的）", time.Now())
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -675,7 +675,7 @@ func serveListenDefault() string {
 func operatorDestinationFromListen(listen string) (netip.Addr, error) {
 	endpoint, err := operatorendpoint.ParseListen(listen)
 	if err != nil {
-		return netip.Addr{}, fmt.Errorf("必須是 canonical literal Tailscale listener IP:nonzero-port（且為 node address）：%w", err)
+		return netip.Addr{}, fmt.Errorf("must be canonical literal Tailscale listener IP:nonzero-port (and a node address): %w", err)
 	}
 	return endpoint.Destination(), nil
 }
@@ -683,7 +683,7 @@ func operatorDestinationFromListen(listen string) (netip.Addr, error) {
 func operatorAuthorityFromListen(listen string) (string, error) {
 	endpoint, err := operatorendpoint.ParseListen(listen)
 	if err != nil {
-		return "", fmt.Errorf("必須是 canonical literal Tailscale listener IP:nonzero-port（且為 node address）：%w", err)
+		return "", fmt.Errorf("must be canonical literal Tailscale listener IP:nonzero-port (and a node address): %w", err)
 	}
 	return endpoint.Authority(), nil
 }
@@ -723,7 +723,7 @@ func watchdogLoop(ctx context.Context, h *hub) {
 			if err := h.store.PingReader(ctx); err != nil {
 				// ⚠ 不餵。讓 systemd 殺掉重來 —— 一個查不動資料庫的 Hub
 				// 還活著，比它死掉更糟：它會安靜地什麼都不回報。
-				log.Printf("看門狗：資料庫沒有回應，停止餵食：%v", err)
+				log.Printf("watchdog: database not responding, stopping keepalive: %v", err)
 				continue
 			}
 			notifyWatchdog()
@@ -747,12 +747,12 @@ func sdNotify(msg string) {
 	}
 	conn, err := net.DialUnix("unixgram", nil, &net.UnixAddr{Name: sock, Net: "unixgram"})
 	if err != nil {
-		log.Printf("sd_notify(%s) 連不上 %q：%v", msg, os.Getenv("NOTIFY_SOCKET"), err)
+		log.Printf("sd_notify(%s) cannot connect to %q: %v", msg, os.Getenv("NOTIFY_SOCKET"), err)
 		return
 	}
 	defer conn.Close()
 	if _, err := conn.Write([]byte(msg)); err != nil {
-		log.Printf("sd_notify(%s) 寫入失敗：%v", msg, err)
+		log.Printf("sd_notify(%s) write failed: %v", msg, err)
 	}
 }
 
@@ -783,7 +783,7 @@ func (h *hub) reconcileLoop(ctx context.Context) {
 		}
 		prev = now
 		if err := h.store.TouchHubAlive(now); err != nil {
-			log.Printf("蓋不了「還活著」的章：%v", err)
+			log.Printf("failed to touch hub alive timestamp: %v", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -795,7 +795,7 @@ func (h *hub) reconcileLoop(ctx context.Context) {
 
 func (h *hub) reconcile() {
 	if err := h.store.ReconcileFleet(time.Now().UTC()); err != nil {
-		log.Printf("對帳失敗：%v", err)
+		log.Printf("reconciliation failed: %v", err)
 	}
 }
 
@@ -842,7 +842,7 @@ const pruneInterval = 20 * time.Hour
 func (h *hub) maybePrune(now time.Time) {
 	last, _, ok, err := h.store.LastPrune()
 	if err != nil {
-		log.Printf("清理：讀不到上次的清理紀錄，這一輪跳過：%v", err)
+		log.Printf("prune: cannot read last prune record, skipping this cycle: %v", err)
 		return
 	}
 	if ok && now.Sub(last) < pruneInterval {
@@ -852,12 +852,12 @@ func (h *hub) maybePrune(now time.Time) {
 	if err != nil {
 		// ⚠ 不 Fatal。清不掉舊資料是「磁碟遲早會滿」，
 		// 而直接讓 Hub 死掉是「現在就什麼都看不到」。後者嚴重得多。
-		log.Printf("清理失敗：%v", err)
+		log.Printf("prune failed: %v", err)
 		return
 	}
 	// ⚠ 一定要印，連 0 也要印。一個從來不出聲的清理程序，
 	// 沒有人分得出它是「沒東西要清」還是「三個月前就壞了」。
-	log.Printf("清理：刪掉 %d 列，留下 %d 列各組最新的（%s）",
+	log.Printf("prune: deleted %d rows, kept %d newest rows in each group (%s)",
 		rep.Total(), rep.KeptNewest, pruneSummary(rep))
 }
 
@@ -902,7 +902,7 @@ func (h *hub) maybeSendReport(now time.Time) {
 	}
 	last, found, err := h.store.LastNotification("daily")
 	if err != nil {
-		log.Printf("查上次推播失敗：%v", err)
+		log.Printf("failed to query last notification: %v", err)
 		return
 	}
 	if found && !last.Before(due) {
@@ -910,7 +910,7 @@ func (h *hub) maybeSendReport(now time.Time) {
 	}
 	rows, failures, lastFailed, err := h.store.NotificationAttemptsSince("daily", due)
 	if err != nil {
-		log.Printf("查早報嘗試失敗：%v", err)
+		log.Printf("failed to query daily report attempts: %v", err)
 		return
 	}
 	if h.notifier() == nil {
@@ -930,7 +930,7 @@ func (h *hub) maybeSendReport(now time.Time) {
 	}
 	body, err := h.buildReport(now, since)
 	if err != nil {
-		log.Printf("產生早報失敗：%v", err)
+		log.Printf("failed to generate daily report: %v", err)
 		return
 	}
 	h.deliver("daily", body, now)
@@ -951,28 +951,28 @@ func (h *hub) maybeSendReport(now time.Time) {
 func publicBase(listen string) (base, why string) {
 	host, port, err := net.SplitHostPort(listen)
 	if err != nil {
-		return "", fmt.Sprintf("看不懂監聽位址 %q", listen)
+		return "", fmt.Sprintf("cannot parse listen address %q", listen)
 	}
 	ip, err := netip.ParseAddr(host)
 	switch {
 	case host == "" || err == nil && ip.IsUnspecified():
-		return "", "監聽在所有介面上，推不出對外該用哪一個位址"
+		return "", "listening on all interfaces; cannot derive external address"
 	case err != nil:
-		return "", fmt.Sprintf("監聽位址 %q 不是 literal IP", host)
+		return "", fmt.Sprintf("listen address %q is not a literal IP", host)
 	case ip.IsLoopback():
-		return "", "只監聽 loopback，沒有別台連得到的位址"
+		return "", "listening only on loopback; address not reachable from other machines"
 	case !tsaddr.IsTailscaleIP(ip.Unmap()):
-		return "", fmt.Sprintf("監聽位址 %q 不是 Tailscale IP", host)
+		return "", fmt.Sprintf("listen address %q is not a Tailscale IP", host)
 	}
 	endpoint, err := operatorendpoint.ParseListen(net.JoinHostPort(host, port))
 	if err != nil {
-		return "", fmt.Sprintf("監聽位址 %q 不是受支援的 canonical Tailscale node endpoint：%v", listen, err)
+		return "", fmt.Sprintf("listen address %q is not a supported canonical Tailscale node endpoint: %v", listen, err)
 	}
 	base = endpoint.BaseURL()
 	if configured := strings.TrimRight(os.Getenv("CLAWCTL_PUBLIC_URL"), "/"); configured != "" && configured != base {
 		// Do not echo the configured value: environment files also hold bearer
 		// material, and a mistaken URL can itself contain credentials.
-		return "", fmt.Sprintf("CLAWCTL_PUBLIC_URL 與釘住的 operator authority %q 不一致；目前不支援另一個 hostname 或 TLS origin", base)
+		return "", fmt.Sprintf("CLAWCTL_PUBLIC_URL does not match pinned operator authority %q; alternate hostname or TLS origin not supported", base)
 	}
 	return base, ""
 }
@@ -1002,7 +1002,7 @@ func (h *hub) buildReport(now, since time.Time) (string, error) {
 	if chs, err := h.store.ChangesSince(since, now); err != nil {
 		// ⚠ 讀不到就要出聲。靜靜地當作「沒有同時失聯」正是這一段在修的那個病：
 		// 一個空的、乾淨的答案跟一個沒問對地方的答案長得一模一樣。
-		log.Printf("讀取狀態轉移失敗，這次早報無法判斷同時失聯：%v", err)
+		log.Printf("failed to read state transitions; cannot evaluate concurrent outages in this report: %v", err)
 	} else {
 		for _, c := range chs {
 			if c.Kind == "state" && state.State(c.To) == state.Unreachable {
@@ -1018,7 +1018,7 @@ func (h *hub) buildReport(now, since time.Time) (string, error) {
 	// Hub 自己的日誌：早報要拿它對「同時失聯」。窗口往前多拉一小時，
 	// 因為上一則早報之前的一次重啟，也可能是這一輪窗口開頭那次眨眼的成因。
 	if evs, err := h.store.HubEventsBetween(since.Add(-time.Hour), now); err != nil {
-		log.Printf("讀取 Hub 自己的日誌失敗，這次早報無法解釋同時失聯：%v", err)
+		log.Printf("failed to read hub journal; cannot explain concurrent outages in this report: %v", err)
 	} else {
 		for _, e := range evs {
 			in.HubEvents = append(in.HubEvents, report.HubEvent{At: e.At, Kind: e.Kind, Detail: e.Detail})
@@ -1097,11 +1097,11 @@ func (h *hub) touchReportStamp(kind string, now time.Time) {
 	// 先寫暫存檔再 rename：讀的那一端永遠看到完整的數字，不會撞上寫到一半。
 	tmp := h.reportStamp + ".tmp"
 	if err := os.WriteFile(tmp, []byte(strconv.FormatInt(now.Unix(), 10)+"\n"), 0o644); err != nil {
-		log.Printf("寫不了早報時間戳 %s：%v（早報本身已送達）", h.reportStamp, err)
+		log.Printf("failed to write daily report timestamp %s: %v (daily report itself delivered)", h.reportStamp, err)
 		return
 	}
 	if err := os.Rename(tmp, h.reportStamp); err != nil {
-		log.Printf("換不了早報時間戳 %s：%v（早報本身已送達）", h.reportStamp, err)
+		log.Printf("failed to replace daily report timestamp %s: %v (daily report itself delivered)", h.reportStamp, err)
 	}
 }
 
@@ -1140,7 +1140,7 @@ func cmdRetire(argv []string) {
 func retireAliasArgs(argv []string) ([]string, error) {
 	for _, arg := range argv {
 		if arg == "--set" || arg == "-set" || strings.HasPrefix(arg, "--set=") || strings.HasPrefix(arg, "-set=") {
-			return nil, errors.New("retire alias 不接受 --set；請改用 clawctl-hub machine lifecycle 明示 desired state")
+			return nil, errors.New("retire alias does not accept --set; use clawctl-hub machine lifecycle to specify desired state")
 		}
 	}
 	return append([]string{"lifecycle", "--set", "retired"}, argv...), nil
@@ -1178,8 +1178,8 @@ func parseAsOf(s string) (time.Time, error) {
 	t, err := time.Parse("2006-01-02", s)
 	if err != nil {
 		return time.Time{}, fmt.Errorf(
-			"%q 不是 YYYY-MM-DD 也不是 RFC3339（例如 2026-10-01 或 "+
-				"2026-10-01T00:00:00Z）", s)
+			"%q is neither YYYY-MM-DD nor RFC3339 (e.g. 2026-10-01 or "+
+				"2026-10-01T00:00:00Z)", s)
 	}
 	return t.UTC(), nil
 }
@@ -1210,11 +1210,11 @@ func loadExpectations(st *store.Store) *expect.Set {
 	exps := expect.Load(os.Getenv("CLAWCTL_EXPECTATIONS"))
 	switch {
 	case exps.Err != "":
-		log.Printf("期望設定失敗：%s；rules=0", exps.Err)
+		log.Printf("expectations configuration failed: %s; rules=0", exps.Err)
 	case !exps.Configured:
 		log.Printf("expectations rules=0")
 	default:
-		log.Printf("載入 %d 條期望（%s）", len(exps.Rules), exps.Path)
+		log.Printf("loaded %d expectations (%s)", len(exps.Rules), exps.Path)
 	}
 	st.SetExpectations(exps)
 	return exps
@@ -1234,16 +1234,16 @@ func openServeStore(path string) (*store.Store, error) {
 	switch {
 	case err == nil:
 		if !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("資料庫 %s 不是 regular file", path)
+			return nil, fmt.Errorf("database %s is not a regular file", path)
 		}
 		if err := store.ValidateExistingLedger(path); err != nil {
-			return nil, fmt.Errorf("既有檔案的 clawctl ledger pre-open 驗證失敗：%w", err)
+			return nil, fmt.Errorf("pre-open validation of existing clawctl ledger failed: %w", err)
 		}
 		before = info
 	case errors.Is(err, os.ErrNotExist):
 		// A genuinely absent target is the one explicit first-install case.
 	default:
-		return nil, fmt.Errorf("確認資料庫 %s 是否存在：%w", path, err)
+		return nil, fmt.Errorf("check database %s existence: %w", path, err)
 	}
 
 	st, err := store.Open(path)
@@ -1255,16 +1255,16 @@ func openServeStore(path string) (*store.Store, error) {
 	}
 	after, err := os.Lstat(path)
 	if err != nil {
-		return fail(fmt.Errorf("writable open 後重查 ledger identity：%w", err))
+		return fail(fmt.Errorf("re-check ledger identity after writable open: %w", err))
 	}
 	if !after.Mode().IsRegular() || (before != nil && !os.SameFile(before, after)) {
-		return fail(errors.New("ledger path 在驗證與 writable open 之間改變"))
+		return fail(errors.New("ledger path changed between validation and writable open"))
 	}
 	if err := ledgerlock.ValidateUpgradeTarget(path); err != nil {
-		return fail(fmt.Errorf("writable open 後 ledger path/sidecar identity 拒絕：%w", err))
+		return fail(fmt.Errorf("ledger path/sidecar identity rejected after writable open: %w", err))
 	}
 	if err := store.ValidateExistingLedger(path); err != nil {
-		return fail(fmt.Errorf("migration 後 clawctl ledger identity 拒絕：%w", err))
+		return fail(fmt.Errorf("clawctl ledger identity rejected after migration: %w", err))
 	}
 	return st, nil
 }
@@ -1284,13 +1284,13 @@ func openServeStore(path string) (*store.Store, error) {
 func openExisting(path string) (*store.Store, error) {
 	before, err := os.Lstat(path)
 	if err != nil {
-		return nil, fmt.Errorf("資料庫 %s 無法開啟：%v；檢查：systemctl --user cat clawctl-hub", path, err)
+		return nil, fmt.Errorf("database %s cannot be opened: %v; check: systemctl --user cat clawctl-hub", path, err)
 	}
 	if !before.Mode().IsRegular() {
-		return nil, fmt.Errorf("資料庫 %s 不是 non-symlink regular file；拒絕 writable open", path)
+		return nil, fmt.Errorf("database %s is not a non-symlink regular file; refusing writable open", path)
 	}
 	if err := store.ValidateExistingLedger(path); err != nil {
-		return nil, fmt.Errorf("資料庫 %s 的 clawctl ledger pre-open 驗證失敗：%w", path, err)
+		return nil, fmt.Errorf("database %s clawctl ledger pre-open validation failed: %w", path, err)
 	}
 	st, err := store.Open(path)
 	if err != nil {
@@ -1302,10 +1302,10 @@ func openExisting(path string) (*store.Store, error) {
 		if err == nil {
 			err = errors.New("path/inode changed")
 		}
-		return nil, errors.Join(fmt.Errorf("資料庫 %s 在驗證與 writable open 之間改變：%w", path, err), closeErr)
+		return nil, errors.Join(fmt.Errorf("database %s changed between validation and writable open: %w", path, err), closeErr)
 	}
 	if err := store.ValidateExistingLedger(path); err != nil {
-		return nil, errors.Join(fmt.Errorf("資料庫 %s migration 後 identity 拒絕：%w", path, err), st.Close())
+		return nil, errors.Join(fmt.Errorf("database %s identity rejected after migration: %w", path, err), st.Close())
 	}
 	return st, nil
 }

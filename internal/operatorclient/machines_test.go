@@ -931,14 +931,14 @@ func TestMachineReadClientEnforcesResponseSizeCap(t *testing.T) {
 	server := machineReadResponseServer(t, http.StatusOK, strings.Repeat(" ", maxResponseBytes+1), nil)
 	defer server.Close()
 	_, err := operatorClientForServer(t, server).Machines(t.Context())
-	if err == nil || !strings.Contains(err.Error(), "超過 1 MiB") {
+	if err == nil || !strings.Contains(err.Error(), "exceeds 1 MiB") {
 		t.Fatalf("oversized response error=%v", err)
 	}
 	detailServer := machineReadResponseServer(t, http.StatusOK,
 		strings.Repeat(" ", int(maxMachineDetailResponseBytes)+1), nil)
 	defer detailServer.Close()
 	_, err = operatorClientForServer(t, detailServer).Machine(t.Context(), "machine-1")
-	if err == nil || !strings.Contains(err.Error(), "超過 4 MiB") {
+	if err == nil || !strings.Contains(err.Error(), "exceeds 4 MiB") {
 		t.Fatalf("oversized detail response error=%v", err)
 	}
 }

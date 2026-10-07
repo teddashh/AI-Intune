@@ -43,7 +43,7 @@ func windowsObservedUnit(name string, view windowsTaskView, queryErr error) mode
 	u.Present = true
 	active, sub, ok := windowsTaskActiveState(view.State)
 	if !ok {
-		u.Reason = "scheduled task 狀態無法辨識"
+		u.Reason = "unrecognized scheduled task state"
 		return u
 	}
 	u.ActiveState = active
@@ -80,7 +80,7 @@ func parseWindowsTaskReport(stdout string) (windowsTaskView, error) {
 		}
 		key, value, ok := strings.Cut(line, "=")
 		if !ok {
-			return windowsTaskView{}, errors.New("scheduled task 回應無法解析")
+			return windowsTaskView{}, errors.New("cannot parse scheduled task response")
 		}
 		switch key {
 		case "found":
@@ -90,29 +90,29 @@ func parseWindowsTaskReport(stdout string) (windowsTaskView, error) {
 			case "0":
 				view.Found = false
 			default:
-				return windowsTaskView{}, errors.New("scheduled task 回應無法解析")
+				return windowsTaskView{}, errors.New("cannot parse scheduled task response")
 			}
 			seenFound = true
 		case "state":
 			n, err := strconv.Atoi(value)
 			if err != nil {
-				return windowsTaskView{}, errors.New("scheduled task 回應無法解析")
+				return windowsTaskView{}, errors.New("cannot parse scheduled task response")
 			}
 			view.State = n
 		case "lastrun":
 			t, err := time.Parse(time.RFC3339, value)
 			if err != nil {
-				return windowsTaskView{}, errors.New("scheduled task 回應無法解析")
+				return windowsTaskView{}, errors.New("cannot parse scheduled task response")
 			}
 			if t.Year() >= 2000 {
 				view.LastRun = t.UTC()
 			}
 		default:
-			return windowsTaskView{}, errors.New("scheduled task 回應無法解析")
+			return windowsTaskView{}, errors.New("cannot parse scheduled task response")
 		}
 	}
 	if !seenFound {
-		return windowsTaskView{}, errors.New("scheduled task 回應無法解析")
+		return windowsTaskView{}, errors.New("cannot parse scheduled task response")
 	}
 	return view, nil
 }

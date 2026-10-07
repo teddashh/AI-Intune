@@ -57,7 +57,7 @@ SELECT scope_type, scope_id, resource_kind, resource_id, desired_id, revision, s
   FROM desired_state
  ORDER BY revision DESC, rowid DESC`)
 	if err != nil {
-		return nil, fmt.Errorf("store: 讀全機隊安裝意圖: %w", err)
+		return nil, fmt.Errorf("store: read fleet install intents: %w", err)
 	}
 	defer rows.Close()
 
@@ -68,7 +68,7 @@ SELECT scope_type, scope_id, resource_kind, resource_id, desired_id, revision, s
 		var spec, created string
 		if err := rows.Scan(&it.ScopeType, &it.ScopeID, &it.ResourceKind, &it.ResourceID,
 			&it.DesiredID, &it.Revision, &spec, &created, &it.CreatedBy); err != nil {
-			return nil, fmt.Errorf("store: scan 全機隊安裝意圖: %w", err)
+			return nil, fmt.Errorf("store: scan fleet install intents: %w", err)
 		}
 		key := it.ScopeType + "\x00" + it.ScopeID + "\x00" + it.ResourceKind + "\x00" + it.ResourceID
 		if seen[key] {
@@ -93,7 +93,7 @@ SELECT scope_type, scope_id, resource_kind, resource_id, desired_id, revision, s
 		out = append(out, it)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: 讀全機隊安裝意圖: %w", err)
+		return nil, fmt.Errorf("store: read fleet install intents: %w", err)
 	}
 	return out, nil
 }
@@ -143,7 +143,7 @@ SELECT resource_kind, resource_id, spec, created_at
   FROM desired_state
  ORDER BY rowid`)
 	if err != nil {
-		return nil, fmt.Errorf("store: 讀指派過的版本: %w", err)
+		return nil, fmt.Errorf("store: read assigned versions: %w", err)
 	}
 	defer rows.Close()
 
@@ -153,7 +153,7 @@ SELECT resource_kind, resource_id, spec, created_at
 	for rows.Next() {
 		var kindColumn, idColumn, spec, created string
 		if err := rows.Scan(&kindColumn, &idColumn, &spec, &created); err != nil {
-			return nil, fmt.Errorf("store: scan 指派過的版本: %w", err)
+			return nil, fmt.Errorf("store: scan assigned versions: %w", err)
 		}
 		specKind, _, err := model.ParseJobSpec([]byte(spec))
 		if err != nil || specKind == "" || specKind == "noop" {
@@ -187,7 +187,7 @@ SELECT resource_kind, resource_id, spec, created_at
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: 讀指派過的版本: %w", err)
+		return nil, fmt.Errorf("store: read assigned versions: %w", err)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].ResourceKind != out[j].ResourceKind {

@@ -41,7 +41,7 @@ func (h *hub) handlePreviewOperatorVerificationAssignment(w http.ResponseWriter,
 	if err != nil {
 		status, code, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator verification assignment preview 失敗: %v", err)
+			log.Printf("operator verification assignment preview failed: %v", err)
 		}
 		writeErr(w, status, code, detail)
 		return
@@ -73,7 +73,7 @@ func (h *hub) handleCreateOperatorVerificationAssignment(w http.ResponseWriter, 
 	if err != nil {
 		status, code, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator verification assignment 失敗: %v", err)
+			log.Printf("operator verification assignment failed: %v", err)
 		}
 		var rejection *store.OperatorRequestError
 		if errors.As(err, &rejection) && rejection.Replayed {

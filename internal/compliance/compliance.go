@@ -118,22 +118,22 @@ func (p *Policy) Normalize() {
 // broke it.
 func (p Policy) Validate() error {
 	if p.SchemaVersion != SchemaVersion {
-		return fmt.Errorf("%w: schema_version 是 %d，這個 Hub 只認得 %d",
+		return fmt.Errorf("%w: schema_version is %d, this Hub only recognizes %d",
 			ErrInvalid, p.SchemaVersion, SchemaVersion)
 	}
 	if len(p.Rules) == 0 {
-		return fmt.Errorf("%w: 一份合規性原則至少要有一條規則", ErrInvalid)
+		return fmt.Errorf("%w: a compliance policy must have at least one rule", ErrInvalid)
 	}
 	if len(p.Rules) > MaxRules {
-		return fmt.Errorf("%w: 有 %d 條規則，上限是 %d 條", ErrInvalid, len(p.Rules), MaxRules)
+		return fmt.Errorf("%w: has %d rules, limit is %d rules", ErrInvalid, len(p.Rules), MaxRules)
 	}
 	seen := make(map[RuleKind]struct{}, len(p.Rules))
 	for _, rule := range p.Rules {
 		if _, ok := ruleOrder[rule.Kind]; !ok {
-			return fmt.Errorf("%w: 不認得規則 %q", ErrInvalid, string(rule.Kind))
+			return fmt.Errorf("%w: unknown rule %q", ErrInvalid, string(rule.Kind))
 		}
 		if _, duplicate := seen[rule.Kind]; duplicate {
-			return fmt.Errorf("%w: 規則 %s 出現兩次；同一個條件只能有一條",
+			return fmt.Errorf("%w: rule %s appears twice; only one rule allowed per condition",
 				ErrInvalid, rule.Kind)
 		}
 		seen[rule.Kind] = struct{}{}
@@ -147,7 +147,7 @@ func (p Policy) Validate() error {
 	seenAction := make(map[ActionKind]struct{}, len(actionOrder))
 	for _, action := range p.Actions {
 		if _, duplicate := seenAction[action.Kind]; duplicate {
-			return fmt.Errorf("%w: 動作 %s 出現兩次；同一個後果只能有一個寬限期",
+			return fmt.Errorf("%w: action %s appears twice; only one grace period allowed per consequence",
 				ErrInvalid, action.Kind)
 		}
 		seenAction[action.Kind] = struct{}{}
@@ -165,7 +165,7 @@ func (r Rule) validate() error {
 		if len(fields) == 0 {
 			return nil
 		}
-		return fmt.Errorf("%w: 規則 %s 不使用 %s", ErrInvalid, r.Kind, strings.Join(fields, "、"))
+		return fmt.Errorf("%w: rule %s does not use %s", ErrInvalid, r.Kind, strings.Join(fields, ", "))
 	}
 	var extra []string
 	if r.Kind != RuleCheckinMaxAge && r.MaxAgeSeconds != 0 {
@@ -183,17 +183,17 @@ func (r Rule) validate() error {
 	switch r.Kind {
 	case RuleCheckinMaxAge:
 		if r.MaxAgeSeconds < MinCheckinMaxAgeSeconds || r.MaxAgeSeconds > MaxCheckinMaxAgeSeconds {
-			return fmt.Errorf("%w: max_age_seconds 是 %d，可用範圍是 %d–%d 秒",
+			return fmt.Errorf("%w: max_age_seconds is %d, allowed range is %d-%d seconds",
 				ErrInvalid, r.MaxAgeSeconds, MinCheckinMaxAgeSeconds, MaxCheckinMaxAgeSeconds)
 		}
 	case RuleAgentVersion:
 		if _, ok := versionShaped(r.AgentVersion); !ok {
-			return fmt.Errorf("%w: agent_version 必須是 1–%d 個版本字元（英數、`.`、`-`、`_`、`+`）",
+			return fmt.Errorf("%w: agent_version must be 1-%d version characters (alphanumeric, '.', '-', '_', '+')",
 				ErrInvalid, MaxAgentVersionBytes)
 		}
 	case RuleDiskFreeMinPercent:
 		if r.MinFreePercent < MinFreePercent || r.MinFreePercent > MaxFreePercent {
-			return fmt.Errorf("%w: min_free_percent 是 %d，可用範圍是 %d–%d",
+			return fmt.Errorf("%w: min_free_percent is %d, allowed range is %d-%d",
 				ErrInvalid, r.MinFreePercent, MinFreePercent, MaxFreePercent)
 		}
 	}
@@ -222,7 +222,7 @@ func Parse(raw []byte) (Policy, error) {
 		return Policy{}, fmt.Errorf("%w: %s", ErrInvalid, firstLine(err.Error()))
 	}
 	if dec.More() {
-		return Policy{}, fmt.Errorf("%w: 檔案裡有多份 JSON 文件", ErrInvalid)
+		return Policy{}, fmt.Errorf("%w: multiple JSON documents in file", ErrInvalid)
 	}
 	(&p).Normalize()
 	if err := p.Validate(); err != nil {

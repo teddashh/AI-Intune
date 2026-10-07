@@ -213,7 +213,7 @@ func (h *hub) handleOperatorTerminalSocket(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err != nil {
-		log.Printf("無法讀取終端工作階段：連線已拒絕；請修復資料庫：%v", err)
+		log.Printf("cannot read terminal session: connection refused; please repair the database: %v", err)
 		http.Error(w, operatorTerminalOpenFailed, http.StatusInternalServerError)
 		return
 	}
@@ -260,7 +260,7 @@ func (h *hub) handleOperatorTerminalSocket(w http.ResponseWriter, r *http.Reques
 	if _, err := h.store.AgentSessionForOperator(row.MachineID, row.SessionID, row.OperatorTailnetUserID); err != nil {
 		end := operatorTerminalAlreadyClosed
 		if !errors.Is(err, store.ErrNotFound) {
-			log.Printf("無法確認終端工作階段是否仍開啟：連線已關閉；請修復資料庫：%v", err)
+			log.Printf("cannot verify whether terminal session remains open: connection closed; please repair the database: %v", err)
 			end = operatorTerminalMachineError
 		}
 		h.finishOperatorTerminalNow(session, conn, row.SessionID, end, 0, true)
@@ -349,7 +349,7 @@ func (h *hub) persistOperatorTerminalClose(sessionID string, end operatorTermina
 		return
 	}
 	if _, err := h.store.CloseAgentSessionsByID([]string{sessionID}, reason); err != nil {
-		log.Printf("終端工作階段已關閉，但關閉狀態未能寫入資料庫；請修復資料庫：%v", err)
+		log.Printf("terminal session closed, but closure state could not be written to database; please repair the database: %v", err)
 	}
 }
 

@@ -144,7 +144,7 @@ func assertCatalogDependencyRejection(t *testing.T, f jobsFixture, deps machineC
 		if action == "evidence" &&
 			(!strings.Contains(text, "code="+terminalSafe(string(deploy.DependencyFailed))) ||
 				!strings.Contains(text, "rejection detail: "+terminalSafe(detail)) ||
-				!strings.Contains(text, `producer="hub_scheduler"/"hub"；role="scheduler"；authority="dependency_graph"；provenance_recorded=true`)) {
+				!strings.Contains(text, `producer="hub_scheduler"/"hub"; role="scheduler"; authority="dependency_graph"; provenance_recorded=true`)) {
 			t.Fatalf("evidence text missing rejection cause or scheduler attribution")
 		}
 	}

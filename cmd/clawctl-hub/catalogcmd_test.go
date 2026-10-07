@@ -181,7 +181,7 @@ func TestCatalogCLIRequiresExactConfirmations(t *testing.T) {
 	var out, errOut bytes.Buffer
 	err := runCatalogCommandWithDeps(t.Context(), []string{"package", "add", "--artifact", node.SHA256,
 		"--confirm", "node-runtime@wrong", "--reason", "approve runtime"}, &out, &errOut, deps)
-	if err == nil || !strings.Contains(err.Error(), "--confirm 必須是 node-runtime@24.21.0") {
+	if err == nil || !strings.Contains(err.Error(), "--confirm must be node-runtime@24.21.0") {
 		t.Fatalf("confirmation err=%v", err)
 	}
 	stateRoot := os.Getenv("XDG_STATE_HOME")

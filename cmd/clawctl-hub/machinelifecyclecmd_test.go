@@ -112,7 +112,7 @@ func TestMachineLifecycleCLIHTTPReadPreviewApplyAndExplicitRetry(t *testing.T) {
 	if err := runMachineCommandWithDeps(t.Context(), applyArgs, &applyOut, &applyErr, deps); err != nil {
 		t.Fatalf("HTTP lifecycle apply: %v; stderr=%s", err, applyErr.String())
 	}
-	if !strings.Contains(applyErr.String(), "terminal sessions currently open: 1；retiring ends any still open when applied.") {
+	if !strings.Contains(applyErr.String(), "terminal sessions currently open: 1; retiring ends any still open when applied.") {
 		t.Fatalf("HTTP lifecycle apply omitted terminal-session notice: %q", applyErr.String())
 	}
 	for _, want := range []string{"HTTP operator API", "active → retired", "revision=1", "ETag=", "changed=true", "no-op=false", "replayed=false"} {
@@ -524,7 +524,7 @@ func TestMachineLifecycleCLIReplayedRejectionReadsAuthoritativeCurrent(t *testin
 	err = runMachineCommandWithDeps(t.Context(), retryArgs, &replayOut, &replayErr, deps)
 	var replayAPI *operatorclient.APIError
 	if !errors.As(err, &replayAPI) || replayAPI.Code != store.OperatorCodeConfirmationMismatch || !replayAPI.Replayed ||
-		!strings.Contains(err.Error(), "這是原判決") {
+		!strings.Contains(err.Error(), "this is the original verdict") {
 		t.Fatalf("replayed lifecycle rejection=%T %v API=%+v", err, err, replayAPI)
 	}
 	if replayOut.Len() != 0 || !strings.Contains(replayErr.String(), "HTTP operator API authoritative current:") ||
@@ -551,20 +551,20 @@ func TestMachineLifecycleCLIInputValidationStopsBeforeTransport(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "missing machine", args: []string{"lifecycle"}, want: "--machine 必填"},
-		{name: "bad desired state", args: []string{"lifecycle", "--machine", "id", "--set", "deleted"}, want: "active 或 retired"},
-		{name: "read with reason", args: []string{"lifecycle", "--machine", "id", "--reason", "why"}, want: "只讀模式不接受 --reason"},
-		{name: "read with preview", args: []string{"lifecycle", "--machine", "id", "--preview"}, want: "只讀模式不接受 --preview"},
-		{name: "apply missing confirmation", args: []string{"lifecycle", "--machine", "id", "--set", "retired", "--reason", "why"}, want: "--confirm-name 必填"},
-		{name: "apply missing reason", args: []string{"lifecycle", "--machine", "id", "--set", "retired", "--confirm-name", "name"}, want: "--reason 必填"},
-		{name: "preview with confirmation", args: []string{"lifecycle", "--machine", "id", "--set", "retired", "--preview", "--confirm-name", "x"}, want: "--preview 不接受"},
-		{name: "preview with reason", args: []string{"lifecycle", "--machine", "id", "--set", "retired", "--preview", "--reason", "y"}, want: "--preview 不接受"},
-		{name: "retry key only", args: []string{"lifecycle", "--machine", "id", "--set", "retired", "--idempotency-key", "key"}, want: "retry 必須同時提供"},
-		{name: "retry digest only", args: []string{"lifecycle", "--machine", "id", "--set", "retired", "--preview-digest", "sha256:x"}, want: "retry 必須同時提供"},
-		{name: "preview with retry coordinates", args: []string{"lifecycle", "--machine", "id", "--set", "retired", "--preview", "--idempotency-key", "key", "--expected-revision", "0", "--preview-digest", "sha256:x"}, want: "--preview 不接受"},
-		{name: "mixed transport", args: []string{"lifecycle", "--hub-url", "http://100.64.0.9:8787", "--db", "/tmp/hub.db", "--machine", "id"}, want: "不可同時明示"},
-		{name: "empty explicit URL", args: []string{"lifecycle", "--hub-url=", "--machine", "id"}, want: "不可為空"},
-		{name: "empty explicit DB", args: []string{"lifecycle", "--db=", "--machine", "id"}, want: "不可為空"},
+		{name: "missing machine", args: []string{"lifecycle"}, want: "--machine is required"},
+		{name: "bad desired state", args: []string{"lifecycle", "--machine", "id", "--set", "deleted"}, want: "active or retired"},
+		{name: "read with reason", args: []string{"lifecycle", "--machine", "id", "--reason", "why"}, want: "read-only mode does not accept --reason"},
+		{name: "read with preview", args: []string{"lifecycle", "--machine", "id", "--preview"}, want: "read-only mode does not accept --preview"},
+		{name: "apply missing confirmation", args: []string{"lifecycle", "--machine", "id", "--set", "retired", "--reason", "why"}, want: "--confirm-name is required"},
+		{name: "apply missing reason", args: []string{"lifecycle", "--machine", "id", "--set", "retired", "--confirm-name", "name"}, want: "--reason is required"},
+		{name: "preview with confirmation", args: []string{"lifecycle", "--machine", "id", "--set", "retired", "--preview", "--confirm-name", "x"}, want: "--preview does not accept"},
+		{name: "preview with reason", args: []string{"lifecycle", "--machine", "id", "--set", "retired", "--preview", "--reason", "y"}, want: "--preview does not accept"},
+		{name: "retry key only", args: []string{"lifecycle", "--machine", "id", "--set", "retired", "--idempotency-key", "key"}, want: "retry must provide"},
+		{name: "retry digest only", args: []string{"lifecycle", "--machine", "id", "--set", "retired", "--preview-digest", "sha256:x"}, want: "retry must provide"},
+		{name: "preview with retry coordinates", args: []string{"lifecycle", "--machine", "id", "--set", "retired", "--preview", "--idempotency-key", "key", "--expected-revision", "0", "--preview-digest", "sha256:x"}, want: "--preview does not accept"},
+		{name: "mixed transport", args: []string{"lifecycle", "--hub-url", "http://100.64.0.9:8787", "--db", "/tmp/hub.db", "--machine", "id"}, want: "cannot both be specified"},
+		{name: "empty explicit URL", args: []string{"lifecycle", "--hub-url=", "--machine", "id"}, want: "cannot be empty"},
+		{name: "empty explicit DB", args: []string{"lifecycle", "--db=", "--machine", "id"}, want: "cannot be empty"},
 		{name: "positional", args: []string{"lifecycle", "--machine", "id", "extra"}, want: "positional arguments"},
 	}
 	for _, test := range tests {
@@ -617,8 +617,8 @@ func TestMachineLifecycleCLIRejectsInvalidRetryCoordinatesBeforeDiscoveryOrDBFen
 			"lifecycle", "--db", "/must/not/be/inspected.sqlite", "--machine", "machine-id", "--set", "retired",
 			"--confirm-name", "machine", "--reason", "input validation", "--expected-revision=-1",
 		}, want: "expected-revision"},
-		{name: "empty key", args: retryArgs("", "0", validDigest), want: "不可為空"},
-		{name: "empty digest", args: retryArgs("retry-key", "0", ""), want: "不可為空"},
+		{name: "empty key", args: retryArgs("", "0", validDigest), want: "cannot be empty"},
+		{name: "empty digest", args: retryArgs("retry-key", "0", ""), want: "cannot be empty"},
 		{name: "oversized key", args: retryArgs(strings.Repeat("k", 201), "0", validDigest), want: "200"},
 		{name: "oversized digest", args: retryArgs("retry-key", "0", "sha256:"+strings.Repeat("a", 65)), want: "sha256"},
 		{name: "malformed digest", args: retryArgs("retry-key", "0", "sha256:not-hex"), want: "sha256"},
@@ -658,7 +658,7 @@ func TestMachineLifecycleCLIHelpNamesSafeModesAndRetryContract(t *testing.T) {
 		t.Fatalf("lifecycle help error=%v", err)
 	}
 	for _, want := range []string{
-		"--hub-url", "operator.json", "--db", "transport：HTTP", "active|retired",
+		"--hub-url", "operator.json", "--db", "transport: HTTP", "active|retired",
 		"--preview", "--reason", "--confirm-name", "--idempotency-key", "--expected-revision", "--preview-digest",
 	} {
 		if !strings.Contains(errOut.String(), want) {
@@ -728,7 +728,7 @@ func TestMachineLifecycleCLIExplicitDirectDBIsFencedAndAudited(t *testing.T) {
 		t.Fatalf("direct lifecycle output=%q", out.String())
 	}
 	key, revision, digest := lifecycleRetryCoordinates(t, errOut.String())
-	if !strings.Contains(errOut.String(), "terminal sessions currently open: 1；retiring ends any still open when applied.") {
+	if !strings.Contains(errOut.String(), "terminal sessions currently open: 1; retiring ends any still open when applied.") {
 		t.Fatalf("direct lifecycle apply omitted terminal-session notice: %q", errOut.String())
 	}
 	if revision != "0" {
@@ -850,9 +850,9 @@ func TestLegacyRetireAliasRejectsOverrideAndOldPositionalBeforeDB(t *testing.T) 
 		args []string
 		want string
 	}{
-		{name: "desired state override", args: []string{"retire", "--set=active", "--machine", "id", "--confirm-name", "name", "--reason", "why"}, want: "retire alias 不接受 --set"},
-		{name: "single dash desired state override", args: []string{"retire", "-set=active", "--machine", "id", "--confirm-name", "name", "--reason", "why"}, want: "retire alias 不接受 --set"},
-		{name: "single dash split desired state override", args: []string{"retire", "-set", "active", "--machine", "id", "--confirm-name", "name", "--reason", "why"}, want: "retire alias 不接受 --set"},
+		{name: "desired state override", args: []string{"retire", "--set=active", "--machine", "id", "--confirm-name", "name", "--reason", "why"}, want: "retire alias does not accept --set"},
+		{name: "single dash desired state override", args: []string{"retire", "-set=active", "--machine", "id", "--confirm-name", "name", "--reason", "why"}, want: "retire alias does not accept --set"},
+		{name: "single dash split desired state override", args: []string{"retire", "-set", "active", "--machine", "id", "--confirm-name", "name", "--reason", "why"}, want: "retire alias does not accept --set"},
 		{name: "old positional", args: []string{"retire", "machine-id"}, want: "positional arguments"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

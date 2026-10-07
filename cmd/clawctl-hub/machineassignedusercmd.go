@@ -17,35 +17,35 @@ func runMachineAssignedUserSubcommand(ctx context.Context, argv []string, out, e
 	fs := flag.NewFlagSet("machine assigned-user", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub machine assigned-user --machine 機器識別碼 --user 使用者識別碼或none --confirm-name 機器名稱 [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub machine assigned-user --machine MACHINE_ID --user USER_ID_OR_NONE --confirm-name MACHINE_NAME [--hub-url URL | --db PATH]")
 		fs.PrintDefaults()
 	}
-	machine := fs.String("machine", "", "機器識別碼；指定資料庫時也可使用名稱")
-	user := fs.String("user", "", "Tailnet 使用者識別碼；none 取消指派")
-	confirm := fs.String("confirm-name", "", "輸入機器名稱以確認指派")
-	key := fs.String("idempotency-key", "", "重試時使用原請求金鑰")
-	revision := fs.Int64("expected-revision", 0, "重試時使用原指派版本；與請求金鑰一起提供")
-	hubURL := fs.String("hub-url", "", "Hub 網址")
-	db := fs.String("db", "", "已停止 Hub 的資料庫路徑")
+	machine := fs.String("machine", "", "machine ID; name may also be used when specifying database")
+	user := fs.String("user", "", "Tailnet user ID; none to unassign")
+	confirm := fs.String("confirm-name", "", "machine name to confirm assignment")
+	key := fs.String("idempotency-key", "", "original request key when retrying")
+	revision := fs.Int64("expected-revision", 0, "original assignment revision when retrying; provide with request key")
+	hubURL := fs.String("hub-url", "", "Hub URL")
+	db := fs.String("db", "", "database path of stopped Hub")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
 	if fs.NArg() != 0 {
-		return errors.New("不接受額外參數")
+		return errors.New("positional arguments not accepted")
 	}
 	if strings.TrimSpace(*machine) == "" || strings.TrimSpace(*user) == "" || strings.TrimSpace(*confirm) == "" {
-		return errors.New("請提供 --machine、--user 與 --confirm-name")
+		return errors.New("--machine, --user, and --confirm-name are required")
 	}
 	if seen["hub-url"] && seen["db"] {
-		return errors.New("--hub-url 與 --db 不可同時提供")
+		return errors.New("--hub-url and --db cannot be provided together")
 	}
 	if seen["idempotency-key"] != seen["expected-revision"] || (seen["idempotency-key"] && strings.TrimSpace(*key) == "") {
-		return errors.New("請一起提供非空的 --idempotency-key 與 --expected-revision")
+		return errors.New("non-empty --idempotency-key and --expected-revision must be provided together")
 	}
 	if (seen["db"] && strings.TrimSpace(*db) == "") || (seen["hub-url"] && strings.TrimSpace(*hubURL) == "") {
-		return errors.New("網址與資料庫路徑不可為空")
+		return errors.New("URL and database path cannot be empty")
 	}
 	inputs := machineAssignedUserInputs{Machine: *machine, UserID: *user, ConfirmName: *confirm, IdempotencyKey: *key}
 	if seen["expected-revision"] {
@@ -91,7 +91,7 @@ func runMachineAssignedUser(ctx context.Context, st *store.Store, source operato
 		Actor: operator.Actor{SourceAddr: "local-cli", WhoUnavailable: "direct-db-cli", UserAgent: "clawctl-hub machine assigned-user", SourceKind: operator.SourceKindDirectDBCLI},
 	})
 	if err != nil {
-		return fmt.Errorf("指派失敗（請求金鑰=%q，預期版本=%d）：%w", key, expected, assignedUserCLIError(err))
+		return fmt.Errorf("assignment failed (request key=%q, expected revision=%d): %w", key, expected, assignedUserCLIError(err))
 	}
 	return writeAssignedUserCLI(out, result.DisplayName, result.UserID, result.UserLogin, result.Revision, key, result.Replayed)
 }
@@ -111,7 +111,7 @@ func runMachineAssignedUserHTTP(ctx context.Context, client *operatorclient.Clie
 	}
 	result, err := client.PutMachineAssignedUser(ctx, inputs.Machine, key, operatorclient.MachineAssignedUserRequest{UserID: inputs.UserID, ExpectedRevision: expected, ConfirmDisplayName: inputs.ConfirmName})
 	if err != nil {
-		return fmt.Errorf("指派失敗（請求金鑰=%q，預期版本=%d）：%w", key, expected, assignedUserCLIError(err))
+		return fmt.Errorf("assignment failed (request key=%q, expected revision=%d): %w", key, expected, assignedUserCLIError(err))
 	}
 	return writeAssignedUserCLI(out, result.DisplayName, result.UserID, result.UserLogin, result.Revision, key, result.Replayed)
 }
@@ -123,15 +123,15 @@ func assignedUserCLILabel(id, login string) string {
 	if id != "" {
 		return terminalSafe(id)
 	}
-	return "未指派"
+	return "unassigned"
 }
 
 func writeAssignedUserCLI(out io.Writer, name, id, login string, revision int64, key string, replayed bool) error {
 	replay := ""
 	if replayed {
-		replay = "；已重放"
+		replay = "; replayed"
 	}
-	_, err := fmt.Fprintf(out, "%s：指派使用者 %s；版本=%d；請求金鑰=%s%s\n", terminalSafe(name), assignedUserCLILabel(id, login), revision, terminalSafe(key), replay)
+	_, err := fmt.Fprintf(out, "%s: assigned user %s; revision=%d; request key=%s%s\n", terminalSafe(name), assignedUserCLILabel(id, login), revision, terminalSafe(key), replay)
 	return err
 }
 

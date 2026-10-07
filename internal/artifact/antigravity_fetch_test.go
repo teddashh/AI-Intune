@@ -244,7 +244,7 @@ func TestAntigravityPreviewRefusesUpstreamMetadata(t *testing.T) {
 				o.setAll(func(doc *agyTestManifest) { doc.version = "1.2.15" })
 			},
 			want:     ErrUpstreamVersionUnavailable,
-			sentence: "上游目前只提供 Antigravity 1.2.15；改用這個版號重新 Preview。",
+			sentence: "upstream currently only provides Antigravity 1.2.15; retry Preview with this version",
 		},
 		{
 			name: "versions disagree",

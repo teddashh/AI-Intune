@@ -90,10 +90,10 @@ func (c *Client) ComplianceBoard(ctx context.Context) (operator.ComplianceBoardR
 func (c *Client) PreviewCompliancePolicy(ctx context.Context, body CompliancePolicyPreviewRequest) (operator.CompliancePolicyPreviewResult, error) {
 	var out operator.CompliancePolicyPreviewResult
 	if strings.TrimSpace(body.PolicyID) != body.PolicyID || body.PolicyID == "" {
-		return out, errors.New("operator client: compliance policy id 不可空白或含前後空白")
+		return out, errors.New("operator client: compliance policy id cannot be empty or have leading/trailing whitespace")
 	}
 	if len(body.Rules) == 0 {
-		return out, errors.New("operator client: compliance policy 至少要有一條規則")
+		return out, errors.New("operator client: compliance policy must have at least one rule")
 	}
 	response, err := c.postSettingJSON(ctx, "/v1/operator/compliance-policies/preview", "", body)
 	if err != nil {
@@ -111,15 +111,15 @@ func (c *Client) PreviewCompliancePolicy(ctx context.Context, body CompliancePol
 	if out.PolicyID != body.PolicyID || !validSHA256Digest(out.Digest) ||
 		!validSHA256Digest(out.PreviewDigest) || out.CurrentRev < 0 ||
 		out.Unchanged != (out.NextRev == out.CurrentRev) {
-		return out, errors.New("operator client: compliance policy preview identity 不一致")
+		return out, errors.New("operator client: compliance policy preview identity is inconsistent")
 	}
 	// 規則的說明文字跟規則本體必須是同一份，否則畫面說的與送出的會是兩件事。
 	if len(out.Rules) != len(out.Policy.Rules) {
-		return out, errors.New("operator client: compliance policy preview 的規則說明與規則不符")
+		return out, errors.New("operator client: compliance policy preview rule description does not match rule")
 	}
 	for i, rule := range out.Policy.Rules {
 		if out.Rules[i].Kind != rule.Kind || out.Rules[i].Label == "" {
-			return out, errors.New("operator client: compliance policy preview 的規則說明與規則不符")
+			return out, errors.New("operator client: compliance policy preview rule description does not match rule")
 		}
 	}
 	if err := validateComplianceActionDescriptions(out.Policy, out.Actions); err != nil {
@@ -134,12 +134,12 @@ func (c *Client) PreviewCompliancePolicy(ctx context.Context, body CompliancePol
 // 動作必須是同一件事。
 func validateComplianceActionDescriptions(p compliance.Policy, described []operator.ComplianceAction) error {
 	if len(described) != len(p.Actions) {
-		return errors.New("operator client: compliance preview 的動作說明與動作不符")
+		return errors.New("operator client: compliance preview action description does not match action")
 	}
 	for i, action := range p.Actions {
 		if described[i].Kind != action.Kind || described[i].Label == "" ||
 			described[i].Effect == "" || described[i].Grace == "" {
-			return errors.New("operator client: compliance preview 的動作說明與動作不符")
+			return errors.New("operator client: compliance preview action description does not match action")
 		}
 	}
 	return nil
@@ -150,7 +150,7 @@ func (c *Client) PublishCompliancePolicy(ctx context.Context, key string, body C
 	if !validSettingIdempotencyKey(key) || body.ExpectedRevision == nil || *body.ExpectedRevision < 0 ||
 		!validSHA256Digest(body.PreviewDigest) || body.ConfirmPolicyID == "" ||
 		strings.TrimSpace(body.Reason) != body.Reason || body.Reason == "" || len(body.Rules) == 0 {
-		return out, errors.New("operator client: compliance policy publish coordinates 不合法")
+		return out, errors.New("operator client: compliance policy publish coordinates are invalid")
 	}
 	response, err := c.postSettingJSON(ctx, "/v1/operator/compliance-policies", key, body)
 	if err != nil {
@@ -169,13 +169,13 @@ func (c *Client) PublishCompliancePolicy(ctx context.Context, key string, body C
 	// A fresh decision is 201; a replay or an unchanged republish is 200. Any
 	// other pairing means the two sides disagree about what just happened.
 	if fresh := response.status == http.StatusCreated; fresh == (out.Replayed || out.Unchanged) {
-		return out, fmt.Errorf("operator client: compliance policy publish HTTP %d 與結果不符", response.status)
+		return out, fmt.Errorf("operator client: compliance policy publish HTTP %d does not match result", response.status)
 	}
 	if out.PolicyID != body.PolicyID || out.Revision <= 0 || !validSHA256Digest(out.Digest) {
-		return out, errors.New("operator client: compliance policy publish identity 不一致")
+		return out, errors.New("operator client: compliance policy publish identity is inconsistent")
 	}
 	if err := out.Policy.Validate(); err != nil {
-		return out, fmt.Errorf("operator client: compliance policy publish 回傳了不合法的規則：%w", err)
+		return out, fmt.Errorf("operator client: compliance policy publish returned an invalid rule: %w", err)
 	}
 	return out, nil
 }
@@ -183,7 +183,7 @@ func (c *Client) PublishCompliancePolicy(ctx context.Context, key string, body C
 func (c *Client) PreviewComplianceAssignment(ctx context.Context, body ComplianceAssignmentPreviewRequest) (operator.ComplianceAssignmentPreviewResult, error) {
 	var out operator.ComplianceAssignmentPreviewResult
 	if body.Revision <= 0 || body.ScopeID == "" || body.PolicyID == "" {
-		return out, errors.New("operator client: compliance assignment preview coordinates 不合法")
+		return out, errors.New("operator client: compliance assignment preview coordinates are invalid")
 	}
 	response, err := c.postSettingJSON(ctx, "/v1/operator/compliance-assignments/preview", "", body)
 	if err != nil {
@@ -200,7 +200,7 @@ func (c *Client) PreviewComplianceAssignment(ctx context.Context, body Complianc
 	}
 	if string(out.Scope) != body.Scope || out.ScopeID != body.ScopeID || out.Revision != body.Revision ||
 		!validSHA256Digest(out.Digest) || !validSHA256Digest(out.PreviewDigest) {
-		return out, errors.New("operator client: compliance assignment preview identity 不一致")
+		return out, errors.New("operator client: compliance assignment preview identity is inconsistent")
 	}
 	if err := validateComplianceActionDescriptions(out.Policy, out.Actions); err != nil {
 		return out, err
@@ -213,7 +213,7 @@ func (c *Client) AssignCompliancePolicy(ctx context.Context, key string, body Co
 	if !validSettingIdempotencyKey(key) || !validSHA256Digest(body.PreviewDigest) ||
 		body.ConfirmScopeID == "" || body.Revision <= 0 ||
 		strings.TrimSpace(body.Reason) != body.Reason || body.Reason == "" {
-		return out, errors.New("operator client: compliance assignment coordinates 不合法")
+		return out, errors.New("operator client: compliance assignment coordinates are invalid")
 	}
 	response, err := c.postSettingJSON(ctx, "/v1/operator/compliance-assignments", key, body)
 	if err != nil {
@@ -230,12 +230,12 @@ func (c *Client) AssignCompliancePolicy(ctx context.Context, key string, body Co
 		return out, errors.New("operator client: compliance assignment replay evidence mismatch")
 	}
 	if fresh := response.status == http.StatusCreated; fresh == (out.Replayed || out.Unchanged) {
-		return out, fmt.Errorf("operator client: compliance assignment HTTP %d 與結果不符", response.status)
+		return out, fmt.Errorf("operator client: compliance assignment HTTP %d does not match result", response.status)
 	}
 	if string(out.Scope) != body.Scope || out.ScopeID != body.ScopeID ||
 		out.PolicyID != body.PolicyID || out.PolicyRev != body.Revision ||
 		out.AssignmentID == "" || !validSHA256Digest(out.Digest) {
-		return out, errors.New("operator client: compliance assignment identity 不一致")
+		return out, errors.New("operator client: compliance assignment identity is inconsistent")
 	}
 	return out, nil
 }
@@ -259,15 +259,15 @@ func validateComplianceBoard(board operator.ComplianceBoardResult) error {
 	blocked := 0
 	for _, machine := range board.Machines {
 		if machine.MachineID == "" || machine.VerdictLabel == "" {
-			return errors.New("operator client: compliance board row 沒有身分")
+			return errors.New("operator client: compliance board row lacks identity")
 		}
 		if (machine.Source == compliance.SourceNone) != (machine.PolicyID == "") {
-			return errors.New("operator client: compliance board row 的來源與原則不一致")
+			return errors.New("operator client: compliance board row source does not match policy")
 		}
 		results := make([]compliance.RuleResult, 0, len(machine.Results))
 		for _, r := range machine.Results {
 			if r.Label == "" || r.Detail == "" {
-				return errors.New("operator client: compliance board 的規則判決沒有說明")
+				return errors.New("operator client: compliance board rule verdict lacks description")
 			}
 			results = append(results, compliance.RuleResult{Kind: r.Kind, Outcome: r.Outcome, Detail: r.Detail})
 		}
@@ -276,22 +276,22 @@ func validateComplianceBoard(board operator.ComplianceBoardResult) error {
 		want := compliance.Judge(machine.Source != compliance.SourceNone,
 			machine.ReportedAt != nil, results)
 		if want != machine.Verdict {
-			return fmt.Errorf("operator client: compliance board 的 %s 判決與它自己列的證據不符",
+			return fmt.Errorf("operator client: compliance board %s verdict does not match its own evidence",
 				machine.MachineID)
 		}
 		counted[machine.Verdict]++
 		// 動作的狀態也是判決的函數：一台不是「不符合」的機器不可能有動作生效中。
 		for _, action := range machine.Actions {
 			if action.Label == "" || action.StateLabel == "" {
-				return errors.New("operator client: compliance board 的動作沒有說明")
+				return errors.New("operator client: compliance board action lacks description")
 			}
 			if action.State != compliance.ActionStateNotTriggered &&
 				machine.Verdict != compliance.VerdictNoncompliant {
-				return fmt.Errorf("operator client: %s 不是不符合，卻有動作被觸發",
+				return fmt.Errorf("operator client: %s is not non-compliant, but action was triggered",
 					machine.MachineID)
 			}
 			if (action.State == compliance.ActionStateInGrace) != (action.DueAt != nil) {
-				return fmt.Errorf("operator client: %s 的動作狀態與生效時間不一致",
+				return fmt.Errorf("operator client: %s action state is inconsistent with effective time",
 					machine.MachineID)
 			}
 		}
@@ -300,20 +300,20 @@ func validateComplianceBoard(board operator.ComplianceBoardResult) error {
 		}
 	}
 	if blocked != board.Blocked {
-		return errors.New("operator client: compliance board 的停發計數與列不符")
+		return errors.New("operator client: compliance board dispatch blocked count does not match rows")
 	}
 	for verdict, n := range board.Counts {
 		if counted[verdict] != n {
-			return fmt.Errorf("operator client: compliance board 的 %s 計數與列不符", verdict)
+			return fmt.Errorf("operator client: compliance board %s count does not match rows", verdict)
 		}
 	}
 	for verdict := range counted {
 		if _, ok := board.Counts[verdict]; !ok {
-			return fmt.Errorf("operator client: compliance board 沒有回報 %s 的計數", verdict)
+			return fmt.Errorf("operator client: compliance board did not report count for %s", verdict)
 		}
 	}
 	if board.EvaluatedAt.IsZero() {
-		return errors.New("operator client: compliance board 沒有說判決是什麼時候算的")
+		return errors.New("operator client: compliance board did not state when verdict was evaluated")
 	}
 	return nil
 }

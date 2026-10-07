@@ -105,18 +105,18 @@ func (e hermesExecutor) Run(ctx context.Context, job model.JobResponse) ([]model
 
 	root := filepath.Join(d.home, ".local", "share", "clawctl", "hermes")
 	if err := d.requireWritableAncestor(root); err != nil {
-		return nil, rejectPrecondition("Hermes 目錄不可寫：" + err.Error())
+		return nil, rejectPrecondition("Hermes directory is not writable: " + err.Error())
 	}
 	if err := os.MkdirAll(d.fsPath(filepath.Join(root, "data")), 0o700); err != nil {
-		return []model.JobVerificationRequest{e.failure(d, "hermes-stage", "建立 Hermes data", err)}, nil
+		return []model.JobVerificationRequest{e.failure(d, "hermes-stage", "create Hermes data", err)}, nil
 	}
 	staging := filepath.Join(root, ".staging-"+safeJobID(job.JobID))
 	if err := os.RemoveAll(d.fsPath(staging)); err != nil {
-		return []model.JobVerificationRequest{e.failure(d, "hermes-stage", "清理 Hermes staging", err)}, nil
+		return []model.JobVerificationRequest{e.failure(d, "hermes-stage", "clean Hermes staging", err)}, nil
 	}
 	defer os.RemoveAll(d.fsPath(staging))
 	if err := os.Mkdir(d.fsPath(staging), 0o700); err != nil {
-		return []model.JobVerificationRequest{e.failure(d, "hermes-stage", "建立 Hermes staging", err)}, nil
+		return []model.JobVerificationRequest{e.failure(d, "hermes-stage", "create Hermes staging", err)}, nil
 	}
 	bundle := filepath.Join(staging, "hermes-oci.tgz")
 	actualDigest, actualSize, err := d.downloadArtifactAtMost(ctx, d.hubURL+spec.Artifact.URL,
@@ -124,38 +124,38 @@ func (e hermesExecutor) Run(ctx context.Context, job model.JobResponse) ([]model
 	if err != nil {
 		var sizeErr *artifactDownloadSizeError
 		if errors.As(err, &sizeErr) {
-			return nil, &rejectError{Code: deploy.ArtifactHashMismatch, Detail: "Hermes artifact 超過宣告 size"}
+			return nil, &rejectError{Code: deploy.ArtifactHashMismatch, Detail: "Hermes artifact exceeds declared size"}
 		}
-		return []model.JobVerificationRequest{e.failure(d, "hermes-stage", "下載 Hermes OCI bundle", err)}, nil
+		return []model.JobVerificationRequest{e.failure(d, "hermes-stage", "download Hermes OCI bundle", err)}, nil
 	}
 	if actualDigest != spec.Artifact.SHA256 || actualSize != spec.Artifact.Size {
 		return nil, &rejectError{Code: deploy.ArtifactHashMismatch,
-			Detail: fmt.Sprintf("Hermes artifact 期望 sha256=%s size=%d，實得 sha256=%s size=%d",
+			Detail: fmt.Sprintf("Hermes artifact expected sha256=%s size=%d; got sha256=%s size=%d",
 				shortDigest(spec.Artifact.SHA256), spec.Artifact.Size, shortDigest(actualDigest), actualSize)}
 	}
 	manifestDigest, err := validateHermesOCIBundle(d.fsPath(bundle), spec.TargetOS, spec.TargetArch, spec.ImageReference)
 	if err != nil {
-		return []model.JobVerificationRequest{e.failure(d, "hermes-stage", "驗證 Hermes OCI bundle", err)}, nil
+		return []model.JobVerificationRequest{e.failure(d, "hermes-stage", "verify Hermes OCI bundle", err)}, nil
 	}
 	loadUnit := "clawctl-hermes-load-" + safeJobID(job.JobID)
 	stdout, stderr, err := e.runAsUserService(ctx, d, loadUnit, e.podman(), "load", "--input", d.fsPath(bundle))
 	if err != nil {
-		failure := e.failure(d, "hermes-load", "載入 Hermes image", err)
+		failure := e.failure(d, "hermes-load", "load Hermes image", err)
 		failure.StdoutExcerpt = excerpt(stdout, maxExecOutput)
 		failure.StderrExcerpt = excerpt(errorText(stderr, err), maxExecOutput)
 		return []model.JobVerificationRequest{failure}, nil
 	}
 	if _, stderr, err := e.runAsUserService(ctx, d, "clawctl-hermes-image-"+safeJobID(job.JobID),
 		e.podman(), "image", "exists", spec.ImageReference); err != nil {
-		return []model.JobVerificationRequest{e.failure(d, "hermes-load", "確認 Hermes image", errors.New(errorText(stderr, err)))}, nil
+		return []model.JobVerificationRequest{e.failure(d, "hermes-load", "verify Hermes image", errors.New(errorText(stderr, err)))}, nil
 	}
 
 	snapshot, err := e.snapshot(ctx, d)
 	if err != nil {
-		return nil, rejectPrecondition("Hermes service state 不合法：" + err.Error())
+		return nil, rejectPrecondition("invalid Hermes service state: " + err.Error())
 	}
 	if err := e.activate(ctx, d, spec, snapshot); err != nil {
-		failed := e.failure(d, "hermes-activate", "切換 Hermes service", err)
+		failed := e.failure(d, "hermes-activate", "switch Hermes service", err)
 		rollback := e.rollbackWithOwnBudget(ctx, d, job, snapshot)
 		return []model.JobVerificationRequest{failed, rollback}, nil
 	}
@@ -173,38 +173,38 @@ func (e hermesExecutor) gate(job model.JobResponse, d execDeps) (model.HermesSpe
 	decoder := json.NewDecoder(bytes.NewReader(job.Spec))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&spec); err != nil {
-		return spec, rejectPrecondition("Hermes spec 不是合法 JSON：" + err.Error())
+		return spec, rejectPrecondition("Hermes spec is not valid JSON: " + err.Error())
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return spec, rejectPrecondition("Hermes spec 含有尾隨資料")
+		return spec, rejectPrecondition("Hermes spec contains trailing data")
 	}
 	if job.ResourceKind != agentadapter.ExecutorKindHermes || spec.Kind != agentadapter.ExecutorKindHermes ||
 		job.ResourceID != "hermes-agent" || !validHermesExactVersion(spec.Version) {
-		return spec, rejectPrecondition("Hermes identity 不合法")
+		return spec, rejectPrecondition("invalid Hermes identity")
 	}
 	if spec.TargetOS != e.targetOS || spec.TargetArch != e.targetArch || spec.TargetOS != "linux" ||
 		(spec.TargetArch != "amd64" && spec.TargetArch != "arm64") {
-		return spec, rejectPrecondition("Hermes target 與 agent 平台不一致")
+		return spec, rejectPrecondition("Hermes target does not match agent platform")
 	}
 	if spec.BundleLayout != model.HermesOCIBundleLayoutV1 || spec.Artifact == nil ||
 		spec.ImageReference != "docker.io/nousresearch/hermes-agent:v"+spec.Version ||
 		!validHermesDigest(spec.ImageIndexDigest) {
-		return spec, rejectPrecondition("Hermes image contract 不合法")
+		return spec, rejectPrecondition("invalid Hermes image contract")
 	}
 	artifact := spec.Artifact
 	if !validHermesSHA256(artifact.SHA256) || artifact.Size <= 0 || artifact.Size > maxHermesBundleArtifactBytes ||
 		artifact.URL != "/v1/artifacts/"+artifact.SHA256 || artifact.EnginesNode != "" ||
 		artifact.UpstreamTarball != "" || artifact.SHA512 != "" {
-		return spec, rejectPrecondition("Hermes artifact contract 不合法")
+		return spec, rejectPrecondition("invalid Hermes artifact contract")
 	}
 	if job.ArtifactDigest != "sha256:"+artifact.SHA256 {
-		return spec, &rejectError{Code: deploy.ArtifactHashMismatch, Detail: "工作單 artifact digest 與 Hermes spec 不一致"}
+		return spec, &rejectError{Code: deploy.ArtifactHashMismatch, Detail: "job artifact digest does not match Hermes spec"}
 	}
 	for _, logical := range []string{e.podman(), filepath.Join(d.home, ".config", "systemd", "user", hermesUnit)} {
 		info, err := os.Lstat(d.fsPath(logical))
 		if err != nil || !info.Mode().IsRegular() || (logical == e.podman() && info.Mode().Perm()&0o111 == 0) {
-			return spec, rejectPrecondition("Hermes runtime 缺少：" + logical)
+			return spec, rejectPrecondition("missing Hermes runtime: " + logical)
 		}
 	}
 	return spec, nil
@@ -249,7 +249,7 @@ func readHermesEnvironment(d execDeps, logical string) (string, error) {
 		return "", err
 	}
 	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 1024 {
-		return "", errors.New("Hermes environment 不是合法 regular file")
+		return "", errors.New("Hermes environment is not a regular file")
 	}
 	body, err := os.ReadFile(d.fsPath(logical))
 	if err != nil {
@@ -273,11 +273,11 @@ func (e hermesExecutor) snapshot(ctx context.Context, d execDeps) (hermesSwitchS
 	if snapshot.openClawActive {
 		install := d.discover(ctx)
 		if install == nil {
-			return snapshot, errors.New("active OpenClaw 缺少可驗證的 gateway port")
+			return snapshot, errors.New("active OpenClaw missing verifiable gateway port")
 		}
 		port, ok := gatewayPort(install.GatewayArgs)
 		if !ok {
-			return snapshot, errors.New("active OpenClaw 缺少可驗證的 gateway port")
+			return snapshot, errors.New("active OpenClaw missing verifiable gateway port")
 		}
 		snapshot.openClawPort = port
 	}
@@ -325,7 +325,7 @@ func (e hermesExecutor) activate(ctx context.Context, d execDeps, spec model.Her
 func (e hermesExecutor) verify(ctx context.Context, d execDeps, spec model.HermesSpec) []model.JobVerificationRequest {
 	if stdout, stderr, err := d.systemctl(ctx, "--user", "is-active", hermesUnit); err != nil || strings.TrimSpace(stdout) != "active" {
 		if err == nil {
-			err = errors.New("Hermes unit 不是 active")
+			err = errors.New("Hermes unit is not active")
 		}
 		return []model.JobVerificationRequest{d.verification("hermes-unit", "systemctl --user is-active "+hermesUnit,
 			stdout, errorText(stderr, err), exitCode(err), false)}
@@ -337,7 +337,7 @@ func (e hermesExecutor) verify(ctx context.Context, d execDeps, spec model.Herme
 	want := "true|" + spec.ImageReference
 	passed := err == nil && strings.TrimSpace(stdout) == want
 	if err == nil && !passed {
-		err = fmt.Errorf("Hermes container identity=%q；要 %q", strings.TrimSpace(stdout), want)
+		err = fmt.Errorf("Hermes container identity=%q; want %q", strings.TrimSpace(stdout), want)
 	}
 	checks = append(checks, d.verification("hermes-container", e.podman()+" container inspect "+hermesContainer,
 		stdout, errorText(stderr, err), exitCode(err), passed))
@@ -453,21 +453,21 @@ func validateHermesOCIBundle(filename, targetOS, targetArch, imageReference stri
 		}
 		if entries >= maxHermesBundleEntries || header.Typeflag != tar.TypeReg || header.Size <= 0 ||
 			header.Size > maxHermesBundleBlobBytes || total > maxHermesBundleUncompressedBytes-header.Size {
-			return "", errors.New("Hermes OCI bundle 超出 layout 上限")
+			return "", errors.New("Hermes OCI bundle exceeds layout limit")
 		}
 		total += header.Size
 		name := path.Clean(header.Name)
 		if name != header.Name || path.IsAbs(name) || strings.Contains(name, "\\") || strings.ContainsRune(name, '\x00') {
-			return "", errors.New("Hermes OCI bundle 路徑不合法")
+			return "", errors.New("invalid Hermes OCI bundle path")
 		}
 		if _, duplicate := seen[name]; duplicate {
-			return "", errors.New("Hermes OCI bundle 路徑重複")
+			return "", errors.New("duplicate path in Hermes OCI bundle")
 		}
 		seen[name] = struct{}{}
 		isMetadata := name == "oci-layout" || name == "index.json"
 		blobHex, isBlob := strings.CutPrefix(name, "blobs/sha256/")
 		if !isMetadata && (!isBlob || !validHermesSHA256(blobHex)) {
-			return "", errors.New("Hermes OCI bundle 路徑超出 layout")
+			return "", errors.New("Hermes OCI bundle path outside layout")
 		}
 		hash := sha256.New()
 		var body bytes.Buffer
@@ -477,10 +477,10 @@ func validateHermesOCIBundle(filename, targetOS, targetArch, imageReference stri
 		}
 		written, copyErr := io.CopyN(writer, reader, header.Size)
 		if copyErr != nil || written != header.Size {
-			return "", errors.New("Hermes OCI bundle entry 不完整")
+			return "", errors.New("incomplete Hermes OCI bundle entry")
 		}
 		if isBlob && hex.EncodeToString(hash.Sum(nil)) != blobHex {
-			return "", errors.New("Hermes OCI blob digest 不一致")
+			return "", errors.New("Hermes OCI blob digest mismatch")
 		}
 		sizes[name] = header.Size
 		if header.Size <= maxHermesBundleMetadataBytes {
@@ -491,29 +491,29 @@ func validateHermesOCIBundle(filename, targetOS, targetArch, imageReference stri
 		ImageLayoutVersion string `json:"imageLayoutVersion"`
 	}
 	if err := decodeHermesOCIJSON(metadata["oci-layout"], &layout); err != nil || layout.ImageLayoutVersion != "1.0.0" {
-		return "", errors.New("Hermes OCI layout 不合法")
+		return "", errors.New("invalid Hermes OCI layout")
 	}
 	var root hermesOCIIndex
 	if err := decodeHermesOCIJSON(metadata["index.json"], &root); err != nil || root.SchemaVersion != 2 ||
 		root.MediaType != hermesOCIIndexMedia || len(root.Manifests) != 1 {
-		return "", errors.New("Hermes OCI root index 不合法")
+		return "", errors.New("invalid Hermes OCI root index")
 	}
 	rootDescriptor := root.Manifests[0]
 	if rootDescriptor.MediaType != hermesOCIIndexMedia || rootDescriptor.Platform != nil ||
 		!validHermesDigest(rootDescriptor.Digest) || len(rootDescriptor.Annotations) != 1 ||
 		rootDescriptor.Annotations["org.opencontainers.image.ref.name"] != imageReference {
-		return "", errors.New("Hermes OCI image reference 不一致")
+		return "", errors.New("Hermes OCI image reference mismatch")
 	}
 	referenced := map[string]struct{}{}
 	rootBlob := hermesOCIBlobPath(rootDescriptor.Digest)
 	if sizes[rootBlob] != rootDescriptor.Size {
-		return "", errors.New("Hermes OCI platform index descriptor 不一致")
+		return "", errors.New("Hermes OCI platform index descriptor mismatch")
 	}
 	referenced[rootBlob] = struct{}{}
 	var index hermesOCIIndex
 	if err := decodeHermesOCIJSON(metadata[rootBlob], &index); err != nil || index.SchemaVersion != 2 ||
 		index.MediaType != hermesOCIIndexMedia || len(index.Manifests) != 2 {
-		return "", errors.New("Hermes OCI platform index 不合法")
+		return "", errors.New("invalid Hermes OCI platform index")
 	}
 	selected := ""
 	platforms := make(map[string]struct{}, 2)
@@ -522,28 +522,28 @@ func validateHermesOCIBundle(filename, targetOS, targetArch, imageReference stri
 			(descriptor.Platform.Architecture != "amd64" && descriptor.Platform.Architecture != "arm64") ||
 			(descriptor.MediaType != hermesOCIManifestMedia && descriptor.MediaType != hermesDockerManifestMedia) ||
 			!validHermesDigest(descriptor.Digest) {
-			return "", errors.New("Hermes OCI platform descriptor 不合法")
+			return "", errors.New("invalid Hermes OCI platform descriptor")
 		}
 		platformKey := descriptor.Platform.OS + "/" + descriptor.Platform.Architecture
 		if _, duplicate := platforms[platformKey]; duplicate {
-			return "", errors.New("Hermes OCI platform descriptor 重複")
+			return "", errors.New("duplicate Hermes OCI platform descriptor")
 		}
 		platforms[platformKey] = struct{}{}
 		manifestPath := hermesOCIBlobPath(descriptor.Digest)
 		if sizes[manifestPath] != descriptor.Size {
-			return "", errors.New("Hermes OCI manifest descriptor 不一致")
+			return "", errors.New("Hermes OCI manifest descriptor mismatch")
 		}
 		referenced[manifestPath] = struct{}{}
 		var manifest hermesOCIManifest
 		if err := decodeHermesOCIJSON(metadata[manifestPath], &manifest); err != nil || manifest.SchemaVersion != 2 ||
 			manifest.MediaType != descriptor.MediaType || len(manifest.Layers) == 0 || len(manifest.Layers) > maxHermesBundleLayers {
-			return "", errors.New("Hermes OCI image manifest 不合法")
+			return "", errors.New("invalid Hermes OCI image manifest")
 		}
 		content := append([]hermesOCIDescriptor{manifest.Config}, manifest.Layers...)
 		for _, item := range content {
 			if item.Platform != nil || !validHermesDigest(item.Digest) || item.Size <= 0 ||
 				sizes[hermesOCIBlobPath(item.Digest)] != item.Size {
-				return "", errors.New("Hermes OCI content descriptor 不一致")
+				return "", errors.New("Hermes OCI content descriptor mismatch")
 			}
 			referenced[hermesOCIBlobPath(item.Digest)] = struct{}{}
 		}
@@ -552,14 +552,14 @@ func validateHermesOCIBundle(filename, targetOS, targetArch, imageReference stri
 		}
 	}
 	if selected == "" {
-		return "", errors.New("Hermes OCI bundle 沒有目標平台")
+		return "", errors.New("Hermes OCI bundle has no target platform")
 	}
 	for name := range sizes {
 		if name == "oci-layout" || name == "index.json" {
 			continue
 		}
 		if _, ok := referenced[name]; !ok {
-			return "", errors.New("Hermes OCI bundle 含未引用 blob")
+			return "", errors.New("Hermes OCI bundle contains unreferenced blob")
 		}
 	}
 	return selected, nil
@@ -571,7 +571,7 @@ func hermesOCIBlobPath(digest string) string {
 
 func decodeHermesOCIJSON(body []byte, target any) error {
 	if len(body) == 0 || len(body) > int(maxHermesBundleMetadataBytes) {
-		return errors.New("OCI JSON 缺少或過大")
+		return errors.New("missing or oversized OCI JSON")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	if err := decoder.Decode(target); err != nil {
@@ -579,7 +579,7 @@ func decodeHermesOCIJSON(body []byte, target any) error {
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return errors.New("OCI JSON 含尾隨資料")
+		return errors.New("OCI JSON contains trailing data")
 	}
 	return nil
 }

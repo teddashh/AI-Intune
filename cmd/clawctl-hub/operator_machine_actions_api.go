@@ -70,7 +70,7 @@ func writeOperatorMachineActionsError(w http.ResponseWriter, err error, machineI
 	case errors.As(err, &rejection) && rejection.Code == store.OperatorCodeMachineNotFound:
 		writeErr(w, http.StatusNotFound, store.OperatorCodeMachineNotFound, "找不到這台機器")
 	default:
-		log.Printf("讀取 operator machine actions 失敗 machine=%q: %v", machineID, err)
+		log.Printf("failed to read operator machine actions machine=%q: %v", machineID, err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取裝置動作目錄失敗")
 	}
 }

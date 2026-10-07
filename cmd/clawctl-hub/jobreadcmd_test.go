@@ -356,7 +356,7 @@ func TestJobCreateRemainsFencedDuringUpgradeMaintenance(t *testing.T) {
 	}
 	if err := rejectTopLevelCLIWhileUpgradeMaintenance("job", []string{
 		"job", "create", "--kind", "noop",
-	}); err == nil || !strings.Contains(err.Error(), "升級維護") {
+	}); err == nil || !strings.Contains(err.Error(), "upgrade maintenance") {
 		t.Fatalf("job create escaped maintenance fence: %v", err)
 	}
 	for _, argv := range [][]string{
@@ -633,14 +633,14 @@ func TestJobIndependentEvidenceCLIDistinguishesAbsentWithAwaitingAssignment(t *t
 	if !strings.Contains(withAssignment, string(operator.JobAssignmentAwaitingReport)) {
 		t.Errorf("有派工的 absent 輸出 got %q；expected 包含 %q；operator 無法用 raw token 定位尚未回報的派工", withAssignment, operator.JobAssignmentAwaitingReport)
 	}
-	if !strings.Contains(withAssignment, "已發出，等它回報") {
-		t.Errorf("有派工的 absent 輸出 got %q；expected 包含 %q；operator 不知道應追蹤已發出但未回報的 verifier", withAssignment, "已發出，等它回報")
+	if !strings.Contains(withAssignment, "dispatched, awaiting report") {
+		t.Errorf("有派工的 absent 輸出 got %q；expected 包含 %q；operator 不知道應追蹤已發出但未回報的 verifier", withAssignment, "dispatched, awaiting report")
 	}
 	if !strings.Contains(withoutAssignment, "assignments: 0") {
 		t.Errorf("無派工的輸出 got %q；expected 包含 %q；operator 會把區塊沉默誤讀成已有 verifier 在處理", withoutAssignment, "assignments: 0")
 	}
-	if !strings.Contains(withoutAssignment, "還沒有 verifier 被指派來看這張工作單") {
-		t.Errorf("無派工的輸出 got %q；expected 包含 %q；operator 不知道下一步是先指派 verifier", withoutAssignment, "還沒有 verifier 被指派來看這張工作單")
+	if !strings.Contains(withoutAssignment, "no verifiers have been assigned to this job yet") {
+		t.Errorf("無派工的輸出 got %q；expected 包含 %q；operator 不知道下一步是先指派 verifier", withoutAssignment, "no verifiers have been assigned to this job yet")
 	}
 	if !strings.Contains(withAssignment, "reported_at=not reported") {
 		t.Errorf("ReportedAt nil 的輸出 got %q；expected 包含 %q；operator 可能把未回報誤當成已回報", withAssignment, "reported_at=not reported")
@@ -675,10 +675,10 @@ func TestJobAssignmentStateStatementGivesEachStateItsOwnConsequence(t *testing.T
 		want        string
 		consequence string
 	}{
-		{operator.JobAssignmentReported, "已送出獨立證據", "operator 應改讀已送出的證據"},
-		{operator.JobAssignmentProducerRevoked, "指派的 verifier 已撤銷，不會再回報", "operator 應改指派可用的 verifier"},
-		{operator.JobAssignmentWaitingForJob, "等這張工作單結束才會發出", "operator 應等工作單結束"},
-		{operator.JobAssignmentAwaitingReport, "已發出，等它回報", "operator 應追蹤尚未回報的 verifier"},
+		{operator.JobAssignmentReported, "independent evidence submitted", "operator 應改讀已送出的證據"},
+		{operator.JobAssignmentProducerRevoked, "assigned verifier revoked, will not report", "operator 應改指派可用的 verifier"},
+		{operator.JobAssignmentWaitingForJob, "waiting for job completion before dispatch", "operator 應等工作單結束"},
+		{operator.JobAssignmentAwaitingReport, "dispatched, awaiting report", "operator 應追蹤尚未回報的 verifier"},
 	}
 	seen := make(map[string]string, len(cases))
 	for _, tc := range cases {

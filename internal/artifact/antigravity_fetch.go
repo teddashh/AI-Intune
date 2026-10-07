@@ -60,7 +60,7 @@ func (e *UpstreamVersionError) OperatorSentence() string {
 	if e == nil || e.Name != "antigravity" || !ValidAntigravityVersion(e.Published) {
 		return ""
 	}
-	return "上游目前只提供 Antigravity " + e.Published + "；改用這個版號重新 Preview。"
+	return "upstream currently only provides Antigravity " + e.Published + "; retry Preview with this version"
 }
 
 type AntigravitySource struct {

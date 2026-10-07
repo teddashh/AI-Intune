@@ -141,7 +141,7 @@ func TestGrokExecutorRejectsSymlinkAndHardlinkMembers(t *testing.T) {
 				t.Fatalf("typeflag %q left %s: %v", tc.typeflag, binary, statErr)
 			}
 			if err != nil || len(rows) != 1 || rows[0].Passed || rows[0].RuleID != "stage" ||
-				rows[0].StderrExcerpt != "Grok bundle 成員不是 regular file" {
+				rows[0].StderrExcerpt != "Grok bundle member is not a regular file" {
 				t.Fatalf("typeflag %q rows=%+v err=%v", tc.typeflag, rows, err)
 			}
 		})
@@ -178,7 +178,7 @@ func TestGrokExecutorBoundsDecompressedBinaryWrite(t *testing.T) {
 	if !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("oversize binary stat: %v", statErr)
 	}
-	if err == nil || err.Error() != "Grok 執行檔超出大小上限" {
+	if err == nil || err.Error() != "Grok binary exceeds size limit" {
 		t.Fatalf("err=%v written=%d", err, written)
 	}
 	if written != maxGrokBinaryBytes+1 {
@@ -225,7 +225,7 @@ func TestGrokExecutorRejectsDownloadOverDeclaredSize(t *testing.T) {
 	_, err := executor.Run(t.Context(), job)
 	var rejection *rejectError
 	if !errors.As(err, &rejection) || rejection.Code != deploy.ArtifactHashMismatch ||
-		!strings.Contains(rejection.Detail, "超過宣告 size") {
+		!strings.Contains(rejection.Detail, "exceeds declared size") {
 		t.Fatalf("err=%v", err)
 	}
 }

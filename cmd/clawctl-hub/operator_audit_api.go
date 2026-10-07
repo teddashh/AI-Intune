@@ -27,7 +27,7 @@ func (h *hub) handleListOperatorAuditEvents(w http.ResponseWriter, r *http.Reque
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "audit filter 或 cursor 不合法")
 			return
 		}
-		log.Printf("讀取 operator audit events 失敗: %v", err)
+		log.Printf("failed to read operator audit events: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 audit events 失敗")
 		return
 	}

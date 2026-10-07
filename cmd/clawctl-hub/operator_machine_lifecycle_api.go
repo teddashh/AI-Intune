@@ -119,7 +119,7 @@ func writeOperatorMachineLifecycleError(w http.ResponseWriter, err error, operat
 		w.Header().Set("Idempotency-Replayed", "true")
 	}
 	if status == http.StatusInternalServerError {
-		log.Printf("operator machine lifecycle %s 失敗 machine=%q: %v", operation, machineID, err)
+		log.Printf("operator machine lifecycle %s failed machine=%q: %v", operation, machineID, err)
 	}
 	writeErr(w, status, code, detail)
 }

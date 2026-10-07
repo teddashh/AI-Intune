@@ -24,7 +24,7 @@
 set -euo pipefail
 
 if [ "$(id -u)" -ne 0 ]; then
-	echo "要 root：sudo $0" >&2
+	echo "Must be root: sudo $0" >&2
 	exit 1
 fi
 
@@ -32,13 +32,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 hr() { printf '\n\033[1m━━━━━━ %s ━━━━━━\033[0m\n' "$*"; }
 
-hr "第 1 段 / 共 3 段：Prometheus + node_exporter"
+hr "Stage 1 / 3: Prometheus + node_exporter"
 "$HERE/install-prometheus.sh"
 
-hr "第 2 段 / 共 3 段：Alertmanager（跑完約 5 分鐘後開始送 Telegram）"
+hr "Stage 2 / 3: Alertmanager (Telegram notifications start ~5 min after completion)"
 "$HERE/install-alertmanager.sh"
 
-hr "第 3 段 / 共 3 段：Grafana"
+hr "Stage 3 / 3: Grafana"
 # ⚠⚠ 2026-09-05：這一段原本是內嵌的，而且在拿不到套件時印「前兩段是好的」
 #     然後 exit 0 —— operator 讀到「做完了」、回報「跑完了」，Grafana 根本沒裝。
 #     /var/log/apt/history.log 裡連一筆 install grafana 都沒有。
@@ -46,12 +46,12 @@ hr "第 3 段 / 共 3 段：Grafana"
 #     set -e 讓這裡跟著失敗。三段都要真的成，才算跑完。
 "$HERE/install-grafana.sh"
 
-hr "三段都做完了"
+hr "All three stages completed"
 cat <<EOF
 Prometheus    http://100.64.200.2:9090
 Alertmanager  http://100.64.200.2:9093
 Grafana       http://100.64.200.2:3000/d/clawctl-fleet
 
-對答案：./ops/prometheus/check-dashboard.sh
-靜音一台：amtool silence add machine=sampleagent1 -d 720h -c '我自己處理'
+Check: ./ops/prometheus/check-dashboard.sh
+Silence a machine: amtool silence add machine=sampleagent1 -d 720h -c 'Handling manually'
 EOF

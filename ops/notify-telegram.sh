@@ -50,7 +50,7 @@ fi
 _caller_token="${TELEGRAM_BOT_TOKEN:-}"
 _caller_chat="${TELEGRAM_CHAT_ID:-}"
 
-_src="呼叫端的環境變數"
+_src="caller environment variables"
 if [ -z "$_caller_token" ] || [ -z "$_caller_chat" ]; then
 	for f in "${CLAWCTL_NOTIFY_ENV:-}" \
 		"$HOME/.config/clawctl/notify.env" \
@@ -90,11 +90,11 @@ fi
 #
 # 所以現在它必須先說出自己要用哪一份設定。這一行不含任何秘密，
 # 而它是唯一能讓人事後回答「那則告警到底送去哪了」的東西。
-echo "notify-telegram: 設定來源 = $_src" >&2
+echo "notify-telegram: config source = $_src" >&2
 if [ -n "${_fellback:-}" ]; then
-	echo "notify-telegram: ⚠ 沒有指定 CLAWCTL_NOTIFY_ENV，這是 fallback 挑到的。" >&2
-	echo "  這台機器上如果不只一組 bot，你可能正在用你以為的那個以外的 bot 或聊天室。" >&2
-	echo "  要確定收件人就明講：CLAWCTL_NOTIFY_ENV=<path> $(basename "$0")" >&2
+	echo "notify-telegram: ⚠ CLAWCTL_NOTIFY_ENV not specified, selected via fallback" >&2
+	echo "  If this machine has more than one bot, you may be using a different bot or chat than expected" >&2
+	echo "  To specify recipient explicitly: CLAWCTL_NOTIFY_ENV=<path> $(basename "$0")" >&2
 fi
 
 # ⚠ 檔案只負責「補上沒設的那個」，不負責蓋掉呼叫端設好的。
@@ -106,8 +106,8 @@ fi
 [ -n "$_caller_chat" ] && TELEGRAM_CHAT_ID="$_caller_chat"
 unset _caller_token _caller_chat
 
-: "${TELEGRAM_BOT_TOKEN:?找不到 TELEGRAM_BOT_TOKEN（看這支腳本開頭的設定說明）}"
-: "${TELEGRAM_CHAT_ID:?找不到 TELEGRAM_CHAT_ID}"
+: "${TELEGRAM_BOT_TOKEN:?missing TELEGRAM_BOT_TOKEN (see configuration instructions at start of script)}"
+: "${TELEGRAM_CHAT_ID:?missing TELEGRAM_CHAT_ID}"
 
 # ⚠⚠ token 不准出現在 curl 的 argv 裡。
 #
@@ -143,17 +143,17 @@ if [ "$CHECK" -eq 1 ]; then
 	_r=$(_tg_config getMe | curl -sS --max-time 20 --retry 2 --retry-delay 3 \
 		-K - 2>&1)
 	if [ $? -ne 0 ]; then
-		echo "notify-telegram --check: ✗ 連不上 Telegram（網路或 DNS）" >&2
+		echo "notify-telegram --check: ✗ cannot reach Telegram (network or DNS)" >&2
 		_fail=1
 	else
 		case "$_r" in
 		*'"ok":true'*)
-			echo "notify-telegram --check: ✓ token 有效 → @$(printf '%s' "$_r" |
+			echo "notify-telegram --check: ✓ token valid → @$(printf '%s' "$_r" |
 				sed -n 's/.*"username":"\([^"]*\)".*/\1/p')"
 			;;
 		*)
 			# token 被撤銷時 Telegram 回 401 + "Unauthorized"
-			echo "notify-telegram --check: ✗ token 被拒：$(printf '%s' "$_r" |
+			echo "notify-telegram --check: ✗ token rejected: $(printf '%s' "$_r" |
 				sed -n 's/.*"description":"\([^"]*\)".*/\1/p')" >&2
 			_fail=1
 			;;
@@ -172,7 +172,7 @@ if [ "$CHECK" -eq 1 ]; then
 		# ⚠ 這裡不能去 sed `_r` 裡的 description —— curl 的錯誤訊息沒有那個欄位，
 		# 結果會是「✗ 送不進這個聊天室：」後面空一片，看起來像 Telegram 回了
 		# 一個空的理由。網路不通跟被拒絕是兩件事，要講成兩句話。
-		echo "notify-telegram --check: ✗ 連不上 Telegram（網路或 DNS）" >&2
+		echo "notify-telegram --check: ✗ cannot reach Telegram (network or DNS)" >&2
 		_fail=1
 	else
 		case "$_r" in
@@ -181,12 +181,12 @@ if [ "$CHECK" -eq 1 ]; then
 			_who=$(printf '%s' "$_r" | sed -n 's/.*"title":"\([^"]*\)".*/\1/p')
 			[ -n "$_who" ] || _who=$(printf '%s' "$_r" |
 				sed -n 's/.*"first_name":"\([^"]*\)".*/\1/p')
-			echo "notify-telegram --check: ✓ 送得進「${_who:-（無標題）}」"
+			echo "notify-telegram --check: ✓ can deliver to \"${_who:-(no title)}\""
 			;;
 		*)
 			_d=$(printf '%s' "$_r" | sed -n 's/.*"description":"\([^"]*\)".*/\1/p')
-			echo "notify-telegram --check: ✗ 送不進這個聊天室：${_d:-回應格式不認得}" >&2
-			echo "  bot 被踢出群組／群組被刪掉／chat_id 打錯，都會長這樣。" >&2
+			echo "notify-telegram --check: ✗ cannot deliver to this chat: ${_d:-unrecognized response format}" >&2
+			echo "  Bot kicked from group / group deleted / typo in chat_id all look like this" >&2
 			_fail=1
 			;;
 		esac
@@ -200,7 +200,7 @@ body=$(cat)
 if [ -z "${body//[[:space:]]/}" ]; then
 	# ⚠ 空訊息不算送出去。上游若因為某個 bug 產出空字串，
 	# 把它記成 delivered 會讓一整天安靜無聲而且沒有人知道。
-	echo "notify-telegram: 收到空訊息，拒絕送出" >&2
+	echo "notify-telegram: empty message received, refusing to send" >&2
 	exit 1
 fi
 
@@ -221,7 +221,7 @@ rc=$?
 if [ $rc -ne 0 ]; then
 	# ⚠ 不要把 resp 印出來 —— curl 的錯誤訊息會包含整個 URL，
 	# 而 URL 裡有 bot token。這則錯誤會被寫進 Hub 的 notifications 表。
-	echo "notify-telegram: curl 失敗（exit $rc）" >&2
+	echo "notify-telegram: curl failed (exit $rc)" >&2
 	exit 1
 fi
 
@@ -231,5 +231,5 @@ esac
 
 # 只印 description，同樣是為了不把 token 寫進資料庫。
 desc=$(printf '%s' "$resp" | sed -n 's/.*"description":"\([^"]*\)".*/\1/p')
-echo "notify-telegram: Telegram 拒絕了這則訊息：${desc:-回應格式不認得}" >&2
+echo "notify-telegram: Telegram rejected message: ${desc:-unrecognized response format}" >&2
 exit 1

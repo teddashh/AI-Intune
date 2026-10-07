@@ -48,7 +48,7 @@ func TestWindowsNativeTaskObservation(t *testing.T) {
 	})
 	t.Run("query failed stays unknown", func(t *testing.T) {
 		got := windowsObservedUnit(windowsAgentTaskUnit, windowsTaskView{Found: true, State: windowsTaskStateRunning},
-			errors.New("Get-ScheduledTask clawctl-agent 失敗：exit 1"))
+			errors.New("Get-ScheduledTask clawctl-agent failed: exit 1"))
 		if got.Measured || got.Present || got.Reason == "" {
 			t.Fatalf("failed query=%+v", got)
 		}

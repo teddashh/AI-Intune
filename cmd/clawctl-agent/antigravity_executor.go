@@ -58,10 +58,10 @@ func (e antigravityExecutor) Run(ctx context.Context, job model.JobResponse) ([]
 	root := filepath.Join(d.home, ".local", "share", "clawctl", "antigravity")
 	releases := filepath.Join(root, "releases")
 	if err := d.requireWritableAncestor(root); err != nil {
-		return nil, rejectPrecondition("Antigravity 目錄不可寫：" + err.Error())
+		return nil, rejectPrecondition("Antigravity directory is not writable: " + err.Error())
 	}
 	if err := os.MkdirAll(d.fsPath(releases), 0o700); err != nil {
-		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "stage", "建立 Antigravity releases", err)}, nil
+		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "stage", "create Antigravity releases", err)}, nil
 	}
 	release := filepath.Join(releases, spec.Version)
 	stageVerification, err := e.ensureRelease(ctx, d, job, spec, release)
@@ -72,18 +72,18 @@ func (e antigravityExecutor) Run(ctx context.Context, job model.JobResponse) ([]
 		return []model.JobVerificationRequest{*stageVerification}, nil
 	}
 	if err := sealAntigravityRelease(d, release, spec.TargetOS); err != nil {
-		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "stage", "鎖定 Antigravity bin", err)}, nil
+		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "stage", "seal Antigravity bin", err)}, nil
 	}
 	previous, currentRelease, err := readNodeRuntimeCurrent(d, root, releases)
 	if err != nil {
-		return nil, rejectPrecondition("Antigravity current 不合法：" + err.Error())
+		return nil, rejectPrecondition("invalid Antigravity current: " + err.Error())
 	}
 	if samePath(currentRelease, release) {
 		return verifyAntigravityRelease(ctx, d, release, spec.Version, spec.Artifact.SHA256,
 			spec.TargetOS, "antigravity-current"), nil
 	}
 	if err := setNodeRuntimeCurrent(d, root, release, job.JobID); err != nil {
-		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "activate", "切換 Antigravity current", err)}, nil
+		return []model.JobVerificationRequest{*nodeRuntimeFailure(d, "activate", "switch Antigravity current", err)}, nil
 	}
 	verifications := verifyAntigravityRelease(ctx, d, release, spec.Version, spec.Artifact.SHA256,
 		spec.TargetOS, "antigravity-activate")
@@ -101,41 +101,41 @@ func (e antigravityExecutor) gate(job model.JobResponse) (model.AntigravitySpec,
 	decoder := json.NewDecoder(strings.NewReader(string(job.Spec)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&spec); err != nil {
-		return spec, rejectPrecondition("Antigravity spec 不是合法 JSON：" + err.Error())
+		return spec, rejectPrecondition("Antigravity spec is not valid JSON: " + err.Error())
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return spec, rejectPrecondition("Antigravity spec 含有尾隨資料")
+		return spec, rejectPrecondition("Antigravity spec contains trailing data")
 	}
 	if job.ResourceKind != agentadapter.ExecutorKindAntigravity || spec.Kind != agentadapter.ExecutorKindAntigravity {
-		return spec, rejectPrecondition("工作單與 spec kind 必須是 antigravity")
+		return spec, rejectPrecondition("job and spec kind must be antigravity")
 	}
 	if job.ResourceID != "antigravity" || !safePathComponent(spec.Version) || !validNodeRuntimeExactVersion(spec.Version) {
-		return spec, rejectPrecondition("Antigravity identity 不合法")
+		return spec, rejectPrecondition("invalid Antigravity identity")
 	}
 	if _, ok := antigravityOfficialFile(spec.TargetOS, spec.TargetArch); !ok ||
 		spec.TargetOS != e.targetOS || spec.TargetArch != e.targetArch {
-		return spec, rejectPrecondition("Antigravity target 與 agent 平台不一致")
+		return spec, rejectPrecondition("Antigravity target does not match agent platform")
 	}
 	if spec.BundleLayout != model.AntigravityBundleLayoutV1 || spec.Artifact == nil {
-		return spec, rejectPrecondition("Antigravity bundle contract 不合法")
+		return spec, rejectPrecondition("invalid Antigravity bundle contract")
 	}
 	pinned := spec.Artifact
 	if len(pinned.SHA256) != sha256.Size*2 {
-		return spec, rejectPrecondition("artifact.sha256 不是 64 碼十六進位")
+		return spec, rejectPrecondition("artifact.sha256 is not 64 hex digits")
 	}
 	if _, err := hex.DecodeString(pinned.SHA256); err != nil || strings.ToLower(pinned.SHA256) != pinned.SHA256 {
-		return spec, rejectPrecondition("artifact.sha256 必須是小寫十六進位")
+		return spec, rejectPrecondition("artifact.sha256 must be lowercase hex")
 	}
 	if pinned.Size <= 0 || pinned.Size > maxAntigravityArtifactBytes {
-		return spec, rejectPrecondition("artifact.size 超出 Antigravity bundle 上限")
+		return spec, rejectPrecondition("artifact.size exceeds Antigravity bundle limit")
 	}
 	if pinned.URL != "/v1/artifacts/"+pinned.SHA256 ||
 		pinned.EnginesNode != "" || pinned.UpstreamTarball != "" || pinned.SHA512 != "" {
-		return spec, rejectPrecondition("Antigravity artifact contract 不合法")
+		return spec, rejectPrecondition("invalid Antigravity artifact contract")
 	}
 	if job.ArtifactDigest != "sha256:"+pinned.SHA256 {
-		return spec, &rejectError{Code: deploy.ArtifactHashMismatch, Detail: "工作單 artifact digest 與 spec 不一致"}
+		return spec, &rejectError{Code: deploy.ArtifactHashMismatch, Detail: "job artifact digest does not match spec"}
 	}
 	return spec, nil
 }
@@ -152,27 +152,27 @@ func (e antigravityExecutor) ensureRelease(ctx context.Context, d execDeps, job 
 			return nil, ctx.Err()
 		}
 		if err := unsealAntigravityBin(d, release, spec.TargetOS); err != nil {
-			return nodeRuntimeFailure(d, "stage", "解除 Antigravity bin", err), nil
+			return nodeRuntimeFailure(d, "stage", "unseal Antigravity bin", err), nil
 		}
 		broken := release + ".broken-" + safeJobID(job.JobID)
 		if _, err := os.Lstat(d.fsPath(broken)); err == nil {
-			return nodeRuntimeFailure(d, "stage", "保留既有 Antigravity release", errors.New("broken 證據路徑已存在")), nil
+			return nodeRuntimeFailure(d, "stage", "preserve existing Antigravity release", errors.New("broken evidence path already exists")), nil
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return nodeRuntimeFailure(d, "stage", "檢查 Antigravity broken 證據", err), nil
+			return nodeRuntimeFailure(d, "stage", "check Antigravity broken evidence", err), nil
 		}
 		if err := os.Rename(d.fsPath(release), d.fsPath(broken)); err != nil {
-			return nodeRuntimeFailure(d, "stage", "保留既有 Antigravity release", err), nil
+			return nodeRuntimeFailure(d, "stage", "preserve existing Antigravity release", err), nil
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return nodeRuntimeFailure(d, "stage", "檢查 Antigravity release", err), nil
+		return nodeRuntimeFailure(d, "stage", "check Antigravity release", err), nil
 	}
 	staging := filepath.Join(filepath.Dir(release), ".staging-"+safeJobID(job.JobID))
 	if err := os.RemoveAll(d.fsPath(staging)); err != nil {
-		return nodeRuntimeFailure(d, "stage", "清理 Antigravity staging", err), nil
+		return nodeRuntimeFailure(d, "stage", "clean Antigravity staging", err), nil
 	}
 	defer os.RemoveAll(d.fsPath(staging))
 	if err := os.MkdirAll(d.fsPath(staging), 0o700); err != nil {
-		return nodeRuntimeFailure(d, "stage", "建立 Antigravity staging", err), nil
+		return nodeRuntimeFailure(d, "stage", "create Antigravity staging", err), nil
 	}
 	bundle := filepath.Join(staging, "antigravity.tgz")
 	actualDigest, actualSize, err := d.downloadArtifactAtMost(ctx, d.hubURL+spec.Artifact.URL, bundle, spec.Artifact.Size)
@@ -180,22 +180,22 @@ func (e antigravityExecutor) ensureRelease(ctx context.Context, d execDeps, job 
 		var sizeErr *artifactDownloadSizeError
 		if errors.As(err, &sizeErr) {
 			return nil, &rejectError{Code: deploy.ArtifactHashMismatch,
-				Detail: fmt.Sprintf("Antigravity artifact 超過宣告 size=%d", spec.Artifact.Size)}
+				Detail: fmt.Sprintf("Antigravity artifact exceeds declared size=%d", spec.Artifact.Size)}
 		}
-		return nodeRuntimeFailure(d, "stage", "下載 Antigravity bundle", err), nil
+		return nodeRuntimeFailure(d, "stage", "download Antigravity bundle", err), nil
 	}
 	if actualDigest != spec.Artifact.SHA256 || actualSize != spec.Artifact.Size {
 		return nil, &rejectError{Code: deploy.ArtifactHashMismatch,
-			Detail: fmt.Sprintf("Antigravity artifact 期望 sha256=%s size=%d，實得 sha256=%s size=%d",
+			Detail: fmt.Sprintf("Antigravity artifact expected sha256=%s size=%d; got sha256=%s size=%d",
 				shortDigest(spec.Artifact.SHA256), spec.Artifact.Size, shortDigest(actualDigest), actualSize)}
 	}
 	payload := filepath.Join(staging, "payload")
 	if err := stageAntigravityBundle(d.fsPath(bundle), d.fsPath(staging), d.fsPath(payload), spec.Version, spec.TargetOS, spec.TargetArch); err != nil {
-		return nodeRuntimeFailure(d, "stage", "展開 Antigravity bundle", err), nil
+		return nodeRuntimeFailure(d, "stage", "extract Antigravity bundle", err), nil
 	}
 	marker := filepath.Join(payload, nodeRuntimeArtifactMarker)
 	if err := writePrivateFile(d.fsPath(marker), []byte("sha256:"+spec.Artifact.SHA256+"\n")); err != nil {
-		return nodeRuntimeFailure(d, "stage", "記錄 Antigravity artifact identity", err), nil
+		return nodeRuntimeFailure(d, "stage", "record Antigravity artifact identity", err), nil
 	}
 	checks := verifyAntigravityRelease(ctx, d, payload, spec.Version, spec.Artifact.SHA256, spec.TargetOS, "antigravity-stage")
 	if !allPassed(checks) {
@@ -209,10 +209,10 @@ func (e antigravityExecutor) ensureRelease(ctx context.Context, d execDeps, job 
 		return &failure, nil
 	}
 	if err := os.Rename(d.fsPath(payload), d.fsPath(release)); err != nil {
-		return nodeRuntimeFailure(d, "stage", "發佈 Antigravity release", err), nil
+		return nodeRuntimeFailure(d, "stage", "publish Antigravity release", err), nil
 	}
 	if err := syncNodeRuntimeDirectory(d.fsPath(filepath.Dir(release))); err != nil {
-		return nodeRuntimeFailure(d, "stage", "同步 Antigravity releases", err), nil
+		return nodeRuntimeFailure(d, "stage", "sync Antigravity releases", err), nil
 	}
 	return nil, nil
 }
@@ -256,7 +256,7 @@ type antigravityStagedManifest struct {
 func stageAntigravityBundle(bundle, staging, payload, version, targetOS, targetArch string) error {
 	fileName, ok := antigravityOfficialFile(targetOS, targetArch)
 	if !ok {
-		return errors.New("Antigravity target 不合法")
+		return errors.New("invalid Antigravity target")
 	}
 	wantFile := "antigravity/" + targetOS + "-" + targetArch + "/" + fileName
 	wantManifest := "antigravity/" + targetOS + "-" + targetArch + "/manifest.json"
@@ -267,13 +267,13 @@ func stageAntigravityBundle(bundle, staging, payload, version, targetOS, targetA
 	defer input.Close()
 	gz, err := gzip.NewReader(input)
 	if err != nil {
-		return errors.New("Antigravity bundle 解不開")
+		return errors.New("cannot unpack Antigravity bundle")
 	}
 	defer gz.Close()
 	officialPath := filepath.Join(staging, fileName)
 	manifestPath := filepath.Join(staging, "manifest.json")
 	if !underDir(officialPath, staging) || !underDir(manifestPath, staging) {
-		return errors.New("Antigravity 暫存路徑超出 staging")
+		return errors.New("Antigravity temporary path outside staging")
 	}
 	reader := tar.NewReader(gz)
 	var manifest antigravityStagedManifest
@@ -286,11 +286,11 @@ func stageAntigravityBundle(bundle, staging, payload, version, targetOS, targetA
 			break
 		}
 		if err != nil {
-			return errors.New("Antigravity bundle 解不開")
+			return errors.New("cannot unpack Antigravity bundle")
 		}
 		entries++
 		if entries > maxAntigravityBundleEntries || header.Size < 0 {
-			return errors.New("Antigravity bundle 超出展開上限")
+			return errors.New("Antigravity bundle exceeds extraction limit")
 		}
 		name, err := cleanAntigravityBundlePath(header.Name)
 		if err != nil {
@@ -298,17 +298,17 @@ func stageAntigravityBundle(bundle, staging, payload, version, targetOS, targetA
 		}
 		if header.Typeflag == tar.TypeDir {
 			if header.Size != 0 {
-				return errors.New("Antigravity bundle 成員不是 regular file")
+				return errors.New("Antigravity bundle member is not a regular file")
 			}
 			continue
 		}
 		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
-			return errors.New("Antigravity bundle 成員不是 regular file")
+			return errors.New("Antigravity bundle member is not a regular file")
 		}
 		switch name {
 		case wantManifest:
 			if foundManifest || header.Size <= 0 || header.Size > maxAntigravityManifestBytes {
-				return errors.New("Antigravity manifest 不合法")
+				return errors.New("invalid Antigravity manifest")
 			}
 			body, err := readBoundedMember(reader, header.Size)
 			if err != nil {
@@ -325,7 +325,7 @@ func stageAntigravityBundle(bundle, staging, payload, version, targetOS, targetA
 			foundManifest = true
 		case wantFile:
 			if foundFile || header.Size <= 0 || header.Size > maxAntigravityOfficialBytes {
-				return errors.New("Antigravity 官方檔大小不合法")
+				return errors.New("invalid Antigravity official archive size")
 			}
 			sum, err := writeHashedMember(reader, header.Size, officialPath)
 			if err != nil {
@@ -335,7 +335,7 @@ func stageAntigravityBundle(bundle, staging, payload, version, targetOS, targetA
 			foundFile = true
 		default:
 			if header.Size > maxAntigravityOfficialBytes {
-				return errors.New("Antigravity bundle 成員大小不合法")
+				return errors.New("invalid Antigravity bundle member size")
 			}
 			if err := discardAntigravityMember(reader, header.Size); err != nil {
 				return err
@@ -343,11 +343,11 @@ func stageAntigravityBundle(bundle, staging, payload, version, targetOS, targetA
 		}
 	}
 	if !foundFile || !foundManifest {
-		return errors.New("Antigravity bundle 沒有這個平台的執行檔")
+		return errors.New("Antigravity bundle has no executable for this platform")
 	}
 	file, ok := antigravityURLFile(manifest.URL)
 	if manifest.Version != version || !ok || file != fileName || !validAntigravitySHA512Hex(manifest.SHA512) || gotSHA != manifest.SHA512 {
-		return errors.New("Antigravity manifest 與官方檔不一致")
+		return errors.New("Antigravity manifest does not match official archive")
 	}
 	if targetOS == "windows" {
 		return installAntigravityWindows(officialPath, payload)
@@ -360,14 +360,14 @@ func decodeAntigravityStagedManifest(body []byte) (antigravityStagedManifest, er
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&document); err != nil {
-		return document, errors.New("Antigravity manifest 不是合法 JSON")
+		return document, errors.New("Antigravity manifest is not valid JSON")
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return document, errors.New("Antigravity manifest 含有尾隨資料")
+		return document, errors.New("Antigravity manifest contains trailing data")
 	}
 	if document.Version == "" || document.URL == "" || document.SHA512 == "" {
-		return document, errors.New("Antigravity manifest 不完整")
+		return document, errors.New("incomplete Antigravity manifest")
 	}
 	return document, nil
 }
@@ -375,7 +375,7 @@ func decodeAntigravityStagedManifest(body []byte) (antigravityStagedManifest, er
 func readBoundedMember(reader io.Reader, size int64) ([]byte, error) {
 	body, err := io.ReadAll(io.LimitReader(reader, size))
 	if err != nil || int64(len(body)) != size {
-		return nil, errors.New("Antigravity bundle 成員不完整")
+		return nil, errors.New("incomplete Antigravity bundle member")
 	}
 	return body, nil
 }
@@ -395,7 +395,7 @@ func writeHashedMember(reader io.Reader, size int64, destination string) (string
 	digest := sha512.New()
 	n, err := io.Copy(io.MultiWriter(file, digest), io.LimitReader(reader, size))
 	if err != nil || n != size {
-		return "", errors.New("Antigravity bundle 成員不完整")
+		return "", errors.New("incomplete Antigravity bundle member")
 	}
 	if err := file.Sync(); err != nil {
 		return "", err
@@ -410,21 +410,21 @@ func writeHashedMember(reader io.Reader, size int64, destination string) (string
 func discardAntigravityMember(reader io.Reader, size int64) error {
 	n, err := io.Copy(io.Discard, io.LimitReader(reader, size+1))
 	if err != nil || n != size {
-		return errors.New("Antigravity bundle 成員不完整")
+		return errors.New("incomplete Antigravity bundle member")
 	}
 	return nil
 }
 
 func cleanAntigravityBundlePath(name string) (string, error) {
 	if name == "" || len(name) > 256 || strings.HasPrefix(name, "/") || strings.Contains(name, `\`) || strings.ContainsRune(name, 0) {
-		return "", errors.New("Antigravity bundle 路徑不合法")
+		return "", errors.New("invalid Antigravity bundle path")
 	}
 	cleaned := path.Clean(strings.TrimSuffix(name, "/"))
 	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.Contains("/"+cleaned+"/", "/../") {
-		return "", errors.New("Antigravity bundle 路徑超出範圍")
+		return "", errors.New("Antigravity bundle path out of bounds")
 	}
 	if cleaned != "antigravity" && !strings.HasPrefix(cleaned, "antigravity/") {
-		return "", errors.New("Antigravity bundle 路徑超出範圍")
+		return "", errors.New("Antigravity bundle path out of bounds")
 	}
 	return cleaned, nil
 }
@@ -440,12 +440,12 @@ func extractAntigravityUnix(archive, destination string) error {
 	defer input.Close()
 	gz, err := gzip.NewReader(input)
 	if err != nil {
-		return errors.New("Antigravity 官方檔解不開")
+		return errors.New("cannot unpack Antigravity official archive")
 	}
 	defer gz.Close()
 	binary := filepath.Join(destination, "bin", "agy")
 	if !underDir(binary, destination) {
-		return errors.New("Antigravity 執行檔路徑超出 release")
+		return errors.New("Antigravity binary path outside release")
 	}
 	if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
 		return err
@@ -459,19 +459,19 @@ func extractAntigravityUnix(archive, destination string) error {
 			break
 		}
 		if err != nil {
-			return errors.New("Antigravity 官方檔解不開")
+			return errors.New("cannot unpack Antigravity official archive")
 		}
 		entries++
 		if entries > 1 || header.Size < 0 {
-			return errors.New("Antigravity 官方檔必須只有一個執行檔")
+			return errors.New("Antigravity official archive must contain exactly one executable")
 		}
 		name := path.Clean(strings.TrimSuffix(header.Name, "/"))
 		if header.Typeflag == tar.TypeDir || header.Typeflag == tar.TypeSymlink || header.Typeflag == tar.TypeLink ||
 			(header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA) || name != "antigravity" {
-			return errors.New("Antigravity 官方檔必須只有一個執行檔")
+			return errors.New("Antigravity official archive must contain exactly one executable")
 		}
 		if header.Size <= 0 || header.Size > maxAntigravityOfficialBytes {
-			return errors.New("Antigravity 執行檔大小不合法")
+			return errors.New("invalid Antigravity executable size")
 		}
 		if err := writeAntigravityBinary(reader, header.Size, binary); err != nil {
 			return err
@@ -479,7 +479,7 @@ func extractAntigravityUnix(archive, destination string) error {
 		found = true
 	}
 	if !found {
-		return errors.New("Antigravity 官方檔必須只有一個執行檔")
+		return errors.New("Antigravity official archive must contain exactly one executable")
 	}
 	return nil
 }
@@ -498,7 +498,7 @@ func writeAntigravityBinary(reader io.Reader, size int64, destination string) er
 	}()
 	n, err := io.Copy(file, io.LimitReader(reader, size+1))
 	if err != nil || n != size || n > maxAntigravityOfficialBytes {
-		return errors.New("Antigravity 執行檔大小不合法")
+		return errors.New("invalid Antigravity executable size")
 	}
 	if err := file.Sync(); err != nil {
 		return err
@@ -519,7 +519,7 @@ func installAntigravityWindows(staged, destination string) error {
 	}
 	binary := filepath.Join(destination, "bin", "agy.exe")
 	if !underDir(binary, destination) {
-		return errors.New("Antigravity 執行檔路徑超出 release")
+		return errors.New("Antigravity binary path outside release")
 	}
 	if err := os.MkdirAll(filepath.Dir(binary), 0o755); err != nil {
 		return err
@@ -542,7 +542,7 @@ func verifyAntigravityRelease(ctx context.Context, d execDeps, release, version,
 	marker, err := readPrivateRegularFile(d.fsPath(markerLogical))
 	markerPassed := err == nil && string(marker) == "sha256:"+artifactSHA256+"\n"
 	if err == nil && !markerPassed {
-		err = errors.New("artifact identity marker 與工作單 digest 不符")
+		err = errors.New("artifact identity marker does not match job digest")
 	}
 	results := []model.JobVerificationRequest{d.verification(rulePrefix+"-artifact", "cat "+markerLogical,
 		string(marker), errorText("", err), exitCode(err), markerPassed)}
@@ -552,14 +552,14 @@ func verifyAntigravityRelease(ctx context.Context, d execDeps, release, version,
 	relative, ok := antigravityCommandRelative(targetOS)
 	if !ok {
 		return append(results, *nodeRuntimeFailure(d, rulePrefix+"-version", "agy --version",
-			errors.New("Antigravity target 不合法")))
+			errors.New("invalid Antigravity target")))
 	}
 	binaryLogical := filepath.Join(release, filepath.FromSlash(relative))
 	binaryPath := d.fsPath(binaryLogical)
 	if info, err := os.Lstat(binaryPath); err != nil || !info.Mode().IsRegular() ||
 		(runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0) {
 		if err == nil {
-			err = errors.New(relative + " 不是可執行 regular file")
+			err = errors.New(relative + " is not an executable regular file")
 		}
 		return append(results, *nodeRuntimeFailure(d, rulePrefix+"-version", binaryLogical+" --version", err))
 	}
@@ -570,7 +570,7 @@ func verifyAntigravityRelease(ctx context.Context, d execDeps, release, version,
 	stdout, stderr, err := run(ctx, binaryPath)
 	passed := err == nil && antigravityVersionMatches(stdout, version)
 	if err == nil && !passed {
-		err = fmt.Errorf("Antigravity version=%q；要 %q", strings.TrimSpace(stdout), version)
+		err = fmt.Errorf("Antigravity version=%q; want %q", strings.TrimSpace(stdout), version)
 	}
 	results = append(results, d.verification(rulePrefix+"-version", binaryLogical+" --version",
 		stdout, errorText(stderr, err), exitCode(err), passed))

@@ -33,7 +33,7 @@ type auditStringFlag struct {
 func (v *auditStringFlag) String() string { return v.value }
 func (v *auditStringFlag) Set(value string) error {
 	if v.set {
-		return errors.New("不可重複")
+		return errors.New("cannot be repeated")
 	}
 	v.value, v.set = value, true
 	return nil
@@ -47,11 +47,11 @@ type auditIntFlag struct {
 func (v *auditIntFlag) String() string { return strconv.Itoa(v.value) }
 func (v *auditIntFlag) Set(value string) error {
 	if v.set {
-		return errors.New("不可重複")
+		return errors.New("cannot be repeated")
 	}
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
-		return errors.New("必須是十進位整數")
+		return errors.New("must be a decimal integer")
 	}
 	v.value, v.set = parsed, true
 	return nil
@@ -66,11 +66,11 @@ func (v *auditBoolFlag) String() string   { return strconv.FormatBool(v.value) }
 func (v *auditBoolFlag) IsBoolFlag() bool { return true }
 func (v *auditBoolFlag) Set(value string) error {
 	if v.set {
-		return errors.New("不可重複")
+		return errors.New("cannot be repeated")
 	}
 	parsed, err := strconv.ParseBool(value)
 	if err != nil {
-		return errors.New("必須是 boolean")
+		return errors.New("must be boolean")
 	}
 	v.value, v.set = parsed, true
 	return nil
@@ -89,9 +89,9 @@ func runAuditCommandWithDeps(ctx context.Context, argv []string, out, errOut io.
 	fs := flag.NewFlagSet("audit list", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub audit [list] [filters] [--json] [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "  正常模式走 HTTP operator API；--db 僅供 Hub 完全停止時的 fenced break-glass。")
-		fmt.Fprintln(errOut, "  預設只納入最新 50 筆 operator boundary denials，避免拒絕噪音遮住控制動作；--denials all 可停用抽樣。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub audit [list] [filters] [--json] [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "  Normal mode uses HTTP operator API; --db is for fenced break-glass only when Hub is fully stopped.")
+		fmt.Fprintln(errOut, "  Only latest 50 operator boundary denials are included by default to avoid denial noise drowning control actions; --denials all disables sampling.")
 		fs.PrintDefaults()
 	}
 	var hubURL, dbPath auditStringFlag
@@ -100,29 +100,29 @@ func runAuditCommandWithDeps(ctx context.Context, argv []string, out, errOut io.
 	limit := auditIntFlag{value: operator.DefaultAuditReadLimit}
 	var jsonOutput auditBoolFlag
 	var actionValues repeatedAuditActions
-	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL（省略時自動發現）")
-	fs.Var(&dbPath, "db", "stopped-service direct DB break-glass 的既有 SQLite 檔位置")
-	fs.Var(&machine, "machine", "只看這個 machine_id（direct DB 也接受 display_name）")
-	fs.Var(&actionValues, "action", "只看這個 canonical audit action；可重複")
-	fs.Var(&outcome, "outcome", "只看 ok 或 failed")
-	fs.Var(&principal, "principal", "精確比對 auth_subject 或 who_user")
-	fs.Var(&capability, "capability", "精確比對 verified capability")
-	fs.Var(&sourceKind, "source-kind", "精確比對 source_kind")
-	fs.Var(&correlation, "correlation", "精確比對 idempotency key 或 request digest")
-	fs.Var(&from, "from", "起始時間（second-precision RFC3339，含端點）")
-	fs.Var(&to, "to", "結束時間（second-precision RFC3339，含端點）")
-	fs.Var(&denials, "denials", "operator denials：sampled 或 all（預設 sampled）")
-	fs.Var(&limit, "limit", "每頁最多幾筆（1..100）")
-	fs.Var(&cursor, "cursor", "上一頁回傳的 opaque next cursor")
-	fs.Var(&jsonOutput, "json", "輸出 stable operator JSON DTO")
+	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL (auto-discovered if omitted)")
+	fs.Var(&dbPath, "db", "existing SQLite file location for stopped-service direct DB break-glass")
+	fs.Var(&machine, "machine", "only this machine_id (direct DB also accepts display_name)")
+	fs.Var(&actionValues, "action", "only this canonical audit action; repeatable")
+	fs.Var(&outcome, "outcome", "only ok or failed")
+	fs.Var(&principal, "principal", "exact match on auth_subject or who_user")
+	fs.Var(&capability, "capability", "exact match on verified capability")
+	fs.Var(&sourceKind, "source-kind", "exact match on source_kind")
+	fs.Var(&correlation, "correlation", "exact match on idempotency key or request digest")
+	fs.Var(&from, "from", "start time (second-precision RFC3339, inclusive)")
+	fs.Var(&to, "to", "end time (second-precision RFC3339, inclusive)")
+	fs.Var(&denials, "denials", "operator denials: sampled or all (default sampled)")
+	fs.Var(&limit, "limit", "maximum items per page (1..100)")
+	fs.Var(&cursor, "cursor", "opaque next cursor returned by previous page")
+	fs.Var(&jsonOutput, "json", "output stable operator JSON DTO")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("audit list: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("audit list: positional arguments not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	if hubURL.set && dbPath.set {
-		return errors.New("audit list: --hub-url（HTTP mode）與 --db（direct mode）不可同時明示")
+		return errors.New("audit list: --hub-url (HTTP mode) and --db (direct mode) cannot both be specified explicitly")
 	}
 	for _, field := range []struct {
 		name  string
@@ -141,7 +141,7 @@ func runAuditCommandWithDeps(ctx context.Context, argv []string, out, errOut io.
 		}
 	}
 	if limit.value < 1 || limit.value > operator.MaxAuditReadLimit {
-		return fmt.Errorf("audit list: --limit 必須介於 1 與 %d", operator.MaxAuditReadLimit)
+		return fmt.Errorf("audit list: --limit must be between 1 and %d", operator.MaxAuditReadLimit)
 	}
 
 	request := operator.AuditListRequest{
@@ -153,7 +153,7 @@ func runAuditCommandWithDeps(ctx context.Context, argv []string, out, errOut io.
 	for _, value := range actionValues {
 		action := store.AuditAction(value)
 		if !store.IsKnownAuditAction(action) || seenActions[action] {
-			return fmt.Errorf("audit list: --action %q 不是 canonical action 或重複", value)
+			return fmt.Errorf("audit list: --action %q is not a canonical action or is repeated", value)
 		}
 		seenActions[action] = true
 		request.Actions = append(request.Actions, action)
@@ -161,13 +161,13 @@ func runAuditCommandWithDeps(ctx context.Context, argv []string, out, errOut io.
 	if outcome.value != "" {
 		request.Outcome = store.AuditOutcome(outcome.value)
 		if request.Outcome != store.AuditOutcomeOK && request.Outcome != store.AuditOutcomeFailed {
-			return errors.New("audit list: --outcome 必須是 ok 或 failed")
+			return errors.New("audit list: --outcome must be ok or failed")
 		}
 	}
 	if denials.value != "" {
 		request.Denials = operator.AuditDenialMode(denials.value)
 		if request.Denials != operator.AuditDenialsSampled && request.Denials != operator.AuditDenialsAll {
-			return errors.New("audit list: --denials 必須是 sampled 或 all")
+			return errors.New("audit list: --denials must be sampled or all")
 		}
 	}
 	for _, field := range []struct {
@@ -183,13 +183,13 @@ func runAuditCommandWithDeps(ctx context.Context, argv []string, out, errOut io.
 		}
 		parsed, err := time.Parse(time.RFC3339, field.value.value)
 		if err != nil || parsed.Nanosecond() != 0 {
-			return fmt.Errorf("audit list: --%s 必須是 second-precision RFC3339", field.name)
+			return fmt.Errorf("audit list: --%s must be second-precision RFC3339", field.name)
 		}
 		parsed = parsed.UTC()
 		field.set(&parsed)
 	}
 	if request.From != nil && request.To != nil && request.From.After(*request.To) {
-		return errors.New("audit list: --from 不可晚於 --to")
+		return errors.New("audit list: --from cannot be after --to")
 	}
 
 	if dbPath.set {
@@ -201,7 +201,7 @@ func runAuditCommandWithDeps(ctx context.Context, argv []string, out, errOut io.
 	}
 	result, err := client.AuditEvents(ctx, request)
 	if err != nil {
-		return fmt.Errorf("讀取 audit list 失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read audit list (HTTP operator API): %w", err)
 	}
 	return writeAuditList(out, result, jsonOutput.value, "HTTP operator API")
 }
@@ -209,27 +209,27 @@ func runAuditCommandWithDeps(ctx context.Context, argv []string, out, errOut io.
 func auditHTTPClient(explicitURL string, explicit bool, deps machineCommandDeps) (*operatorclient.Client, error) {
 	if explicit {
 		if deps.newOperatorClient == nil {
-			return nil, errors.New("audit list: operator HTTP client 未初始化")
+			return nil, errors.New("audit list: operator HTTP client not initialized")
 		}
 		client, err := deps.newOperatorClient(explicitURL)
 		if err != nil {
-			return nil, fmt.Errorf("audit list: 建立 HTTP operator client 失敗：%w", err)
+			return nil, fmt.Errorf("audit list: failed to create HTTP operator client: %w", err)
 		}
 		return client, nil
 	}
 	if deps.discoverHubURL == nil {
-		return nil, errors.New("audit list: Hub discovery 未初始化")
+		return nil, errors.New("audit list: Hub discovery not initialized")
 	}
 	discovered, err := deps.discoverHubURL()
 	if err != nil {
-		return nil, fmt.Errorf("audit list: 無法發現 Hub：%w", err)
+		return nil, fmt.Errorf("audit list: unable to discover Hub: %w", err)
 	}
 	if deps.newOperatorClient == nil {
-		return nil, errors.New("audit list: operator HTTP client 未初始化")
+		return nil, errors.New("audit list: operator HTTP client not initialized")
 	}
 	client, err := deps.newOperatorClient(discovered)
 	if err != nil {
-		return nil, fmt.Errorf("audit list: 建立 discovered HTTP operator client 失敗：%w", err)
+		return nil, fmt.Errorf("audit list: failed to create discovered HTTP operator client: %w", err)
 	}
 	return client, nil
 }
@@ -247,7 +247,7 @@ func runAuditDirect(ctx context.Context, request operator.AuditListRequest, dbPa
 		}
 		result, err := operator.New(st).ListAuditContext(ctx, request, time.Now().UTC())
 		if err != nil {
-			return fmt.Errorf("讀取 audit list 失敗（direct DB operator service）：%w", err)
+			return fmt.Errorf("failed to read audit list (direct DB operator service): %w", err)
 		}
 		return writeAuditList(out, result, jsonOutput, "direct DB operator service")
 	})
@@ -261,16 +261,16 @@ func writeAuditList(out io.Writer, result operator.AuditListResult, jsonOutput b
 		return encoder.Encode(result)
 	}
 	if _, err := fmt.Fprintf(out,
-		"%s；Hub 評估時間 %s；consistency %s；依 writer sequence 的固定 creation ceiling 分頁。\n"+
-			"可見 %d / 採樣前符合 %d 筆（成功 %d、失敗 %d、結果無法判讀 %d）。\n"+
-			"operator denials：%s，符合 %d、納入 %d、省略 %d。\n",
+		"%s; Hub evaluated at %s; consistency %s; paginated by fixed creation ceiling on writer sequence.\n"+
+			"visible %d / %d matching before sampling (succeeded %d, failed %d, unknown outcome %d).\n"+
+			"operator denials: %s, matched %d, included %d, omitted %d.\n",
 		source, result.EvaluatedAt.Format(time.RFC3339Nano), result.Consistency, result.Total, result.MatchedTotal,
 		result.Succeeded, result.Failed, result.UnknownOutcome, result.Denials.Mode,
 		result.Denials.Matched, result.Denials.Included, result.Denials.Omitted); err != nil {
 		return err
 	}
 	if len(result.Items) == 0 {
-		_, err := fmt.Fprintln(out, "沒有符合 filter 的稽核事件。")
+		_, err := fmt.Fprintln(out, "No audit events match the filter.")
 		return err
 	}
 	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
@@ -288,7 +288,7 @@ func writeAuditList(out io.Writer, result operator.AuditListResult, jsonOutput b
 		}
 		// Keep this wording aligned with internal/web/templates/audit.html;
 		// tests must catch drift between the two presentations.
-		subject := "對象無法判讀"
+		subject := "undecodable subject"
 		if event.Subject != "" {
 			subject = terminalSafe(event.Subject)
 		}

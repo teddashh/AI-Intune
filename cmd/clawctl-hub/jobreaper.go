@@ -54,7 +54,7 @@ func judgeJobs(jobs []store.ReapableJob, now time.Time, lease time.Duration) []j
 func (h *hub) reapJobs(now time.Time) {
 	jobs, err := h.store.ReapableJobs()
 	if err != nil {
-		log.Printf("工作單 reaper：讀取待判決工作單失敗：%v", err)
+		log.Printf("job reaper: failed to read jobs for verdict: %v", err)
 		return
 	}
 	h.applyJobVerdicts(judgeJobs(jobs, now.UTC(), jobLeaseDuration), now)
@@ -64,14 +64,14 @@ func (h *hub) applyJobVerdicts(verdicts []jobVerdict, now time.Time) {
 	for _, verdict := range verdicts {
 		if _, err := h.store.AdvanceJobByHub(verdict.job.JobID, verdict.event, now, verdict.job.State); err != nil {
 			if errors.Is(err, store.ErrJobNotFound) {
-				log.Printf("工作單 reaper 讓給 agent：job=%s 原狀態=%s", verdict.job.JobID, verdict.job.State)
+				log.Printf("job reaper yielding to agent: job=%s previous_state=%s", verdict.job.JobID, verdict.job.State)
 				continue
 			}
-			log.Printf("工作單 reaper 判決失敗：job=%s event=%s：%v", verdict.job.JobID, verdict.event, err)
+			log.Printf("job reaper verdict failed: job=%s event=%s: %v", verdict.job.JobID, verdict.event, err)
 			continue
 		}
 		if err := h.store.RecordHubEvent(verdict.kind, verdict.detail, now.UTC()); err != nil {
-			log.Printf("工作單 reaper 寫不進 Hub 自己的日誌：job=%s kind=%s：%v",
+			log.Printf("job reaper failed to record Hub event: job=%s kind=%s: %v",
 				verdict.job.JobID, verdict.kind, err)
 		}
 	}

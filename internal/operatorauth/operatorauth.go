@@ -75,25 +75,25 @@ var (
 // exact capability keys understood by this binary.
 func NamesForPrefix(prefix string) (CapabilityNames, error) {
 	if prefix == "" || prefix != strings.TrimSpace(prefix) || strings.ToLower(prefix) != prefix {
-		return CapabilityNames{}, errors.New("operator capability prefix 必須是沒有空白的全小寫名稱")
+		return CapabilityNames{}, errors.New("operator capability prefix must be a lowercase name without whitespace")
 	}
 	parts := strings.Split(prefix, "/")
 	if len(parts) != 3 || parts[1] != "cap" || !capabilitySlug.MatchString(parts[2]) {
-		return CapabilityNames{}, fmt.Errorf("operator capability prefix %q 必須是 <owned-domain>/cap/<application>", prefix)
+		return CapabilityNames{}, fmt.Errorf("operator capability prefix %q must be <owned-domain>/cap/<application>", prefix)
 	}
 	domain := parts[0]
 	labels := strings.Split(domain, ".")
 	if len(labels) < 2 {
-		return CapabilityNames{}, fmt.Errorf("operator capability domain %q 必須是受控網域，不接受單一 label", domain)
+		return CapabilityNames{}, fmt.Errorf("operator capability domain %q must be a controlled domain and cannot be a single label", domain)
 	}
 	for _, label := range labels {
 		if !domainLabelPattern.MatchString(label) {
-			return CapabilityNames{}, fmt.Errorf("operator capability domain %q 格式不合法", domain)
+			return CapabilityNames{}, fmt.Errorf("operator capability domain %q format is invalid", domain)
 		}
 	}
 	if domain == "tailscale.com" || strings.HasSuffix(domain, ".tailscale.com") ||
 		domain == "tailscale.io" || strings.HasSuffix(domain, ".tailscale.io") {
-		return CapabilityNames{}, fmt.Errorf("operator capability domain %q 是 Tailscale 保留 namespace", domain)
+		return CapabilityNames{}, fmt.Errorf("operator capability domain %q is a reserved Tailscale namespace", domain)
 	}
 	return CapabilityNames{
 		View: prefix + "-view", Operate: prefix + "-operate", Admin: prefix + "-admin",
@@ -164,12 +164,12 @@ func New(config Config) (*Authorizer, error) {
 
 func NewWithResolver(config Config, resolver Resolver) (*Authorizer, error) {
 	if resolver == nil {
-		return nil, errors.New("operator auth resolver 不可為 nil")
+		return nil, errors.New("operator auth resolver cannot be nil")
 	}
 	destination := config.Destination
 	if !destination.IsValid() || destination.Zone() != "" || destination.IsUnspecified() ||
 		destination.Unmap().IsLoopback() || !tsaddr.IsTailscaleIP(destination) {
-		return nil, fmt.Errorf("operator auth destination %q 必須是明確的 Tailscale listener IP", destination)
+		return nil, fmt.Errorf("operator auth destination %q must be an explicit Tailscale listener IP", destination)
 	}
 	names, err := NamesForPrefix(config.CapabilityPrefix)
 	if err != nil {
@@ -177,7 +177,7 @@ func NewWithResolver(config Config, resolver Resolver) (*Authorizer, error) {
 	}
 	timeout := config.ResolveTimeout
 	if timeout < 0 {
-		return nil, errors.New("operator auth resolve timeout 不可為負數")
+		return nil, errors.New("operator auth resolve timeout cannot be negative")
 	}
 	if timeout == 0 {
 		timeout = defaultResolveTimeout
@@ -262,7 +262,7 @@ func (p Principal) PermissionLabel() string {
 		}
 	}
 	if len(granted) == 0 {
-		return "沒有 operator capability"
+		return "no operator capabilities"
 	}
 	return strings.Join(granted, ",")
 }
@@ -270,10 +270,10 @@ func (p Principal) PermissionLabel() string {
 func (p Principal) Attribution() string {
 	device := p.DeviceName
 	if device == "" {
-		device = firstNonEmpty(p.SourceAddr, "未知裝置")
+		device = firstNonEmpty(p.SourceAddr, "unknown device")
 	}
-	user := firstNonEmpty(p.TailnetUserLogin, p.TailnetDisplayName, "未知使用者")
-	return fmt.Sprintf("來源裝置 %s；Tailscale 使用者 %s", device, user)
+	user := firstNonEmpty(p.TailnetUserLogin, p.TailnetDisplayName, "unknown user")
+	return fmt.Sprintf("source device %s; Tailscale user %s", device, user)
 }
 
 type principalContextKey struct{}
@@ -297,15 +297,15 @@ func (a *Authorizer) Authorize(r *http.Request, required Permission) (*http.Requ
 	if !ok {
 		err := fmt.Errorf("unknown operator permission %d", required)
 		return nil, deny(http.StatusServiceUnavailable, AuthConfigurationInvalid,
-			"這條 operator route 沒有有效的 capability 分類", Principal{}, err)
+			"operator route does not have a valid capability classification", Principal{}, err)
 	}
 	if r == nil || strings.TrimSpace(r.RemoteAddr) == "" {
 		return nil, deny(http.StatusUnauthorized, Unauthenticated,
-			"無法從連線取得 operator 來源位址", Principal{}, nil)
+			"unable to obtain operator source address from connection", Principal{}, nil)
 	}
 	if host, ok := remoteHost(r.RemoteAddr); !ok || !tsaddr.IsTailscaleIP(host) {
 		return nil, deny(http.StatusUnauthorized, Unauthenticated,
-			"operator request 必須直接從可由 Tailscale 識別的來源位址進入", Principal{SourceAddr: r.RemoteAddr}, nil)
+			"operator request must enter directly from a source address identifiable by Tailscale", Principal{SourceAddr: r.RemoteAddr}, nil)
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), a.timeout)
@@ -313,64 +313,64 @@ func (a *Authorizer) Authorize(r *http.Request, required Permission) (*http.Requ
 	status, err := a.resolver.Status(ctx)
 	if err != nil {
 		return nil, deny(http.StatusServiceUnavailable, AuthSourceUnavailable,
-			"Tailscale LocalAPI 無法確認 daemon 與本機 listener 狀態", Principal{SourceAddr: sourceHost(r.RemoteAddr)}, err)
+			"Tailscale LocalAPI cannot verify daemon and local listener status", Principal{SourceAddr: sourceHost(r.RemoteAddr)}, err)
 	}
 	if status.BackendState != "Running" {
 		err := fmt.Errorf("tailscaled backend state is %q, want Running", status.BackendState)
 		return nil, deny(http.StatusServiceUnavailable, AuthSourceUnavailable,
-			"tailscaled 尚未進入 Running，不能提供 operator authority", Principal{SourceAddr: sourceHost(r.RemoteAddr)}, err)
+			"tailscaled has not entered Running state, cannot provide operator authority", Principal{SourceAddr: sourceHost(r.RemoteAddr)}, err)
 	}
 	if !version.AtLeast(status.Version, minimumDaemonVersion) {
 		err := fmt.Errorf("tailscaled version %q is older than required %s", status.Version, minimumDaemonVersion)
 		return nil, deny(http.StatusServiceUnavailable, AuthSourceUnavailable,
-			fmt.Sprintf("tailscaled 必須至少是 %s，否則 dst_ip 不能當成授權邊界", minimumDaemonVersion), Principal{SourceAddr: sourceHost(r.RemoteAddr)}, err)
+			fmt.Sprintf("tailscaled must be at least %s; otherwise dst_ip cannot serve as authorization boundary", minimumDaemonVersion), Principal{SourceAddr: sourceHost(r.RemoteAddr)}, err)
 	}
 	if !containsLocalIP(status.TailscaleIPs, a.destination) {
 		err := fmt.Errorf("configured destination %s is not one of LocalAPI status IPs %v", a.destination, status.TailscaleIPs)
 		return nil, deny(http.StatusServiceUnavailable, AuthConfigurationInvalid,
-			"operator destination 不是這台機器目前持有的 Tailscale IP", Principal{SourceAddr: sourceHost(r.RemoteAddr)}, err)
+			"operator destination is not a Tailscale IP currently held by this machine", Principal{SourceAddr: sourceHost(r.RemoteAddr)}, err)
 	}
 	who, err := a.resolver.WhoIsForIP(ctx, r.RemoteAddr, a.destination)
 	if err != nil {
 		if errors.Is(err, local.ErrPeerNotFound) {
 			return nil, deny(http.StatusUnauthorized, Unauthenticated,
-				"Tailscale 找不到這個來源連線的身分", Principal{SourceAddr: sourceHost(r.RemoteAddr)}, err)
+				"Tailscale cannot find identity for this source connection", Principal{SourceAddr: sourceHost(r.RemoteAddr)}, err)
 		}
 		return nil, deny(http.StatusServiceUnavailable, AuthSourceUnavailable,
-			"Tailscale LocalAPI 無法驗證 operator 身分", Principal{SourceAddr: sourceHost(r.RemoteAddr)}, err)
+			"Tailscale LocalAPI cannot verify operator identity", Principal{SourceAddr: sourceHost(r.RemoteAddr)}, err)
 	}
 	if who == nil || who.Node == nil {
 		err := errors.New("Tailscale LocalAPI returned an incomplete WhoIs response")
 		return nil, deny(http.StatusServiceUnavailable, AuthSourceUnavailable,
-			"Tailscale LocalAPI 回傳不完整的身分資料", Principal{SourceAddr: sourceHost(r.RemoteAddr)}, err)
+			"Tailscale LocalAPI returned incomplete identity data", Principal{SourceAddr: sourceHost(r.RemoteAddr)}, err)
 	}
 
 	principal := principalFromWho(r.RemoteAddr, who)
 	principal.AuthMethod = AuthMethodLocalAPI
 	if len(who.Node.Tags) != 0 || who.UserProfile == nil || strings.TrimSpace(who.UserProfile.LoginName) == "" {
 		return nil, deny(http.StatusForbidden, HumanPrincipalRequired,
-			"operator plane 只接受有明確 Tailscale 使用者的非 tagged 裝置", principal, nil)
+			"operator plane accepts only non-tagged devices with explicit Tailscale users", principal, nil)
 	}
 	if who.UserProfile.ID == 0 || who.Node.StableID == "" {
 		err := errors.New("Tailscale LocalAPI identity lacks a stable user or node ID")
 		return nil, deny(http.StatusServiceUnavailable, AuthSourceUnavailable,
-			"Tailscale LocalAPI 回傳的 operator 身分缺少穩定識別碼", principal, err)
+			"operator identity returned by Tailscale LocalAPI lacks stable identifier", principal, err)
 	}
 	granted, err := a.readCapabilities(who.CapMap)
 	if err != nil {
 		return nil, deny(http.StatusServiceUnavailable, AuthConfigurationInvalid,
-			"Tailscale grant 內的 clawctl capability 格式不合法", principal, err)
+			"clawctl capability format in Tailscale grant is invalid", principal, err)
 	}
 	principal.GrantedCapabilities = granted
 	if !principal.Has(required) {
 		return nil, deny(http.StatusForbidden, CapabilityRequired,
-			fmt.Sprintf("這個 Tailscale 身分缺少 %s", wanted), principal, nil)
+			fmt.Sprintf("Tailscale identity is missing %s", wanted), principal, nil)
 	}
 
 	principal.AuthorizedCapability = wanted
 	return WithPrincipal(r, principal), Decision{
 		Allowed: true, HTTPStatus: http.StatusOK, Code: Authorized,
-		Detail: "Tailscale LocalAPI 身分與 app capability 已驗證", Principal: principal,
+		Detail: "Tailscale LocalAPI identity and app capability verified", Principal: principal,
 	}
 }
 

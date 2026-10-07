@@ -14,7 +14,7 @@ import (
 )
 
 func TestAntigravityPreviewAPIAndCLINamePublishedVersion(t *testing.T) {
-	const sentence = "上游目前只提供 Antigravity 1.2.15；改用這個版號重新 Preview。"
+	const sentence = "upstream currently only provides Antigravity 1.2.15; retry Preview with this version"
 	recorder := httptest.NewRecorder()
 	writeOperatorArtifactFetchPreviewError(recorder, &artifact.UpstreamVersionError{
 		Name: "antigravity", Requested: "1.2.13", Published: "1.2.15",
@@ -68,7 +68,7 @@ func TestAntigravityPreviewAPIAndCLINamePublishedVersion(t *testing.T) {
 }
 
 func TestAntigravityDirectPreviewNamesPublishedVersion(t *testing.T) {
-	const sentence = "上游目前只提供 Antigravity 1.2.15；改用這個版號重新 Preview。"
+	const sentence = "upstream currently only provides Antigravity 1.2.15; retry Preview with this version"
 	backend := artifactFetchCLIBackend{
 		source: "direct DB operator service",
 		preview: func(operator.ArtifactFetchPreviewRequest) (operator.ArtifactFetchPreviewResult, error) {

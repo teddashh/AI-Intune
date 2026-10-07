@@ -167,7 +167,7 @@ func TestJobCreateCLIRejectsRemovedWriterFlagsBeforeTransport(t *testing.T) {
 	err := runJobCreateCommandWithDeps(t.Context(), []string{
 		"--kind", "noop", "--machine", "machine-1", "--preview", "--spec", `{"kind":"noop"}`,
 	}, &out, &errOut, deps)
-	if err == nil || !strings.Contains(err.Error(), "--spec 不適用") || out.Len() != 0 {
+	if err == nil || !strings.Contains(err.Error(), "--spec is not supported") || out.Len() != 0 {
 		t.Fatalf("err=%v out=%q", err, out.String())
 	}
 }

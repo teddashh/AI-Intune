@@ -15,7 +15,7 @@ import (
 func (h *hub) advanceDeployments(now time.Time) {
 	views, err := h.store.RunningDeployments(now)
 	if err != nil {
-		log.Printf("deployment driver：讀取 running deployments 失敗：%v", err)
+		log.Printf("deployment driver: failed to read running deployments: %v", err)
 		return
 	}
 	for _, view := range views {
@@ -32,26 +32,26 @@ func (h *hub) advanceDeployments(now time.Time) {
 		case rollout.Pause:
 			changed, err := h.store.SetDeploymentState(view.DeploymentID, store.DeploymentRunning, store.DeploymentPaused, now)
 			if err != nil {
-				log.Printf("deployment driver：暫停 %s 失敗：%v", view.DeploymentID, err)
+				log.Printf("deployment driver: failed to pause %s: %v", view.DeploymentID, err)
 				continue
 			}
 			if changed {
 				detail := fmt.Sprintf("deployment %s 批次 %d 失敗即停；machines=%s", view.DeploymentID, view.OpenedBatch, strings.Join(decision.StuckMachineIDs, ","))
 				if err := h.store.RecordHubEvent(store.HubDeploymentPaused, detail, now); err != nil {
-					log.Printf("deployment driver：寫 pause 事件失敗：%v", err)
+					log.Printf("deployment driver: failed to record pause event: %v", err)
 				}
 			}
 		case rollout.OpenNext:
 			if view.PauseAfterCanary && view.OpenedBatch == 1 {
 				changed, err := h.store.SetDeploymentState(view.DeploymentID, store.DeploymentRunning, store.DeploymentPaused, now)
 				if err != nil {
-					log.Printf("deployment driver：canary hold 暫停 %s 失敗：%v", view.DeploymentID, err)
+					log.Printf("deployment driver: canary hold failed to pause %s: %v", view.DeploymentID, err)
 					continue
 				}
 				if changed {
 					detail := fmt.Sprintf("deployment %s canary batch succeeded；expansion waits for explicit Continue", view.DeploymentID)
 					if err := h.store.RecordHubEvent(store.HubDeploymentCanaryHeld, detail, now); err != nil {
-						log.Printf("deployment driver：寫 canary hold 事件失敗：%v", err)
+						log.Printf("deployment driver: failed to record canary hold event: %v", err)
 					}
 				}
 				continue
@@ -59,32 +59,32 @@ func (h *hub) advanceDeployments(now time.Time) {
 			if _, err := h.store.OpenDeploymentBatch(view.DeploymentID, view.OpenedBatch+1, now); err != nil {
 				kind, deterministic := store.DeploymentBoundaryPauseKind(err)
 				if !deterministic {
-					log.Printf("deployment driver：%s 第 %d 批沒有開成，本輪略過：%v",
+					log.Printf("deployment driver: %s failed to open batch %d, skipping this round: %v",
 						view.DeploymentID, view.OpenedBatch+1, err)
 					continue
 				}
 				changed, pauseErr := h.store.PauseDeploymentAtBoundary(
 					view.DeploymentID, view.OpenedBatch, kind, err.Error(), now)
 				if pauseErr != nil {
-					log.Printf("deployment driver：第 %d 批被 %s 擋住，但暫停 %s 失敗：%v",
+					log.Printf("deployment driver: batch %d blocked by %s, but failed to pause %s: %v",
 						view.OpenedBatch+1, kind, view.DeploymentID, pauseErr)
 					continue
 				}
 				if changed {
-					log.Printf("deployment driver：%s 在 batch %d 後被安全閘門停住：%v",
+					log.Printf("deployment driver: %s paused by safety boundary after batch %d: %v",
 						view.DeploymentID, view.OpenedBatch, err)
 				}
 			}
 		case rollout.Finish:
 			changed, err := h.store.SetDeploymentState(view.DeploymentID, store.DeploymentRunning, store.DeploymentFinished, now)
 			if err != nil {
-				log.Printf("deployment driver：完成 %s 失敗：%v", view.DeploymentID, err)
+				log.Printf("deployment driver: failed to finish %s: %v", view.DeploymentID, err)
 				continue
 			}
 			if changed {
 				if err := h.store.RecordHubEvent(store.HubDeploymentFinished,
 					fmt.Sprintf("deployment %s 所有已規劃批次完成", view.DeploymentID), now); err != nil {
-					log.Printf("deployment driver：寫 finished 事件失敗：%v", err)
+					log.Printf("deployment driver: failed to record finished event: %v", err)
 				}
 			}
 		}

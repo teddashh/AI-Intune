@@ -27,7 +27,7 @@ func openJournal(path string) (*os.File, error) {
 	file := os.NewFile(uintptr(handle), path)
 	if file == nil {
 		_ = windows.CloseHandle(handle)
-		return nil, errors.New("無法開啟水位日誌")
+		return nil, errors.New("cannot open journal")
 	}
 	return finishOpenJournal(file)
 }

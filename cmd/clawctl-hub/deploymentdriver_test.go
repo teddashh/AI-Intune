@@ -275,7 +275,7 @@ func TestDeploymentDriverPausesDeterministicBoundaryBlocksWithOneVisibleEvent(t 
 			},
 		},
 		{
-			name: "deferred target changed channel", wantKind: store.DeploymentPauseTargetChanged, wantReason: "不再是未退場的 canary 成員",
+			name: "deferred target changed channel", wantKind: store.DeploymentPauseTargetChanged, wantReason: "is no longer an active canary member",
 			arrange: func(t *testing.T, f jobsFixture, d store.Deployment) {
 				target := driverTargetInBatch(t, f.store, d.DeploymentID, 2)
 				if _, err := f.store.DB().Exec(`UPDATE machine_registry SET channel='stable' WHERE machine_id=?`, target.MachineID); err != nil {

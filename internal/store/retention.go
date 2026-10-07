@@ -93,12 +93,12 @@ func (p RetentionPolicy) Validate() error {
 		{"occupancy", p.Occupancy},
 	} {
 		if c.d <= 0 {
-			return fmt.Errorf("retention: %s 的保留期是 %v —— 0 或負數會清掉全部", c.name, c.d)
+			return fmt.Errorf("retention: %s retention period is %v; zero or negative would purge everything", c.name, c.d)
 		}
 		if c.d <= longestReadWindow {
 			return fmt.Errorf(
-				"retention: %s 只留 %v，但畫面上有一段會讀到 %v 前的資料 —— "+
-					"那一段會安靜地少講一段時間，然後看起來像「這段時間沒事」",
+				"retention: %s retains only %v, but a UI window reads data up to %v ago; "+
+					"that view would silently drop part of the range and look as if nothing happened during that time",
 				c.name, c.d, longestReadWindow)
 		}
 	}
@@ -419,7 +419,7 @@ func pruneReportTx(tx dbTx, now time.Time, p RetentionPolicy, dryRun bool) (Prun
 		if err := tx.QueryRow(
 			fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE %s`, j.table, kpt), cut).
 			Scan(&kept); err != nil {
-			return rep, fmt.Errorf("store: prune 數留下來的 %s: %w", j.table, err)
+			return rep, fmt.Errorf("store: prune count retained %s: %w", j.table, err)
 		}
 		rep.KeptNewest += kept
 
@@ -428,7 +428,7 @@ func pruneReportTx(tx dbTx, now time.Time, p RetentionPolicy, dryRun bool) (Prun
 			if err := tx.QueryRow(
 				fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE %s`, j.table, del), cut).
 				Scan(&n); err != nil {
-				return rep, fmt.Errorf("store: prune 預演 %s: %w", j.table, err)
+				return rep, fmt.Errorf("store: prune dry run %s: %w", j.table, err)
 			}
 		} else {
 			res, err := tx.Exec(
@@ -455,7 +455,7 @@ func writeRetentionLogTx(tx dbTx, rep PruneReport) error {
 INSERT INTO retention_log (at, table_name, rows_deleted, older_than, kept_newest)
 VALUES (?,?,?,?,?)`,
 			fmtTime(rep.At), c.Table, c.Deleted, fmtTime(c.Older), c.Kept); err != nil {
-			return fmt.Errorf("store: retention log（清理已回滾）: %w", err)
+			return fmt.Errorf("store: retention log (purge rolled back): %w", err)
 		}
 	}
 	return nil
@@ -485,7 +485,7 @@ SELECT at, SUM(rows_deleted) FROM retention_log
 	case e != nil:
 		// ⚠ 表不見了、資料庫壞了、查詢寫錯了 —— 全部走這裡，而且要往上吼。
 		// 這一條跟上面那一條在畫面上必須講不一樣的話。
-		return time.Time{}, 0, false, fmt.Errorf("store: 讀清理紀錄: %w", e)
+		return time.Time{}, 0, false, fmt.Errorf("store: read retention log: %w", e)
 	}
 	return parseTime(atStr), rows, true, nil
 }
@@ -502,7 +502,7 @@ func (s *Store) OldestObservation(machineID string) (time.Time, bool, error) {
 	if err := s.rdb.QueryRow(
 		`SELECT MIN(measured_at) FROM observed_state WHERE machine_id = ?`,
 		machineID).Scan(&at); err != nil {
-		return time.Time{}, false, fmt.Errorf("store: 讀最舊的觀測: %w", err)
+		return time.Time{}, false, fmt.Errorf("store: read oldest observation: %w", err)
 	}
 	if !at.Valid || at.String == "" {
 		// 這台身上一筆觀測都沒有。不是錯誤 —— 而且單機頁本來就會

@@ -33,7 +33,7 @@ func (s *Server) openTerminal(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status, detail := terminalOpenRefusal(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator terminal open 失敗 machine=%s: %v", machineID, err)
+			log.Printf("operator terminal open failed machine=%s: %v", machineID, err)
 		}
 		s.refuseTerminalOpen(w, r, machineID, status, detail)
 		return

@@ -62,7 +62,7 @@ func (h *hub) handleListOperatorVerifiers(w http.ResponseWriter, r *http.Request
 	}
 	result, err := operator.New(h.store).Verifiers()
 	if err != nil {
-		log.Printf("讀取 operator verifier list 失敗: %v", err)
+		log.Printf("failed to read operator verifier list: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 verifier list 失敗")
 		return
 	}
@@ -79,7 +79,7 @@ func (h *hub) handleGetOperatorVerifier(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		status, code, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("讀取 operator verifier detail 失敗 verifier=%q: %v", r.PathValue("id"), err)
+			log.Printf("failed to read operator verifier detail verifier=%q: %v", r.PathValue("id"), err)
 		}
 		writeErr(w, status, code, detail)
 		return
@@ -108,7 +108,7 @@ func (h *hub) handlePreviewOperatorVerifier(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		status, code, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator verifier preview 失敗: %v", err)
+			log.Printf("operator verifier preview failed: %v", err)
 		}
 		writeErr(w, status, code, detail)
 		return
@@ -141,7 +141,7 @@ func (h *hub) handleCreateOperatorVerifier(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		status, code, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator verifier register 失敗: %v", err)
+			log.Printf("operator verifier register failed: %v", err)
 		}
 		var rejection *store.OperatorRequestError
 		if errors.As(err, &rejection) && rejection.Replayed {
@@ -200,7 +200,7 @@ func (h *hub) handlePreviewOperatorVerifierRevocation(w http.ResponseWriter, r *
 	if err != nil {
 		status, code, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator verifier revocation preview 失敗 verifier=%s: %v", r.PathValue("id"), err)
+			log.Printf("operator verifier revocation preview failed verifier=%s: %v", r.PathValue("id"), err)
 		}
 		writeErr(w, status, code, detail)
 		return
@@ -232,7 +232,7 @@ func (h *hub) handleCreateOperatorVerifierRevocation(w http.ResponseWriter, r *h
 	if err != nil {
 		status, code, detail := operator.HTTPError(err)
 		if status == http.StatusInternalServerError {
-			log.Printf("operator verifier revocation 失敗 verifier=%s: %v", r.PathValue("id"), err)
+			log.Printf("operator verifier revocation failed verifier=%s: %v", r.PathValue("id"), err)
 		}
 		var rejection *store.OperatorRequestError
 		if errors.As(err, &rejection) && rejection.Replayed {

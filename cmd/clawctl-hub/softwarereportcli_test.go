@@ -64,9 +64,9 @@ func TestSoftwareCLIPrintsWhatIsInstalledAndWhatItCannotKnow(t *testing.T) {
 	text := runSoftwareCLI(t)
 	for _, want := range []string{
 		"分母", "回報過", operator.SoftwareReportCaveat,
-		"個工具", "工具", "有", "沒有", "沒回報過", "機隊裡最新", "版號",
+		"tools", "tool", "present", "absent", "unreported", "newest in fleet", "versions",
 		"claude", "gemini", "openclaw",
-		"2.1.195", "2026.6.10（檔案上讀的）",
+		"2.1.195", "2026.6.10 (read from file)",
 		"never-came",
 		operator.SoftwareStateTitle(operator.SoftwareUnreported),
 		operator.SoftwareStateTitle(operator.SoftwareAbsent),
@@ -108,8 +108,8 @@ func TestTheSoftwareCLIFirstLineCountsTheMachinesThatReported(t *testing.T) {
 // 是 X，這一台是 Y」都假設那個版號講的是機隊上真的在跑的東西。
 func TestSoftwareCLILeadsWithTheVersionThatIsNotRunning(t *testing.T) {
 	text := runSoftwareCLI(t)
-	head := strings.Index(text, "格的版號講的不是正在跑的那一份")
-	tools := strings.Index(text, "個工具\n")
+	head := strings.Index(text, "visible versions measure an installation that is not running")
+	tools := strings.Index(text, "tools\n")
 	if head < 0 || tools < 0 || head > tools {
 		t.Fatalf("錯歸因那一段不在工具那張表前面：head=%d tools=%d\n%s", head, tools, text)
 	}

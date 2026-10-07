@@ -396,7 +396,7 @@ func TestDeploymentRecoveryLoadedFileIsReverifiedImmediatelyBeforeApply(t *testi
 	}
 	errOut := &deploymentRecoveryRemovingWriter{path: path}
 	err := executeDeploymentMutation(inputs, operations, io.Discard, errOut)
-	if err == nil || calledApply || !strings.Contains(err.Error(), "apply 前") {
+	if err == nil || calledApply || !strings.Contains(err.Error(), "before apply") {
 		t.Fatalf("changed loaded receipt err=%v called_apply=%t", err, calledApply)
 	}
 }
@@ -582,7 +582,7 @@ func TestRemoveDeploymentRecoveryDoesNotDeleteSwappedFile(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if err == nil || !strings.Contains(err.Error(), "unlink 前改變") {
+	if err == nil || !strings.Contains(err.Error(), "changed before unlink") {
 		t.Fatalf("swapped recovery cleanup err=%v", err)
 	}
 	got, readErr := os.ReadFile(path)

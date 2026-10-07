@@ -27,11 +27,11 @@ type ticketDaysFlag struct {
 func (value *ticketDaysFlag) String() string { return strconv.Itoa(value.value) }
 func (value *ticketDaysFlag) Set(raw string) error {
 	if value.set {
-		return errors.New("不可重複")
+		return errors.New("cannot be repeated")
 	}
 	parsed, err := strconv.Atoi(raw)
 	if err != nil || strconv.Itoa(parsed) != raw {
-		return errors.New("必須是 canonical 十進位整數")
+		return errors.New("must be a canonical decimal integer")
 	}
 	value.value, value.set = parsed, true
 	return nil
@@ -54,31 +54,31 @@ func runTicketsCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 	fs := flag.NewFlagSet("tickets", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub tickets [--days 1..30] [--provider-ref sha256:…] [--json | --csv] [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "  正常模式走 HTTP operator API；--db 僅供 Hub 完全停止時的 fenced break-glass。")
-		fmt.Fprintln(errOut, "  固定視窗採 Hub received_at 的 [from,to]；驗證成功需搭配驗證證據。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub tickets [--days 1..30] [--provider-ref sha256:...] [--json | --csv] [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "  Normal mode uses the HTTP operator API; --db is fenced break-glass only when Hub is fully stopped.")
+		fmt.Fprintln(errOut, "  Fixed window uses Hub received_at [from,to]; verification success requires verification evidence.")
 		fs.PrintDefaults()
 	}
 	days := ticketDaysFlag{value: operator.DefaultTicketReadDays}
 	var hubURL, dbPath, providerRef auditStringFlag
 	var jsonOutput, csvOutput auditBoolFlag
-	fs.Var(&days, "days", "最近幾天（1..30；預設 7）")
-	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL（省略時自動發現）")
-	fs.Var(&dbPath, "db", "stopped-service direct DB break-glass 的既有 SQLite 檔位置")
-	fs.Var(&providerRef, "provider-ref", "精確比對 opaque provider_ref")
-	fs.Var(&jsonOutput, "json", "輸出 stable operator JSON DTO")
-	fs.Var(&csvOutput, "csv", "輸出安全的 UTF-8 CSV")
+	fs.Var(&days, "days", "recent days (1..30; default 7)")
+	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL (discovered automatically when omitted)")
+	fs.Var(&dbPath, "db", "existing SQLite file path for stopped-service direct DB break-glass")
+	fs.Var(&providerRef, "provider-ref", "exact match for opaque provider_ref")
+	fs.Var(&jsonOutput, "json", "output stable operator JSON DTO")
+	fs.Var(&csvOutput, "csv", "output safe UTF-8 CSV")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("tickets: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("tickets: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	if hubURL.set && dbPath.set {
-		return errors.New("tickets: --hub-url（HTTP mode）與 --db（direct mode）不可同時明示")
+		return errors.New("tickets: --hub-url (HTTP mode) and --db (direct mode) cannot both be specified")
 	}
 	if jsonOutput.value && csvOutput.value {
-		return errors.New("tickets: --json 與 --csv 不可同時使用")
+		return errors.New("tickets: --json and --csv cannot be used together")
 	}
 	for _, field := range []struct {
 		name  string
@@ -95,7 +95,7 @@ func runTicketsCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 	}
 	request := operator.TicketReadRequest{Days: days.value, ProviderRef: providerRef.value}
 	if request.Days < 1 {
-		return errors.New("tickets: --days 必須介於 1 與 30")
+		return errors.New("tickets: --days must be between 1 and 30")
 	}
 	if err := operator.ValidateTicketReadRequest(request); err != nil {
 		return fmt.Errorf("tickets: %w", err)
@@ -110,32 +110,32 @@ func runTicketsCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 	}
 	result, err := client.Tickets(ctx, request)
 	if err != nil {
-		return fmt.Errorf("讀取 tickets 失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read tickets (HTTP operator API): %w", err)
 	}
 	return writeTickets(out, result, jsonOutput.value, csvOutput.value, "HTTP operator API")
 }
 
 func ticketsHTTPClient(explicitURL string, explicit bool, deps machineCommandDeps) (*operatorclient.Client, error) {
 	if deps.newOperatorClient == nil {
-		return nil, errors.New("tickets: operator HTTP client 未初始化")
+		return nil, errors.New("tickets: operator HTTP client is not initialized")
 	}
 	if explicit {
 		client, err := deps.newOperatorClient(explicitURL)
 		if err != nil {
-			return nil, fmt.Errorf("tickets: 建立 HTTP operator client 失敗：%w", err)
+			return nil, fmt.Errorf("tickets: failed to create HTTP operator client: %w", err)
 		}
 		return client, nil
 	}
 	if deps.discoverHubURL == nil {
-		return nil, errors.New("tickets: Hub discovery 未初始化")
+		return nil, errors.New("tickets: Hub discovery is not initialized")
 	}
 	discovered, err := deps.discoverHubURL()
 	if err != nil {
-		return nil, fmt.Errorf("tickets: 無法發現 Hub：%w", err)
+		return nil, fmt.Errorf("tickets: unable to discover Hub: %w", err)
 	}
 	client, err := deps.newOperatorClient(discovered)
 	if err != nil {
-		return nil, fmt.Errorf("tickets: 建立 discovered HTTP operator client 失敗：%w", err)
+		return nil, fmt.Errorf("tickets: failed to create discovered HTTP operator client: %w", err)
 	}
 	return client, nil
 }
@@ -146,7 +146,7 @@ func runTicketsDirect(ctx context.Context, request operator.TicketReadRequest, d
 	return withDirectOperatorStore(ctx, "tickets", dbPath, deps, func(st *store.Store) error {
 		result, err := operator.New(st).ListTicketsContext(ctx, request, time.Now().UTC())
 		if err != nil {
-			return fmt.Errorf("讀取 tickets 失敗（direct DB operator service）：%w", err)
+			return fmt.Errorf("failed to read tickets (direct DB operator service): %w", err)
 		}
 		return writeTickets(out, result, jsonOutput, csvOutput, "direct DB operator service")
 	})
@@ -168,9 +168,9 @@ func writeTickets(out io.Writer, result operator.TicketReadResult, jsonOutput, c
 		return err
 	}
 	if _, err := fmt.Fprintf(out,
-		"%s；Hub 評估時間 %s；固定視窗 %s %s → %s（%d 天，%s）。\n"+
-			"報到率 %d%%（預期 %d 台，已回報 %d 台）；調度分析資格=%t。provider=%d，跑完回合=%d，有錯誤的回合=%d。\n"+
-			"資料界線：provider 是上游文字；錯誤保留原文；驗證成功需搭配驗證證據。\n",
+		"%s; Hub evaluation time %s; fixed window %s %s -> %s (%d days, %s)\n"+
+			"Reporting rate %d%% (expected %d, reported %d); scheduling analysis eligible=%t. provider=%d, completed runs=%d, error runs=%d\n"+
+			"Data boundaries: provider is upstream text; errors preserve original text; verification success requires verification evidence\n",
 		source, result.EvaluatedAt.Format(time.RFC3339), result.Window.Boundary,
 		result.Window.From.Format(time.RFC3339), result.Window.To.Format(time.RFC3339), result.Window.Days,
 		result.Window.TimeBasis, result.Roster.ReportingRatePercent, result.Roster.Expected,
@@ -179,11 +179,11 @@ func writeTickets(out io.Writer, result operator.TicketReadResult, jsonOutput, c
 		return err
 	}
 	if len(result.Items) == 0 {
-		_, err := fmt.Fprintln(out, "沒有符合篩選條件的票證使用量記錄。")
+		_, err := fmt.Fprintln(out, "No ticket occupancy records matched the filter")
 		return err
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	if _, err := fmt.Fprintln(table, "PROVIDER\t跑完回合\t尖峰/小時\t上次跑完（UTC）\t機器\t錯誤回合"); err != nil {
+	if _, err := fmt.Fprintln(table, "PROVIDER\tRUNS\tPEAK/HOUR\tLAST RUN (UTC)\tMACHINES\tERROR RUNS"); err != nil {
 		return err
 	}
 	for _, item := range result.Items {

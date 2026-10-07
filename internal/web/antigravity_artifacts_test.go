@@ -15,7 +15,7 @@ import (
 func TestArtifactFetchWebAntigravityPreviewNamesPublishedVersion(t *testing.T) {
 	s, _ := newServer(t)
 	const published = "1.2.15"
-	sentence := "上游目前只提供 Antigravity " + published + "；改用這個版號重新 Preview。"
+	sentence := "upstream currently only provides Antigravity " + published + "; retry Preview with this version"
 	fake := &fakeArtifactWebOperator{previewErr: &artifact.UpstreamVersionError{
 		Name: "antigravity", Requested: "1.2.13", Published: published,
 	}}

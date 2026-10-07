@@ -41,7 +41,7 @@ func TestEnrollTokenCLIHTTPFreshThenRedactedReplay(t *testing.T) {
 		t.Fatalf("secret delivery was not exactly stdout once: token_len=%d stderr_contains=%t stderr=%q",
 			len(token), strings.Contains(firstErr.String(), token), firstErr.String())
 	}
-	if !strings.Contains(firstErr.String(), "已加入名冊") {
+	if !strings.Contains(firstErr.String(), "added to roster") {
 		t.Fatalf("fresh stderr lacks effect/recovery coordinate: %q", firstErr.String())
 	}
 	if !strings.Contains(firstErr.String(), "./install-agent.sh --hub ") ||
@@ -66,7 +66,7 @@ func TestEnrollTokenCLIHTTPFreshThenRedactedReplay(t *testing.T) {
 	}
 	var replayOut, replayErr bytes.Buffer
 	err := runEnrollTokenCommandWithDeps(t.Context(), replayArgs, &replayOut, &replayErr, deps)
-	if err == nil || !strings.Contains(err.Error(), "token 不可重顯") ||
+	if err == nil || !strings.Contains(err.Error(), "token cannot be redisplayed") ||
 		!strings.Contains(err.Error(), key) {
 		t.Fatalf("replay error=%v stderr=%q", err, replayErr.String())
 	}
@@ -131,7 +131,7 @@ func TestEnrollTokenCLIPreviewDoesNotCreateState(t *testing.T) {
 	}, &out, &errOut, deps); err != nil {
 		t.Fatalf("preview: %v stderr=%q", err, errOut.String())
 	}
-	if !strings.Contains(out.String(), "preview-digest=sha256:") || !strings.Contains(out.String(), "進分母") {
+	if !strings.Contains(out.String(), "preview-digest=sha256:") || !strings.Contains(out.String(), "enter denominator") {
 		t.Fatalf("preview output=%q", out.String())
 	}
 	var afterMachines, afterLedger, afterAudit int
@@ -186,11 +186,11 @@ func TestEnrollTokenCLIPreviewSaysItWillBeRefusedAtTheLimit(t *testing.T) {
 		t.Fatalf("preview: %v stderr=%q", err, errOut.String())
 	}
 	line := out.String()
-	if strings.Contains(line, "會新增一台") || strings.Contains(line, "進分母") {
+	if strings.Contains(line, "will add one") || strings.Contains(line, "enter denominator") {
 		t.Fatalf("到上限的預覽仍在承諾它做不到的事：%q", line)
 	}
 	for _, want := range []string{
-		"現在建立不了", "上限 " + max + " 台", "先退役不用的機器", "preview-digest=sha256:",
+		"cannot be created now", "limit " + max + " machines", "retire unused machines", "preview-digest=sha256:",
 	} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("預覽少了 %q：%q", want, line)
@@ -209,7 +209,7 @@ func TestEnrollTokenCLIAllowsRevokeAsDisplayNameAfterFlagTerminator(t *testing.T
 	}, &out, &errOut, deps); err != nil {
 		t.Fatalf("preview display name revoke: %v; stderr=%q", err, errOut.String())
 	}
-	if !strings.Contains(out.String(), "preview: revoke 會新增一台 expected machine") || errOut.Len() != 0 {
+	if !strings.Contains(out.String(), "preview: revoke will add one expected machine") || errOut.Len() != 0 {
 		t.Fatalf("flag terminator did not preserve display name revoke: stdout=%q stderr=%q", out.String(), errOut.String())
 	}
 	var machines int
@@ -251,7 +251,7 @@ func TestEnrollTokenCLIRetryInputsMustBePaired(t *testing.T) {
 	} {
 		var out, errOut bytes.Buffer
 		err := runEnrollTokenCommandWithDeps(t.Context(), args, &out, &errOut, deps)
-		if err == nil || !strings.Contains(err.Error(), "必須成對提供") || out.Len() != 0 {
+		if err == nil || !strings.Contains(err.Error(), "must be provided together") || out.Len() != 0 {
 			t.Fatalf("args=%v error=%v stdout=%q", args, err, out.String())
 		}
 	}

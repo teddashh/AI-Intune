@@ -68,7 +68,7 @@ func (s *Service) RenameMachine(req MachineRenameRequest) (MachineRenameResult, 
 	}
 	if !alreadyAudited {
 		if auditErr := s.store.RecordAudit(entry); auditErr != nil {
-			log.Printf("operator machine rename audit 寫入失敗 machine=%s: %v", req.MachineID, auditErr)
+			log.Printf("operator machine rename audit write failed machine=%s: %v", req.MachineID, auditErr)
 		}
 	}
 	return result, err

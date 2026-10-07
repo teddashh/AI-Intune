@@ -27,13 +27,13 @@ func runVerifierAssign(ctx context.Context, argv []string, out, errOut io.Writer
 	deps machineCommandDeps,
 ) error {
 	fs, dbPath, hubURL := verifierFlagSet("assign", errOut)
-	jobID := fs.String("job", "", "要驗的工作單 job-id")
-	reason := fs.String("reason", "", "留在 audit 的理由")
-	confirmName := fs.String("confirm-name", "", "套用時必須逐字相同的 verifier display_name")
-	preview := fs.Bool("preview", false, "只顯示這次派工的影響，不寫入")
-	jsonOutput := fs.Bool("json", false, "輸出 stable operator JSON DTO（只用於 --preview）")
-	idempotencyKey := fs.String("idempotency-key", "", "重用同一個 request key")
-	previewDigest := fs.String("preview-digest", "", "已取得的 preview digest")
+	jobID := fs.String("job", "", "job-id of the job to verify")
+	reason := fs.String("reason", "", "reason recorded in audit")
+	confirmName := fs.String("confirm-name", "", "verbatim matching verifier display_name required on apply")
+	preview := fs.Bool("preview", false, "show impact of this assignment only, do not write")
+	jsonOutput := fs.Bool("json", false, "output stable operator JSON DTO (preview only)")
+	idempotencyKey := fs.String("idempotency-key", "", "reuse the same request key")
+	previewDigest := fs.String("preview-digest", "", "obtained preview digest")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
@@ -43,7 +43,7 @@ func runVerifierAssign(ctx context.Context, argv []string, out, errOut io.Writer
 	}
 	if fs.NArg() != 1 {
 		writeVerifierUsage(errOut)
-		return errors.New("verifier assign: 必須提供一個 verifier-id")
+		return errors.New("verifier assign: must provide a verifier-id")
 	}
 	verifierID := fs.Arg(0)
 	if err := validateVerifierIDArgument("assign", verifierID); err != nil {
@@ -53,13 +53,13 @@ func runVerifierAssign(ctx context.Context, argv []string, out, errOut io.Writer
 		return err
 	}
 	if strings.Contains(*jobID, "/") || *jobID == "." || *jobID == ".." {
-		return errors.New("verifier assign: --job 不可含斜線或 dot segment")
+		return errors.New("verifier assign: --job cannot contain slashes or dot segments")
 	}
 	seen := transport.seen
 	if *preview {
 		for _, name := range []string{"reason", "confirm-name"} {
 			if seen[name] {
-				return fmt.Errorf("verifier assign: --preview 不寫入，所以不接受 --%s", name)
+				return fmt.Errorf("verifier assign: --preview creates no writes and does not accept --%s", name)
 			}
 		}
 	} else {
@@ -70,7 +70,7 @@ func runVerifierAssign(ctx context.Context, argv []string, out, errOut io.Writer
 			return err
 		}
 		if *jsonOutput {
-			return errors.New("verifier assign: --json 只用於 --preview")
+			return errors.New("verifier assign: --json is only for --preview")
 		}
 	}
 	inputs := verifierAssignInputs{
@@ -98,7 +98,7 @@ func runVerifierAssignHTTP(ctx context.Context, client *operatorclient.Client,
 	if digest == "" {
 		preview, err := client.PreviewVerificationAssignment(ctx, inputs.VerifierID, inputs.JobID)
 		if err != nil {
-			return fmt.Errorf("verifier assign preview（HTTP operator API）失敗：%w", err)
+			return fmt.Errorf("verifier assign preview (HTTP operator API) failed: %w", err)
 		}
 		if inputs.Preview {
 			return writeVerifierAssignmentPreview(out, preview, inputs.JSON, "HTTP operator API")
@@ -118,7 +118,7 @@ func runVerifierAssignHTTP(ctx context.Context, client *operatorclient.Client,
 			PreviewDigest: digest, Reason: inputs.Reason,
 		})
 	if err != nil {
-		return fmt.Errorf("verifier assign（HTTP operator API；idempotency-key=%q preview-digest=%q%s）失敗：%w",
+		return fmt.Errorf("verifier assign (HTTP operator API; idempotency-key=%q preview-digest=%q%s) failed: %w",
 			key, digest, operatorRejectionReplayNote(err), err)
 	}
 	return writeVerifierAssignmentReceipt(out, result, key, digest)
@@ -132,7 +132,7 @@ func runVerifierAssignDirect(st *store.Store, inputs verifierAssignInputs, out, 
 			VerifierID: inputs.VerifierID, JobID: inputs.JobID,
 		})
 		if err != nil {
-			return fmt.Errorf("verifier assign preview（direct DB operator service）失敗：%w", err)
+			return fmt.Errorf("verifier assign preview (direct DB operator service) failed: %w", err)
 		}
 		if inputs.Preview {
 			return writeVerifierAssignmentPreview(out, preview, inputs.JSON, "direct DB operator service")
@@ -156,7 +156,7 @@ func runVerifierAssignDirect(st *store.Store, inputs verifierAssignInputs, out, 
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("verifier assign（direct DB operator service；idempotency-key=%q preview-digest=%q%s）失敗：%w",
+		return fmt.Errorf("verifier assign (direct DB operator service; idempotency-key=%q preview-digest=%q%s) failed: %w",
 			key, digest, operatorRejectionReplayNote(err), err)
 	}
 	return writeVerifierAssignmentReceipt(out, result, key, digest)
@@ -171,12 +171,12 @@ func writeVerifierAssignmentPreview(out io.Writer,
 	if jsonOutput {
 		return writeJobJSON(out, preview)
 	}
-	handout := "工作單已結束，派工後就會發給它"
+	handout := "job has ended; will be delivered immediately after assignment"
 	if preview.JobTerminalAt == nil {
-		handout = "工作單還在進行，等它結束才會發給它"
+		handout = "job is still in progress; will be delivered after it ends"
 	}
 	_, err := fmt.Fprintf(out,
-		"preview（%s）: %s（%s，failure_domain %s）會被指派去驗 %s 上的工作單 %s（目前 %s）。\n%s\nseparation_rule: %s；satisfied_by: %s\ncommands_supplied_by_hub: %t；grants_deployment_gate: %t\npreview-digest=%s\n",
+		"preview (%s): %s (%s, failure_domain %s) will be assigned to verify %s job %s (currently %s)\n%s\nseparation_rule: %s; satisfied_by: %s\ncommands_supplied_by_hub: %t; grants_deployment_gate: %t\npreview-digest=%s\n",
 		terminalSafe(source), terminalSafe(preview.VerifierName), terminalSafe(preview.VerifierKind),
 		terminalSafe(preview.FailureDomain), terminalSafe(preview.MachineName),
 		terminalSafe(preview.JobID), terminalSafe(preview.JobState), handout,
@@ -193,7 +193,7 @@ func writeVerifierAssignmentReceipt(out io.Writer,
 		state = "replayed"
 	}
 	_, err := fmt.Fprintf(out,
-		"%s: verifier %s（%s）要驗 %s 上的工作單 %s（assignment_id %s，assigned_at %s）。\n待它滿足 preview 固定的回報條件；派工不決定工作單成敗，只有授予部署閘的 verifier 完整回報才參與 stable promotion。\nidempotency-key=%s preview-digest=%s\n",
+		"%s: verifier %s (%s) to verify on %s job %s (assignment_id %s, assigned_at %s)\npending satisfaction of report conditions fixed by preview; assignment does not determine job outcome, only complete reports from verifiers granting deployment gates participate in stable promotion\nidempotency-key=%s preview-digest=%s\n",
 		state, terminalSafe(result.VerifierName), terminalSafe(result.VerifierID),
 		terminalSafe(result.MachineID),
 		terminalSafe(result.JobID), terminalSafe(result.AssignmentID),

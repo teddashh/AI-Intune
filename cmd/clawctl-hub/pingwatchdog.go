@@ -76,9 +76,9 @@ func (h *hub) pingReportWatchdog(kind string, delivered bool) {
 	if !delivered {
 		url = failPingURL(h.reportPingURL)
 		if url == "" {
-			log.Printf("早報沒送出去，但這個 ping URL 帶了 query string，" +
-				"推不出 /fail 端點 —— 只能等死人之鐘自己超時。" +
-				"要立即告警的話請另外設 CLAWCTL_REPORT_PING_FAIL_URL。")
+			log.Printf("daily report was not delivered, but this ping URL contains a query string " +
+				"and cannot derive a /fail endpoint -- dead man's switch can only time out on its own; " +
+				"set CLAWCTL_REPORT_PING_FAIL_URL to alert immediately")
 			return
 		}
 	}
@@ -89,12 +89,12 @@ func (h *hub) pingReportWatchdog(kind string, delivered bool) {
 	defer cancel()
 	if err := pinger(ctx, url); err != nil {
 		// ⚠ 不印 url —— 它本身就是憑證（誰知道這個 URL 誰就能讓死人之鐘閉嘴）。
-		log.Printf("外部死人之鐘 ping 失敗：%v（早報本身 delivered=%v）", err, delivered)
+		log.Printf("external dead man's switch ping failed: %v (daily report itself delivered=%v)", err, delivered)
 		return
 	}
 	if delivered {
-		log.Print("外部死人之鐘已收到今天的早報 ping")
+		log.Print("external dead man's switch received today's daily report ping")
 	} else {
-		log.Print("外部死人之鐘已收到「早報送不出去」的告警 ping")
+		log.Print("external dead man's switch received \"report delivery failure\" alert ping")
 	}
 }

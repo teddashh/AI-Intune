@@ -36,13 +36,13 @@ func runEnrollmentCLI(t *testing.T, argv ...string) string {
 func TestEnrollmentCLIPrintsWhoNeverArrivedAndWhatToDoNext(t *testing.T) {
 	text := runEnrollmentCLI(t)
 	for _, want := range []string{
-		"名冊上", "分母", "已退役", "有機器從來沒有報到過",
-		"還沒到的", "名冊",
-		"機器", "走到哪一步", "宣告納管", "票到期", "最後一次報到", "下一步",
-		"從未報到", "never-came",
+		"on roster", "denominator", "retired", "some machines have never checked in",
+		"machines owed", "roster entries",
+		"machine", "stage", "enrolled", "ticket expires", "last check-in", "next step",
+		"never checked in", "never-came",
 		operator.EnrollmentStageTitle(operator.EnrollmentWaiting),
 		operator.EnrollmentStageNextStep(operator.EnrollmentWaiting),
-		"離開分母只有一條路：退役。",
+		"There is only one way to leave the denominator: retirement.",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("輸出少了 %q：\n%s", want, text)

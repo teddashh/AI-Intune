@@ -72,8 +72,8 @@ func TestUnknownPositionalExitsBeforeDatabaseOrListener(t *testing.T) {
 		argv []string
 		want string
 	}{
-		{name: "first argument typo", argv: []string{"rollback-snapshot", "--help"}, want: "不認得命令"},
-		{name: "positional after serve flags", argv: []string{"--listen", "127.0.0.1:0", "rollback-snapshot", "--help"}, want: "不接受 positional"},
+		{name: "first argument typo", argv: []string{"rollback-snapshot", "--help"}, want: "unrecognized command"},
+		{name: "positional after serve flags", argv: []string{"--listen", "127.0.0.1:0", "rollback-snapshot", "--help"}, want: "does not accept positional"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -126,7 +126,7 @@ func TestBareDeploymentCommandExitsNonzeroWithUsage(t *testing.T) {
 	if !errors.As(runErr, &exitErr) || exitErr.ExitCode() == 0 {
 		t.Fatalf("bare deployment exit err=%v, want non-zero\n%s", runErr, output)
 	}
-	for _, want := range []string{"用法：clawctl-hub deployment", "必須指定 subcommand"} {
+	for _, want := range []string{"Usage: clawctl-hub deployment", "must specify subcommand"} {
 		if !strings.Contains(string(output), want) {
 			t.Fatalf("bare deployment output missing %q:\n%s", want, output)
 		}
@@ -172,7 +172,7 @@ func TestUnsafeOperatorAuthExitsBeforeDatabaseOpen(t *testing.T) {
 			if !errors.As(runErr, &exitErr) || exitErr.ExitCode() == 0 {
 				t.Fatalf("unsafe operator auth exit err=%v, want a non-zero exit\n%s", runErr, output)
 			}
-			for _, want := range []string{"operator auth 設定不合法", "Tailscale listener IP"} {
+			for _, want := range []string{"invalid operator auth configuration", "Tailscale listener IP"} {
 				if !strings.Contains(string(output), want) {
 					t.Fatalf("error does not explain fail-closed operator auth; want %q in:\n%s", want, output)
 				}
@@ -210,7 +210,7 @@ func TestOperatorAuthCheckProcessExitsBeforeDatabaseOpen(t *testing.T) {
 	if !errors.As(runErr, &exitErr) || exitErr.ExitCode() == 0 {
 		t.Fatalf("preflight exit err=%v, want non-zero\n%s", runErr, output)
 	}
-	for _, want := range []string{"operator auth preflight 失敗", "operator console"} {
+	for _, want := range []string{"operator auth preflight failed", "operator console"} {
 		if !strings.Contains(string(output), want) {
 			t.Fatalf("preflight error missing %q:\n%s", want, output)
 		}
@@ -247,7 +247,7 @@ func TestConflictingPublicURLExitsBeforeDatabaseOpen(t *testing.T) {
 	if !errors.As(runErr, &exitErr) || exitErr.ExitCode() == 0 {
 		t.Fatalf("conflicting public URL exit err=%v, want a non-zero exit\n%s", runErr, output)
 	}
-	for _, want := range []string{"operator console 位址設定不合法", "CLAWCTL_PUBLIC_URL", "不一致"} {
+	for _, want := range []string{"invalid operator console address configuration", "CLAWCTL_PUBLIC_URL", "does not match"} {
 		if !strings.Contains(string(output), want) {
 			t.Fatalf("error does not explain authority conflict; want %q in:\n%s", want, output)
 		}

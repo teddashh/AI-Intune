@@ -174,8 +174,8 @@ alert() {
 	#
 	# 所以：落到 syslog（daemon.crit，會被 journal 收），並且在 stderr 上
 	# 明確講出來 —— cron 會把 stderr 寄出去或寫進 log，那是另一條路徑。
-	echo "clawctl deadman: 告警通道失敗；事件已寫入 syslog 與 cron stderr。" >&2
-	logger -t clawctl-deadman -p daemon.crit -- "告警管道失效，原訊息：$msg" 2>/dev/null || true
+	echo "clawctl deadman: alert channel failed; event recorded to syslog and cron stderr" >&2
+	logger -t clawctl-deadman -p daemon.crit -- "Alert channel failed, original message: $msg" 2>/dev/null || true
 	exit 1
 }
 
@@ -187,24 +187,24 @@ if [ "$TEST_MODE" -eq 1 ]; then
 	deliver "$msg" || rc=$?
 	case "$rc" in
 	0)
-		echo "告警測試已送出。"
+		echo "Alert test sent"
 		# ⚠ 順便講出安靜的日子有沒有人在看這條管道。沒設不是錯，
 		# 但「以為有設」跟「真的有設」差很多，而平常看不出來。
 		if [ -n "${DEADMAN_ALERT_CHECK_CMD:-}" ]; then
-			echo "平日健檢：已啟用。"
+			echo "Daily health check: enabled"
 		else
-			echo "平日健檢：未啟用。"
+			echo "Daily health check: disabled"
 		fi
 		exit 0
 		;;
 	2)
-		echo "✗ 告警通道未設定；事件只寫入 syslog。" >&2
-		echo "  下一步：在 crontab 設定 DEADMAN_ALERT_CMD，例如 ~/.local/libexec/clawctl/notify-telegram.sh" >&2
+		echo "✗ Alert channel not configured; event recorded to syslog only" >&2
+		echo "  Next step: configure DEADMAN_ALERT_CMD in crontab, e.g. ~/.local/libexec/clawctl/notify-telegram.sh" >&2
 		exit 2
 		;;
 	*)
-		echo "✗ 告警通道失敗。" >&2
-		echo "  下一步：檢查 DEADMAN_ALERT_CMD 的連線與憑證。" >&2
+		echo "✗ Alert channel failed" >&2
+		echo "  Next step: check connectivity and credentials for DEADMAN_ALERT_CMD" >&2
 		exit 1
 		;;
 	esac

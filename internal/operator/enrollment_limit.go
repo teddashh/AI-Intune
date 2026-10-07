@@ -170,7 +170,7 @@ func (s *Service) SetEnrollmentLimit(req EnrollmentLimitApplyRequest) (Enrollmen
 			audit.Action = store.AuditEnrollmentLimit
 			audit.Subject, audit.OK, audit.Detail = enrollmentLimitAuditSubject(req), false, err.Error()
 			if auditErr := s.store.RecordAudit(audit); auditErr != nil {
-				log.Printf("operator enrollment limit audit 寫入失敗: %v", auditErr)
+				log.Printf("operator enrollment limit audit write failed: %v", auditErr)
 			}
 		}
 	}

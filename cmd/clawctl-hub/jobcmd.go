@@ -18,7 +18,7 @@ import (
 
 func cmdJob(argv []string) {
 	if len(argv) == 0 {
-		fmt.Fprintln(os.Stderr, "用法：clawctl-hub job create|list|show|evidence [參數]")
+		fmt.Fprintln(os.Stderr, "Usage: clawctl-hub job create|list|show|evidence [flags]")
 		os.Exit(2)
 	}
 	switch argv[0] {
@@ -31,7 +31,7 @@ func cmdJob(argv []string) {
 			log.Fatal(terminalSafe(err.Error()))
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "未知的子指令：job %s（有 create、list、show、evidence）\n", argv[0])
+		fmt.Fprintf(os.Stderr, "unknown subcommand: job %s (available: create, list, show, evidence)\n", argv[0])
 		os.Exit(2)
 	}
 }
@@ -64,7 +64,7 @@ func selectArtifactForJob(dir, version, requestedSHA256 string) (artifactSidecar
 // allowRetired=false 用在開單（退場的機器不開單），true 用在看歷史。
 func resolveMachine(st *store.Store, name string, allowRetired bool) (store.Machine, error) {
 	if name == "" {
-		return store.Machine{}, errors.New("要指定 --machine（display_name 或 machine_id）")
+		return store.Machine{}, errors.New("must specify --machine (display_name or machine_id)")
 	}
 	ms, err := st.ListMachines()
 	if err != nil {
@@ -78,10 +78,10 @@ func resolveMachine(st *store.Store, name string, allowRetired bool) (store.Mach
 	}
 	switch len(hits) {
 	case 0:
-		return store.Machine{}, fmt.Errorf("名冊裡沒有 %q", name)
+		return store.Machine{}, fmt.Errorf("machine %q not found in registry", name)
 	case 1:
 		if hits[0].RetiredAt != nil && !allowRetired {
-			return store.Machine{}, fmt.Errorf("%s 已在 %s 退場，不開單", name, hits[0].RetiredAt.UTC().Format(time.RFC3339))
+			return store.Machine{}, fmt.Errorf("%s was retired at %s, cannot create job", name, hits[0].RetiredAt.UTC().Format(time.RFC3339))
 		}
 		return hits[0], nil
 	default:
@@ -91,6 +91,6 @@ func resolveMachine(st *store.Store, name string, allowRetired bool) (store.Mach
 		for _, h := range hits {
 			ids = append(ids, h.MachineID)
 		}
-		return store.Machine{}, fmt.Errorf("%q 對到 %d 台：%s —— 用 machine_id 指定", name, len(hits), strings.Join(ids, ", "))
+		return store.Machine{}, fmt.Errorf("%q matched %d machines: %s - specify machine_id", name, len(hits), strings.Join(ids, ", "))
 	}
 }

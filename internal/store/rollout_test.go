@@ -60,7 +60,7 @@ func addRolloutMachine(t *testing.T, s *Store, id, name string, observed bool) {
 func TestMachineChannelRequiresObservationAndValidValue(t *testing.T) {
 	s := rolloutStore(t)
 	addRolloutMachine(t, s, "sampleagent1", "sampleagent1", false)
-	if err := s.SetMachineChannel("sampleagent1", "stable"); !errors.Is(err, ErrNeverObserved) || !strings.Contains(err.Error(), "從沒回報過") || !strings.Contains(err.Error(), "沒有 agent 會來領單") {
+	if err := s.SetMachineChannel("sampleagent1", "stable"); !errors.Is(err, ErrNeverObserved) || !strings.Contains(err.Error(), "has never reported") || !strings.Contains(err.Error(), "no agent will claim the job") {
 		t.Fatalf("未觀測機器錯誤不清楚：%v", err)
 	}
 	if err := s.SetMachineChannel("sampleagent1", "beta"); !errors.Is(err, ErrBadChannel) {

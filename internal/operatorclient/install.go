@@ -44,35 +44,35 @@ func (c *Client) InstallReport(ctx context.Context) (operator.InstallReport, err
 func validateInstallReport(report operator.InstallReport) error {
 	if report.SchemaVersion != operator.InstallReportSchemaVersion ||
 		report.EvaluatedAt.IsZero() || report.EvaluatedAt.Location() != time.UTC {
-		return errors.New("operator client: install report identity 不一致")
+		return errors.New("operator client: install report identity is inconsistent")
 	}
 	if report.Machines < 0 || report.Assigned < 0 || report.Differing < 0 ||
 		report.Misattributed < 0 {
-		return errors.New("operator client: install report 有負數")
+		return errors.New("operator client: install report has negative values")
 	}
 	if report.Assigned > report.Machines {
-		return fmt.Errorf("operator client: install report 說 %d 台被指派過，分母只有 %d 台",
+		return fmt.Errorf("operator client: install report reports %d machines assigned, total machines is only %d",
 			report.Assigned, report.Machines)
 	}
 	// ⚠⚠ 這一句擋的是「Hub 不知道機器上的東西從哪來」這件事被悄悄拿掉。少了那句話，
 	// 一列「指派的比看到的舊」會被讀成「有人亂動這台機器」——而正式環境上那正是
 	// 預期的樣子。
 	if report.Caveat != operator.InstallReportCaveat {
-		return errors.New("operator client: install report 沒有帶著它講得出口的極限")
+		return errors.New("operator client: install report lacks known limits")
 	}
 	states := operator.InstallStates()
 	if len(report.States) != len(states) {
-		return fmt.Errorf("operator client: install report 有 %d 種狀態，這個版本認得 %d 種",
+		return fmt.Errorf("operator client: install report has %d states, this version recognizes %d states",
 			len(report.States), len(states))
 	}
 	counted := map[operator.InstallState]int{}
 	for index, stateCount := range report.States {
 		if stateCount.State != states[index] {
-			return fmt.Errorf("operator client: install report 第 %d 種狀態是 %q，這個版本這裡是 %q",
+			return fmt.Errorf("operator client: install report state %d is %q, this version expects %q",
 				index, stateCount.State, states[index])
 		}
 		if stateCount.Count < 0 {
-			return fmt.Errorf("operator client: install state %q 的格數是負的", stateCount.State)
+			return fmt.Errorf("operator client: install state %q count is negative", stateCount.State)
 		}
 		if err := validateInstallStateSentences(stateCount.State, stateCount.Title,
 			stateCount.Meaning, stateCount.NextStep); err != nil {
@@ -95,7 +95,7 @@ func validateInstallReport(report operator.InstallReport) error {
 			return err
 		}
 		if names[resource.Name] {
-			return fmt.Errorf("operator client: install report 有兩列 %q", resource.Name)
+			return fmt.Errorf("operator client: install report has duplicate rows for %q", resource.Name)
 		}
 		names[resource.Name] = true
 		if resource.DifferingOn > 0 {
@@ -120,22 +120,22 @@ func validateInstallReport(report operator.InstallReport) error {
 	// 上該先做什麼：那幾格看到的版號量在一個沒有人在跑的檔案上，「指派的比看到的舊」
 	// 比的是一個沒有人在用的檔案。
 	if misattributed != report.Misattributed {
-		return fmt.Errorf("operator client: install report 說 %d 格看到的版號量的不是正在跑的那一份，"+
-			"逐格數出 %d 格", report.Misattributed, misattributed)
+		return fmt.Errorf("operator client: install report reports %d cells where observed version is not running file, "+
+			"counted by cell %d cells", report.Misattributed, misattributed)
 	}
 	if differing != report.Differing {
-		return fmt.Errorf("operator client: install report 說 %d 個資源對不上，逐列數出 %d 個",
+		return fmt.Errorf("operator client: install report reports %d resources mismatched, counted by row %d",
 			report.Differing, differing)
 	}
 	if len(assigned) != report.Assigned {
-		return fmt.Errorf("operator client: install report 說 %d 台被指派過，逐格數出 %d 台",
+		return fmt.Errorf("operator client: install report reports %d machines assigned, counted by cell %d machines",
 			report.Assigned, len(assigned))
 	}
 	// ⚠ 狀態摘要要逐格數過，不是只檢查它們加得起來。一份把「沒有被指派過」搬進
 	// 「指派的跟看到的一樣」的摘要照樣加得起來，而那兩件事的下一步完全不同。
 	for stateValue, want := range counted {
 		if seen[stateValue] != want {
-			return fmt.Errorf("operator client: %q 的摘要說 %d 格，逐格數出 %d 格",
+			return fmt.Errorf("operator client: %q summary reports %d cells, counted by cell %d cells",
 				stateValue, want, seen[stateValue])
 		}
 	}
@@ -143,7 +143,7 @@ func validateInstallReport(report operator.InstallReport) error {
 	// 摘要照樣加得起來，而前者要人去收掉一份安裝，後者不要人做任何事。
 	for stateValue, want := range countedRuntime {
 		if seenRuntime[stateValue] != want {
-			return fmt.Errorf("operator client: %q 的摘要說 %d 格，逐格數出 %d 格",
+			return fmt.Errorf("operator client: %q summary reports %d cells, counted by cell %d cells",
 				stateValue, want, seenRuntime[stateValue])
 		}
 	}
@@ -163,25 +163,25 @@ func validateInstallResource(resource operator.InstallResource, machines int) er
 	// ⚠ 名字要是從身分算出來的。一個自己取名字的資源，可以把兩個不同的資源在畫面
 	// 上寫成同一列，而那一列上的每一格都會是別人的答案。
 	if want := installResourceName(resource.ResourceKind, resource.ResourceID); resource.Name != want {
-		return fmt.Errorf("operator client: 資源 %s:%s 的名字是 %q，照身分算出來是 %q",
+		return fmt.Errorf("operator client: resource %s:%s name is %q, identity calculates to %q",
 			resource.ResourceKind, resource.ResourceID, resource.Name, want)
 	}
 	if resource.AssignedOn < 0 || resource.UnassignedOn < 0 || resource.MatchingOn < 0 ||
 		resource.DifferingOn < 0 || resource.MisattributedOn < 0 {
-		return fmt.Errorf("operator client: 資源 %q 有負數", resource.Name)
+		return fmt.Errorf("operator client: resource %q has negative values", resource.Name)
 	}
 	// ⚠ 兩個加起來就是分母。少掉一台，畫面上會出現一個比實際小的「幾台被指派過」——
 	// 而沒被算到的那一台正是最該被看到的那一台。
 	if total := resource.AssignedOn + resource.UnassignedOn; total != machines {
-		return fmt.Errorf("operator client: 資源 %q 的 %d+%d 台，分母是 %d 台",
+		return fmt.Errorf("operator client: resource %q has %d+%d machines, total machines is %d",
 			resource.Name, resource.AssignedOn, resource.UnassignedOn, machines)
 	}
 	if len(resource.Rows) != machines {
-		return fmt.Errorf("operator client: 資源 %q 有 %d 列，分母是 %d 台",
+		return fmt.Errorf("operator client: resource %q has %d rows, total machines is %d",
 			resource.Name, len(resource.Rows), machines)
 	}
 	if resource.Headline == "" {
-		return fmt.Errorf("operator client: 資源 %q 沒有那一行字", resource.Name)
+		return fmt.Errorf("operator client: resource %q lacks summary text", resource.Name)
 	}
 
 	assignedOn, unassignedOn, matchingOn, differingOn, misattributedOn := 0, 0, 0, 0, 0
@@ -191,7 +191,7 @@ func validateInstallResource(resource operator.InstallResource, machines int) er
 			return err
 		}
 		if ids[row.MachineID] {
-			return fmt.Errorf("operator client: 資源 %q 有兩列 %s", resource.Name, row.MachineID)
+			return fmt.Errorf("operator client: resource %q has duplicate rows for %s", resource.Name, row.MachineID)
 		}
 		ids[row.MachineID] = true
 		// ⚠ 這一格在下面那個 if／continue 之前數。量錯檔案跟指派對不對得上是兩個獨立
@@ -213,16 +213,16 @@ func validateInstallResource(resource operator.InstallResource, machines int) er
 		}
 	}
 	if assignedOn != resource.AssignedOn || unassignedOn != resource.UnassignedOn {
-		return fmt.Errorf("operator client: 資源 %q 的摘要說指派 %d／沒指派 %d，逐列數出 %d／%d",
+		return fmt.Errorf("operator client: resource %q summary reports assigned %d/unassigned %d, counted by row %d/%d",
 			resource.Name, resource.AssignedOn, resource.UnassignedOn, assignedOn, unassignedOn)
 	}
 	if matchingOn != resource.MatchingOn || differingOn != resource.DifferingOn {
-		return fmt.Errorf("operator client: 資源 %q 的摘要說一樣 %d／不一樣 %d，逐列數出 %d／%d",
+		return fmt.Errorf("operator client: resource %q summary reports match %d/differing %d, counted by row %d/%d",
 			resource.Name, resource.MatchingOn, resource.DifferingOn, matchingOn, differingOn)
 	}
 	if misattributedOn != resource.MisattributedOn {
-		return fmt.Errorf("operator client: 資源 %q 的摘要說 %d 台看到的版號量的不是正在跑的那一份，"+
-			"逐列數出 %d 台", resource.Name, resource.MisattributedOn, misattributedOn)
+		return fmt.Errorf("operator client: resource %q summary reports %d machines where observed version is not running file, "+
+			"counted by row %d machines", resource.Name, resource.MisattributedOn, misattributedOn)
 	}
 	return nil
 }
@@ -254,19 +254,19 @@ func validateInstallRow(resourceName string, row operator.InstallRow) error {
 	// ⚠⚠ 有「看到的版號」就表示 Hub 真的看到那個東西裝著。一格說「這台上沒有」或
 	// 「沒回報過」卻帶著看到的版號，講的是兩件互相矛盾的事，而畫面只會印出其中一件。
 	if row.Observed != "" && !operator.InstallStateHasObservedVersion(row.State) {
-		return fmt.Errorf("operator client: 資源 %q 在 %s 上是 %q，卻帶著看到的版號 %s",
+		return fmt.Errorf("operator client: resource %q on %s is %q, but carries observed version %s",
 			resourceName, row.MachineID, row.State, row.Observed)
 	}
 	// FromDisk 講的是「這個版號是從檔案讀的」——沒有版號就沒有這件事好講。
 	if row.FromDisk && row.Observed == "" {
-		return fmt.Errorf("operator client: 資源 %q 在 %s 上沒有看到版號，卻說版號是從檔案讀的",
+		return fmt.Errorf("operator client: resource %q on %s has no observed version, but indicates version was read from file",
 			resourceName, row.MachineID)
 	}
 	// ⚠ 沒有觀測的那三種不會有時刻——那正是它們的意思。
 	switch row.State {
 	case operator.InstallUnassigned, operator.InstallUnreported, operator.InstallUnobserved:
 		if row.MeasuredAt != nil || row.ObservedAt != nil {
-			return fmt.Errorf("operator client: 資源 %q 在 %s 上是 %q，卻給了觀測時刻",
+			return fmt.Errorf("operator client: resource %q on %s is %q, but provides observation timestamp",
 				resourceName, row.MachineID, row.State)
 		}
 	}
@@ -274,7 +274,7 @@ func validateInstallRow(resourceName string, row operator.InstallRow) error {
 		"measured_at": row.MeasuredAt, "observed_at": row.ObservedAt, "assigned_at": row.AssignedAt,
 	} {
 		if value != nil && (value.IsZero() || value.Location() != time.UTC) {
-			return fmt.Errorf("operator client: 資源 %q 在 %s 上的 %s 不是可用的 UTC 時刻",
+			return fmt.Errorf("operator client: resource %q on %s %s is not a usable UTC timestamp",
 				resourceName, row.MachineID, name)
 		}
 	}
@@ -289,14 +289,14 @@ func validateInstallRow(resourceName string, row operator.InstallRow) error {
 // 有人照「指派的比看到的舊」去回滾一台其實沒事的機器。
 func validateInstallRowRuntime(resourceName string, row operator.InstallRow) error {
 	if operator.InstallStateReportedPresent(row.State) != (row.Runtime != nil) {
-		return fmt.Errorf("operator client: 資源 %q 在 %s 上是 %q，「版號講的是哪一份」卻 %s",
+		return fmt.Errorf("operator client: resource %q on %s is %q, but tool runtime was %s",
 			resourceName, row.MachineID, row.State, toolRuntimePresence(row.Runtime != nil))
 	}
 	if row.Runtime == nil {
 		return nil
 	}
 	return validateToolRuntimeFinding(
-		fmt.Sprintf("資源 %q 在 %s 上的「版號講的是哪一份」", resourceName, row.MachineID),
+		fmt.Sprintf("resource %q on %s tool runtime", resourceName, row.MachineID),
 		*row.Runtime)
 }
 
@@ -310,38 +310,38 @@ func validateInstallRowAssignment(resourceName string, row operator.InstallRow) 
 	if !operator.InstallStateAssigned(row.State) {
 		if row.Assigned != "" || row.Scope != "" || row.ScopeID != "" || row.ScopeLabel != "" ||
 			row.Revision != 0 || row.AssignedAt != nil || row.AssignedBy != "" {
-			return fmt.Errorf("operator client: 資源 %q 在 %s 上說沒有被指派過，卻帶著指派欄位",
+			return fmt.Errorf("operator client: resource %q on %s indicates unassigned, but carries assignment fields",
 				resourceName, row.MachineID)
 		}
 		return nil
 	}
 	if row.Scope != "machine" && row.Scope != "channel" {
-		return fmt.Errorf("operator client: 資源 %q 在 %s 上的指派範圍是 %q，這個版本不認得",
+		return fmt.Errorf("operator client: resource %q on %s assignment scope is %q, unrecognized by this version",
 			resourceName, row.MachineID, row.Scope)
 	}
 	if err := validateMachineClientText("install scope_id", row.ScopeID, 256); err != nil {
 		return err
 	}
 	if row.ScopeLabel == "" {
-		return fmt.Errorf("operator client: 資源 %q 在 %s 上沒有講這一筆指派是給誰的",
+		return fmt.Errorf("operator client: resource %q on %s does not specify assignment target",
 			resourceName, row.MachineID)
 	}
 	if row.Revision <= 0 {
-		return fmt.Errorf("operator client: 資源 %q 在 %s 上被指派過，卻沒有 revision",
+		return fmt.Errorf("operator client: resource %q on %s is assigned, but lacks revision",
 			resourceName, row.MachineID)
 	}
 	if row.AssignedAt == nil {
-		return fmt.Errorf("operator client: 資源 %q 在 %s 上被指派過，卻沒有指派時刻",
+		return fmt.Errorf("operator client: resource %q on %s is assigned, but lacks assignment timestamp",
 			resourceName, row.MachineID)
 	}
 	// ⚠ 只有「指派的那一筆沒講版號」那一種才可以沒有版號。別的狀態少了版號，畫面上
 	// 那一格會變成一個空白的比較。
 	if row.Assigned == "" && row.State != operator.InstallAssignedNoVersion {
-		return fmt.Errorf("operator client: 資源 %q 在 %s 上是 %q，卻沒有指派的版號",
+		return fmt.Errorf("operator client: resource %q on %s is %q, but lacks assigned version",
 			resourceName, row.MachineID, row.State)
 	}
 	if row.Assigned != "" && row.State == operator.InstallAssignedNoVersion {
-		return fmt.Errorf("operator client: 資源 %q 在 %s 上說指派沒講版號，卻帶著 %s",
+		return fmt.Errorf("operator client: resource %q on %s indicates unversioned assignment, but carries %s",
 			resourceName, row.MachineID, row.Assigned)
 	}
 	return nil
@@ -357,12 +357,12 @@ func validateInstallStateSentences(stateValue operator.InstallState,
 	// ⚠ 這一句擋的是「有一格落在這個版本不認得的狀態上」。逐格的比對只對得到這個
 	// 版本認得的那幾種，一格落在認不得的狀態上就會從那個比對裡整個消失。
 	if operator.InstallStateTitle(stateValue) == "" {
-		return fmt.Errorf("operator client: install state %q 這個版本不認得", stateValue)
+		return fmt.Errorf("operator client: install state %q is unrecognized by this version", stateValue)
 	}
 	if title != operator.InstallStateTitle(stateValue) ||
 		meaning != operator.InstallStateMeaning(stateValue) ||
 		nextStep != operator.InstallStateNextStep(stateValue) {
-		return fmt.Errorf("operator client: install state %q 的句子跟這個版本不一樣", stateValue)
+		return fmt.Errorf("operator client: install state %q sentences do not match this version", stateValue)
 	}
 	return nil
 }

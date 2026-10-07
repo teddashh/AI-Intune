@@ -65,7 +65,7 @@ func TestVerifierRegisterCLIHTTPDeliversTheCredentialOnceAndNeverAgain(t *testin
 		t.Fatal("the credential was repeated on stderr")
 	}
 	for _, want := range []string{
-		"credential 只輸出這一次", "clawctl-hub verifier revoke", "independent_verifier",
+		"credential is output only this once", "clawctl-hub verifier revoke", "independent_verifier",
 	} {
 		if !strings.Contains(errOut.String(), want) {
 			t.Fatalf("follow-up output lacks %q: %q", want, errOut.String())
@@ -89,7 +89,7 @@ func TestVerifierRegisterCLIHTTPDeliversTheCredentialOnceAndNeverAgain(t *testin
 	if err == nil {
 		t.Fatal("replaying a registration reported success")
 	}
-	if !strings.Contains(err.Error(), "credential 不可重顯") ||
+	if !strings.Contains(err.Error(), "credential cannot be redisplayed") ||
 		!strings.Contains(err.Error(), "revoke_and_register") {
 		t.Fatalf("replay error does not state the recovery: %v", err)
 	}
@@ -202,68 +202,68 @@ func TestVerifierCLIRejectsIncoherentInvocations(t *testing.T) {
 		argv []string
 		want string
 	}{
-		{"no subcommand", nil, "必須指定 list、show、register、revoke 或 assign"},
-		{"unknown subcommand", []string{"rotate"}, "未知的子指令"},
+		{"no subcommand", nil, "must specify list, show, register, revoke, or assign"},
+		{"unknown subcommand", []string{"rotate"}, "unknown subcommand"},
 		{"both transports", []string{"list", "--hub-url", base, "--db", "/tmp/x.sqlite"},
-			"不可同時明示"},
+			"cannot both be specified"},
 		{"register without reason", []string{
 			"register", "--hub-url", base, "--kind", "external_job_runner",
-			"--name", "n", "--failure-domain", "awx"}, "--reason 不可為空"},
+			"--name", "n", "--failure-domain", "awx"}, "--reason cannot be empty"},
 		{"register preview with apply input", []string{
 			"register", "--hub-url", base, "--kind", "external_job_runner",
 			"--name", "n", "--failure-domain", "awx", "--preview", "--reason", "r"},
-			"--preview 不接受 --reason"},
+			"--preview does not accept --reason"},
 		{"register half a retry", []string{
 			"register", "--hub-url", base, "--kind", "external_job_runner",
 			"--name", "n", "--failure-domain", "awx", "--reason", "r",
-			"--idempotency-key", "k"}, "必須成對提供"},
+			"--idempotency-key", "k"}, "must be provided together"},
 		{"register hub prober over HTTP with a hub host", []string{
 			"register", "--hub-url", base, "--kind", "hub_prober",
 			"--name", "n", "--failure-domain", "d", "--reason", "r",
-			"--hub-host", "samplehub1"}, "--hub-host 只用於 --db"},
+			"--hub-host", "samplehub1"}, "--hub-host is only for --db"},
 		{"register json on apply", []string{
 			"register", "--hub-url", base, "--kind", "external_job_runner",
 			"--name", "n", "--failure-domain", "awx", "--reason", "r", "--json"},
-			"--json 只用於 --preview"},
+			"--json is only for --preview"},
 		{"revoke without confirmation", []string{
 			"revoke", "--hub-url", base, "--reason", "r", "verifier-1"},
-			"--confirm-name 不可為空"},
+			"--confirm-name cannot be empty"},
 		{"revoke preview with confirmation", []string{
 			"revoke", "--hub-url", base, "--preview", "--confirm-name", "n", "verifier-1"},
-			"--preview 不接受 --confirm-name"},
+			"--preview does not accept --confirm-name"},
 		{"revoke retry without revision", []string{
 			"revoke", "--hub-url", base, "--reason", "r", "--confirm-name", "n",
 			"--idempotency-key", "k", "--preview-digest", "sha256:x", "verifier-1"},
-			"必須同時提供原 --idempotency-key、--expected-revision 與 --preview-digest"},
+			"retry requires original --idempotency-key, --expected-revision, and --preview-digest together"},
 		{"revoke without an id", []string{"revoke", "--hub-url", base, "--preview"},
-			"必須提供一個 verifier-id"},
+			"must provide a verifier-id"},
 		{"show with a path traversal id", []string{"show", "--hub-url", base, "../etc"},
-			"不可為空、含首尾空白、dot segment 或斜線"},
+			"cannot be empty, contain leading/trailing whitespace, dot segments, or slashes"},
 		{"list with a positional", []string{"list", "--hub-url", base, "extra"},
-			"不接受 positional arguments"},
+			"positional arguments not accepted"},
 		{"assign without a job", []string{"assign", "--hub-url", base, "--preview", "verifier-1"},
-			"--job 不可為空"},
+			"--job cannot be empty"},
 		{"assign without an id", []string{"assign", "--hub-url", base, "--job", "job-1", "--preview"},
-			"必須提供一個 verifier-id"},
+			"must provide a verifier-id"},
 		{"assign without reason", []string{"assign", "--hub-url", base, "--job", "job-1", "verifier-1"},
-			"--reason 不可為空"},
+			"--reason cannot be empty"},
 		{"assign preview with apply input", []string{
 			"assign", "--hub-url", base, "--job", "job-1", "--preview", "--reason", "r", "verifier-1"},
-			"--preview 不寫入，所以不接受 --reason"},
+			"--preview creates no writes and does not accept --reason"},
 		{"assign json on apply", []string{
 			"assign", "--hub-url", base, "--job", "job-1", "--reason", "r",
 			"--confirm-name", "onode-peer", "--json", "verifier-1"},
-			"--json 只用於 --preview"},
+			"--json is only for --preview"},
 		{"assign preview with a confirmation", []string{
 			"assign", "--hub-url", base, "--job", "job-1", "--preview",
 			"--confirm-name", "onode-peer", "verifier-1"},
-			"--preview 不寫入，所以不接受 --confirm-name"},
+			"--preview creates no writes and does not accept --confirm-name"},
 		{"assign apply without a confirmation", []string{
 			"assign", "--hub-url", base, "--job", "job-1", "--reason", "r", "verifier-1"},
-			"--confirm-name 不可為空"},
+			"--confirm-name cannot be empty"},
 		{"assign with a path traversal job", []string{
 			"assign", "--hub-url", base, "--job", "../etc", "--preview", "verifier-1"},
-			"--job 不可含斜線或 dot segment"},
+			"--job cannot contain slashes or dot segments"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var out, errOut bytes.Buffer
@@ -314,7 +314,7 @@ func TestVerifierAssignCLIHTTPStatesTheHandoutRuleAndReceipt(t *testing.T) {
 		`satisfied_by: "complete_independent_report_received_at_or_after_assignment"`,
 		"commands_supplied_by_hub: false",
 		"grants_deployment_gate: true",
-		"工作單還在進行，等它結束才會發給它",
+		"job is still in progress; will be delivered after it ends",
 		"preview-digest=sha256:",
 	} {
 		if !strings.Contains(previewOut.String(), want) {
@@ -333,8 +333,8 @@ func TestVerifierAssignCLIHTTPStatesTheHandoutRuleAndReceipt(t *testing.T) {
 		t.Fatalf("assign: %v; stdout=%q stderr=%q", err, out.String(), errOut.String())
 	}
 	for _, want := range []string{
-		"assigned: verifier ", "待它滿足 preview 固定的回報條件",
-		"派工不決定工作單成敗，只有授予部署閘的 verifier 完整回報才參與 stable promotion。",
+		"assigned: verifier ", "pending satisfaction of report conditions fixed by preview",
+		"assignment does not determine job outcome, only complete reports from verifiers granting deployment gates participate in stable promotion",
 		"idempotency-key=", "preview-digest=sha256:",
 	} {
 		if !strings.Contains(out.String(), want) {

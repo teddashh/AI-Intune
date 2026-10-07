@@ -37,24 +37,24 @@ func runSoftwareReportCommandWithDeps(ctx context.Context, argv []string, out, e
 	fs := flag.NewFlagSet("report software", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub report software [--json | --csv] [--hub-url URL]")
-		fmt.Fprintln(errOut, "  列出每一個工具裝在哪幾台、各是哪一版、哪幾台沒有、哪幾台沒回報過。")
-		fmt.Fprintln(errOut, "  discovery：--hub-url、CLAWCTL_HUB_URL、operator.json。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub report software [--json | --csv] [--hub-url URL]")
+		fmt.Fprintln(errOut, "  List which machines each tool is installed on, its version, which machines lack it, and which machines have not reported.")
+		fmt.Fprintln(errOut, "  discovery: --hub-url, CLAWCTL_HUB_URL, operator.json.")
 		fs.PrintDefaults()
 	}
 	var hubURL auditStringFlag
 	var jsonOutput, csvOutput auditBoolFlag
-	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL（省略時自動發現）")
-	fs.Var(&jsonOutput, "json", "輸出 stable operator JSON DTO")
-	fs.Var(&csvOutput, "csv", "輸出安全的 UTF-8 CSV")
+	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL (auto-discovered when omitted)")
+	fs.Var(&jsonOutput, "json", "output stable operator JSON DTO")
+	fs.Var(&csvOutput, "csv", "output safe UTF-8 CSV")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("report software: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("report software: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	if jsonOutput.value && csvOutput.value {
-		return errors.New("report software: --json 與 --csv 不可同時使用")
+		return errors.New("report software: --json and --csv cannot be used together")
 	}
 	if hubURL.set {
 		if err := validateReportChangeCLIText("hub-url", hubURL.value, 2048); err != nil {
@@ -67,7 +67,7 @@ func runSoftwareReportCommandWithDeps(ctx context.Context, argv []string, out, e
 	}
 	report, err := client.SoftwareReport(ctx)
 	if err != nil {
-		return fmt.Errorf("讀取軟體清查失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read software inventory (HTTP operator API): %w", err)
 	}
 	if jsonOutput.value {
 		return writeOperatorJSON(out, report)
@@ -75,7 +75,7 @@ func runSoftwareReportCommandWithDeps(ctx context.Context, argv []string, out, e
 	if csvOutput.value {
 		body, err := operator.ReportCSV(operator.SoftwareReportCSV(report))
 		if err != nil {
-			return fmt.Errorf("產生軟體清查 CSV 失敗：%w", err)
+			return fmt.Errorf("failed to generate software inventory CSV: %w", err)
 		}
 		_, err = io.WriteString(out, body)
 		return err
@@ -119,12 +119,12 @@ func writeSoftwareMisattributed(out io.Writer, report operator.SoftwareReport) e
 	if report.Misattributed == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintf(out, "\n%d 格的版號講的不是正在跑的那一份\n",
+	if _, err := fmt.Fprintf(out, "\n%d visible versions measure an installation that is not running\n",
 		report.Misattributed); err != nil {
 		return err
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "工具\t機器\t版號\t這一格是什麼\t量版號的那個檔案\t正在跑的那個檔案\t下一步")
+	fmt.Fprintln(table, "tool\tmachine\tversion\tstate\tmeasured file\trunning file\tnext step")
 	for _, tool := range report.Tools {
 		for _, row := range tool.Rows {
 			if row.Runtime == nil || !operator.ToolRuntimeMisattributed(row.Runtime.State) {
@@ -147,11 +147,11 @@ func writeSoftwareTools(out io.Writer, report operator.SoftwareReport) error {
 	if len(report.Tools) == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintf(out, "\n%d 個工具\n", len(report.Tools)); err != nil {
+	if _, err := fmt.Fprintf(out, "\n%d tools\n", len(report.Tools)); err != nil {
 		return err
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "工具\t有\t沒有\t沒回報過\t機隊裡最新\t版號\t下一步")
+	fmt.Fprintln(table, "tool\tpresent\tabsent\tunreported\tnewest in fleet\tversions\tnext step")
 	for _, tool := range report.Tools {
 		fmt.Fprintf(table, "%s\t%d\t%d\t%d\t%s\t%s\t%s\n",
 			tool.Name, tool.InstalledOn, tool.AbsentOn, tool.UnreportedOn,
@@ -173,7 +173,7 @@ func writeSoftwareMatrix(out io.Writer, report operator.SoftwareReport) error {
 			return err
 		}
 		table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(table, "機器\t這一格是什麼\t版號\t版號講的是哪一份\tHub 收到的時刻\t下一步")
+		fmt.Fprintln(table, "machine\tstate\tversion\tversion source\treceived at\tnext step")
 		for _, row := range tool.Rows {
 			fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\t%s\n",
 				row.DisplayName, row.Title, softwareRowVersion(row), softwareRowRuntime(row),
@@ -208,10 +208,10 @@ func softwareRowVersion(row operator.SoftwareRow) string {
 	}
 	value := row.Version
 	if row.FromDisk {
-		value += "（檔案上讀的）"
+		value += " (read from file)"
 	}
 	if row.Shadowed {
-		value += "（另有一份）"
+		value += " (shadowed copy)"
 	}
 	return value
 }

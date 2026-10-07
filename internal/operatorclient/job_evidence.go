@@ -48,7 +48,7 @@ func (c *Client) JobEvidence(ctx context.Context, jobID string, limit int) (oper
 	if err := validateJobReadIdentifier("job_id", jobID, 256); err != nil ||
 		strings.Contains(jobID, "/") || jobID == "." || jobID == ".." {
 		return operator.JobEvidenceResult{}, errors.New(
-			"operator client: job_id 不可為空、含控制字元、dot segment 或斜線")
+			"operator client: job_id cannot be empty, contain control characters, dot segments, or slashes")
 	}
 	effectiveLimit := limit
 	if effectiveLimit == 0 {

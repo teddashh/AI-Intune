@@ -103,7 +103,7 @@ func TestRunRollbackSnapshotCreatesPrivateMarkerAndStandaloneBackup(t *testing.T
 	}, &out); err != nil {
 		t.Fatalf("rollback snapshot command: %v", err)
 	}
-	if !strings.Contains(out.String(), "snapshot") || !strings.Contains(out.String(), "ledger 已靜止") {
+	if !strings.Contains(out.String(), "snapshot") || !strings.Contains(out.String(), "ledger is quiescent") {
 		t.Fatalf("snapshot output=%q", out.String())
 	}
 	destinationInfo, err := os.Stat(destination)
@@ -143,7 +143,7 @@ func TestRunRollbackSnapshotDoesNotTakeOverExistingMarker(t *testing.T) {
 	err = runRollbackSnapshot([]string{
 		"--rollback-snapshot", "--db", source, "--out", destination,
 	}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "Hub 升級維護中") {
+	if err == nil || !strings.Contains(err.Error(), "Hub upgrade maintenance in progress") {
 		t.Fatalf("existing marker was accepted: %v", err)
 	}
 	got, readErr := os.ReadFile(marker)
@@ -241,17 +241,17 @@ func TestRunUpgradeMaintenanceBeginIsExclusiveAndRejectsExtraArguments(t *testin
 	}, &out, func() error { return nil }); err != nil {
 		t.Fatalf("first begin: %v", err)
 	}
-	if !strings.Contains(out.String(), "marker 已建立") {
+	if !strings.Contains(out.String(), "marker created") {
 		t.Fatalf("begin output=%q", out.String())
 	}
 	if err := runUpgradeMaintenanceBegin([]string{
 		"--upgrade-maintenance-begin", "--db", dbPath,
-	}, &bytes.Buffer{}, func() error { return nil }); err == nil || !strings.Contains(err.Error(), "Hub 升級維護中") {
+	}, &bytes.Buffer{}, func() error { return nil }); err == nil || !strings.Contains(err.Error(), "Hub upgrade maintenance in progress") {
 		t.Fatalf("duplicate begin err=%v", err)
 	}
 	if err := runUpgradeMaintenanceBegin([]string{
 		"--upgrade-maintenance-begin", "--db", filepath.Join(t.TempDir(), "other.sqlite"), "extra",
-	}, &bytes.Buffer{}, func() error { return nil }); err == nil || !strings.Contains(err.Error(), "多餘參數") {
+	}, &bytes.Buffer{}, func() error { return nil }); err == nil || !strings.Contains(err.Error(), "unexpected arguments") {
 		t.Fatalf("extra argument err=%v", err)
 	}
 }
@@ -283,8 +283,10 @@ func TestRunRollbackSnapshotLeavesMarkerOnFailClosedRefusal(t *testing.T) {
 }
 
 func TestRunRollbackSnapshotRejectsUnexpectedArguments(t *testing.T) {
-	err := runRollbackSnapshot([]string{"--rollback-snapshot", "extra"}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "多餘參數") {
+	err := runRollbackSnapshot([]string{
+		"--rollback-snapshot", "extra",
+	}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "unexpected arguments") {
 		t.Fatalf("unexpected argument err=%v", err)
 	}
 }
@@ -304,7 +306,7 @@ func TestCLIMaintenanceBarrierBlocksCommandsAndTracksDBFlag(t *testing.T) {
 		{"machines", "--db", production},
 		{"unknown-command", "--db", production},
 	} {
-		if err := rejectCLIWhileUpgradeMaintenance(argv); err == nil || !strings.Contains(err.Error(), "維護") {
+		if err := rejectCLIWhileUpgradeMaintenance(argv); err == nil || !strings.Contains(err.Error(), "maintenance") {
 			t.Fatalf("argv=%q bypassed maintenance: %v", argv, err)
 		}
 	}

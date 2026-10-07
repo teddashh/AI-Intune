@@ -85,7 +85,7 @@ func (h *hub) handleListOperatorDeployments(w http.ResponseWriter, r *http.Reque
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "deployment filter 或 cursor 不合法")
 			return
 		}
-		log.Printf("讀取 operator deployment list 失敗: %v", err)
+		log.Printf("failed to read operator deployment list: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 deployment list 失敗")
 		return
 	}
@@ -106,7 +106,7 @@ func (h *hub) handleGetOperatorDeployment(w http.ResponseWriter, r *http.Request
 		case errors.Is(err, operator.ErrInvalidDeploymentRead):
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "deployment_id 不合法")
 		default:
-			log.Printf("讀取 operator deployment detail 失敗 deployment=%q: %v", r.PathValue("id"), err)
+			log.Printf("failed to read operator deployment detail deployment=%q: %v", r.PathValue("id"), err)
 			writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 deployment detail 失敗")
 		}
 		return
@@ -157,7 +157,7 @@ func (h *hub) handlePreviewOperatorDeploymentCreate(w http.ResponseWriter, r *ht
 				"deployment planning inputs 或 Hub artifact selection 不合法")
 			return
 		}
-		log.Printf("建立 operator deployment preview 失敗: %v", err)
+		log.Printf("failed to create operator deployment preview: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "建立 deployment preview 失敗")
 		return
 	}
@@ -413,7 +413,7 @@ func writeOperatorDeploymentError(w http.ResponseWriter, err error, action strin
 		w.Header().Set("Idempotency-Replayed", "true")
 	}
 	if status == http.StatusInternalServerError {
-		log.Printf("operator deployment %s 失敗: %v", action, err)
+		log.Printf("operator deployment %s failed: %v", action, err)
 	}
 	writeErr(w, status, code, detail)
 }

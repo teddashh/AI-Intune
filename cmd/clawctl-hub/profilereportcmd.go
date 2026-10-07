@@ -36,25 +36,25 @@ func runProfileReportCommandWithDeps(ctx context.Context, argv []string, out, er
 	fs := flag.NewFlagSet("report profile", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub report profile [--json | --csv] [--hub-url URL]")
-		fmt.Fprintln(errOut, "  列出每一版已發佈的 profile 現在穿在誰身上、哪幾版發佈了一台都沒指派、")
-		fmt.Fprintln(errOut, "  以及它點名的每一個套件版本這個 Hub 指派過沒有、在機隊上看到過沒有。")
-		fmt.Fprintln(errOut, "  discovery：--hub-url、CLAWCTL_HUB_URL、operator.json。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub report profile [--json | --csv] [--hub-url URL]")
+		fmt.Fprintln(errOut, "  List which machines wear each published profile revision, which published revisions have zero assignments,")
+		fmt.Fprintln(errOut, "  and whether each referenced package version was assigned or seen by this Hub.")
+		fmt.Fprintln(errOut, "  discovery: --hub-url, CLAWCTL_HUB_URL, operator.json.")
 		fs.PrintDefaults()
 	}
 	var hubURL auditStringFlag
 	var jsonOutput, csvOutput auditBoolFlag
-	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL（省略時自動發現）")
-	fs.Var(&jsonOutput, "json", "輸出 stable operator JSON DTO")
-	fs.Var(&csvOutput, "csv", "輸出安全的 UTF-8 CSV")
+	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL (discovered automatically when omitted)")
+	fs.Var(&jsonOutput, "json", "output stable operator JSON DTO")
+	fs.Var(&csvOutput, "csv", "output safe UTF-8 CSV")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("report profile: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("report profile: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	if jsonOutput.value && csvOutput.value {
-		return errors.New("report profile: --json 與 --csv 不可同時使用")
+		return errors.New("report profile: --json and --csv cannot be used together")
 	}
 	if hubURL.set {
 		if err := validateReportChangeCLIText("hub-url", hubURL.value, 2048); err != nil {
@@ -67,7 +67,7 @@ func runProfileReportCommandWithDeps(ctx context.Context, argv []string, out, er
 	}
 	report, err := client.ProfileReport(ctx)
 	if err != nil {
-		return fmt.Errorf("讀取發佈與指派對照失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read profile report (HTTP operator API): %w", err)
 	}
 	if jsonOutput.value {
 		return writeOperatorJSON(out, report)
@@ -75,7 +75,7 @@ func runProfileReportCommandWithDeps(ctx context.Context, argv []string, out, er
 	if csvOutput.value {
 		body, err := operator.ReportCSV(operator.ProfileReportCSV(report))
 		if err != nil {
-			return fmt.Errorf("產生發佈與指派對照 CSV 失敗：%w", err)
+			return fmt.Errorf("failed to generate profile report CSV: %w", err)
 		}
 		_, err = io.WriteString(out, body)
 		return err
@@ -144,12 +144,12 @@ func writeProfileMisattributed(out io.Writer, report operator.ProfileReport) err
 			}
 		}
 	}
-	if _, err := fmt.Fprintf(out, "\n%d 格看得到的版號量的是沒在跑的那一份\n",
+	if _, err := fmt.Fprintf(out, "\n%d visible versions measure an installation that is not running\n",
 		len(cells)); err != nil {
 		return err
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "profile\trevision\t套件\t版號\t看到幾台\t其中量錯\t這一版在這個 Hub 身上是什麼")
+	fmt.Fprintln(table, "profile\trevision\tpackage\tversion\tseen on\tmeasured wrong\twhat this version is on this Hub")
 	for _, cell := range cells {
 		fmt.Fprintf(table, "%s\t%d\t%s\t%s\t%d\t%d\t%s\n",
 			cell.profileID, cell.revision, cell.pkg.PackageID, cell.pkg.Version,
@@ -159,7 +159,7 @@ func writeProfileMisattributed(out io.Writer, report operator.ProfileReport) err
 		return err
 	}
 	_, err := fmt.Fprintln(out,
-		"要看那幾台量的是哪一份檔案，到每機安裝狀態那一個資源上。")
+		"To see which file those machines measured, inspect the per-machine install report.")
 	return err
 }
 
@@ -171,11 +171,11 @@ func writeProfileRevisions(out io.Writer, report operator.ProfileReport) error {
 	if len(report.Profiles) == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintf(out, "\n%d 版已發佈的 profile\n", len(report.Profiles)); err != nil {
+	if _, err := fmt.Fprintf(out, "\n%d published profile revisions\n", len(report.Profiles)); err != nil {
 		return err
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "profile\trevision\t這一版現在是什麼\t機隊上\t已退役\t發佈的時刻\t下一步")
+	fmt.Fprintln(table, "profile\trevision\tstate\tin fleet\tretired\tpublished at\tnext step")
 	for _, row := range report.Profiles {
 		fmt.Fprintf(table, "%s\t%d\t%s\t%d\t%d\t%s\t%s\n",
 			row.ProfileID, row.Revision, row.Title, row.AssignedOn, row.RetiredOn,
@@ -198,11 +198,11 @@ func writeProfileStates(out io.Writer, report operator.ProfileReport) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintf(out, "\n%d 種狀態\n", len(rows)); err != nil {
+	if _, err := fmt.Fprintf(out, "\n%d states\n", len(rows)); err != nil {
 		return err
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "這一版是什麼\t幾版\t意思\t下一步")
+	fmt.Fprintln(table, "state\trevisions\tmeaning\tnext step")
 	for _, state := range rows {
 		fmt.Fprintf(table, "%s\t%d\t%s\t%s\n",
 			state.Title, state.Count, state.Meaning, profileCellOrDash(state.NextStep))
@@ -220,11 +220,11 @@ func writeProfilePackageStates(out io.Writer, report operator.ProfileReport) err
 	if len(rows) == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintf(out, "\n%d 種套件狀態\n", len(rows)); err != nil {
+	if _, err := fmt.Fprintf(out, "\n%d package states\n", len(rows)); err != nil {
 		return err
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "這一版在這個 Hub 身上是什麼\t幾格\t意思\t下一步")
+	fmt.Fprintln(table, "what this version is on this Hub\tcells\tmeaning\tnext step")
 	for _, state := range rows {
 		fmt.Fprintf(table, "%s\t%d\t%s\t%s\n",
 			state.Title, state.Count, state.Meaning, profileCellOrDash(state.NextStep))
@@ -264,7 +264,7 @@ func writeProfilePackages(out io.Writer, row operator.ProfileRow) error {
 		return nil
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "  套件\t版號\t這一版在這個 Hub 身上是什麼\t指派過幾次\t最後一次指派\t看到幾台\t其中量錯\t下一步")
+	fmt.Fprintln(table, "  package\tversion\twhat this version is on this Hub\tassignments\tlast assigned\tseen on\tmeasured wrong\tnext step")
 	for _, pkg := range row.Packages {
 		fmt.Fprintf(table, "  %s\t%s\t%s\t%d\t%s\t%d\t%d\t%s\n",
 			pkg.PackageID, pkg.Version, pkg.Title, pkg.Intents,
@@ -283,7 +283,7 @@ func writeProfileWearers(out io.Writer, row operator.ProfileRow) error {
 		return nil
 	}
 	table := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(table, "  機器\t在不在機隊上\t指派 revision\t指派的時刻\t指派的人")
+	fmt.Fprintln(table, "  machine\tin fleet\tassigned revision\tassigned at\tassigned by")
 	for _, machine := range row.Machines {
 		fmt.Fprintf(table, "  %s\t%s\t%d\t%s\t%s\n",
 			machine.DisplayName, profileFleetCell(machine.Retired), machine.AssignmentRevision,
@@ -294,9 +294,9 @@ func writeProfileWearers(out io.Writer, row operator.ProfileRow) error {
 
 func profileFleetCell(retired bool) string {
 	if retired {
-		return "已退役"
+		return "retired"
 	}
-	return "在機隊上"
+	return "in fleet"
 }
 
 func profileCellOrDash(value string) string {

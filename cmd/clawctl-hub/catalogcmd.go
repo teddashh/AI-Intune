@@ -34,19 +34,19 @@ func runCatalogCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 	deps machineCommandDeps,
 ) error {
 	usage := func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub catalog package list|add | profile list|publish | assign")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub catalog package list|add | profile list|publish | assign")
 	}
 	if len(argv) == 0 || argv[0] == "-h" || argv[0] == "--help" {
 		usage()
 		if len(argv) == 0 {
-			return errors.New("catalog: 必須指定 package、profile 或 assign")
+			return errors.New("catalog: must specify package, profile, or assign")
 		}
 		return flag.ErrHelp
 	}
 	switch argv[0] {
 	case "package":
 		if len(argv) < 2 {
-			return errors.New("catalog package: 必須指定 list 或 add")
+			return errors.New("catalog package: must specify list or add")
 		}
 		switch argv[1] {
 		case "list":
@@ -54,11 +54,11 @@ func runCatalogCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 		case "add":
 			return runCatalogPackageAdd(ctx, argv[2:], out, errOut, deps)
 		default:
-			return fmt.Errorf("catalog package: 不認得 subcommand %q", argv[1])
+			return fmt.Errorf("catalog package: unrecognized subcommand %q", argv[1])
 		}
 	case "profile":
 		if len(argv) < 2 {
-			return errors.New("catalog profile: 必須指定 list 或 publish")
+			return errors.New("catalog profile: must specify list or publish")
 		}
 		switch argv[1] {
 		case "list":
@@ -66,7 +66,7 @@ func runCatalogCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 		case "publish":
 			return runCatalogProfilePublish(ctx, argv[2:], out, errOut, deps)
 		default:
-			return fmt.Errorf("catalog profile: 不認得 subcommand %q", argv[1])
+			return fmt.Errorf("catalog profile: unrecognized subcommand %q", argv[1])
 		}
 	case "assign":
 		return runCatalogAssign(ctx, argv[1:], out, errOut, deps)
@@ -74,7 +74,7 @@ func runCatalogCommandWithDeps(ctx context.Context, argv []string, out, errOut i
 		return runCatalogRecover(ctx, argv[1:], out, errOut, deps)
 	default:
 		usage()
-		return fmt.Errorf("catalog: 不認得 subcommand %q", argv[0])
+		return fmt.Errorf("catalog: unrecognized subcommand %q", argv[0])
 	}
 }
 
@@ -85,8 +85,8 @@ type catalogTransportFlags struct {
 
 func addCatalogTransportFlags(fs *flag.FlagSet) catalogTransportFlags {
 	return catalogTransportFlags{
-		hubURL: fs.String("hub-url", "", "HTTP operator API base URL（省略時自動發現）"),
-		json:   fs.Bool("json", false, "輸出 stable operator JSON DTO"),
+		hubURL: fs.String("hub-url", "", "HTTP operator API base URL (auto-discovered when omitted)"),
+		json:   fs.Bool("json", false, "output stable operator JSON DTO"),
 	}
 }
 
@@ -100,11 +100,11 @@ func catalogHTTPClient(flags catalogTransportFlags, fs *flag.FlagSet,
 		}
 	})
 	if explicit && (*flags.hubURL == "" || *flags.hubURL != strings.TrimSpace(*flags.hubURL)) {
-		return nil, "", errors.New("catalog: --hub-url 不可為空或含首尾空白")
+		return nil, "", errors.New("catalog: --hub-url cannot be empty or contain leading or trailing whitespace")
 	}
 	client, resolved, err := deploymentHTTPClientResolved(*flags.hubURL, explicit, deps)
 	if err != nil {
-		return nil, "", fmt.Errorf("catalog: 連接 Hub 失敗：%w", err)
+		return nil, "", fmt.Errorf("catalog: failed to connect to Hub: %w", err)
 	}
 	return client, resolved, nil
 }
@@ -115,15 +115,15 @@ func runCatalogPackageList(ctx context.Context, argv []string, out, errOut io.Wr
 	fs := flag.NewFlagSet("catalog package list", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	flags := addCatalogTransportFlags(fs)
-	packageID := fs.String("package", "", "只看指定 package ID")
-	kind := fs.String("kind", "", "只看 app 或 runtime")
-	limit := fs.Int("limit", operator.DefaultCatalogReadLimit, "每頁筆數（1..100）")
-	cursor := fs.String("cursor", "", "上一頁的 opaque next cursor")
+	packageID := fs.String("package", "", "filter by package ID")
+	kind := fs.String("kind", "", "filter by app or runtime")
+	limit := fs.Int("limit", operator.DefaultCatalogReadLimit, "items per page (1..100)")
+	cursor := fs.String("cursor", "", "opaque next cursor from previous page")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("catalog package list: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("catalog package list: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	request := operator.CatalogManifestListRequest{
 		PackageID: *packageID, Kind: appcatalog.PackageKind(*kind), Limit: *limit, Cursor: *cursor,
@@ -134,7 +134,7 @@ func runCatalogPackageList(ctx context.Context, argv []string, out, errOut io.Wr
 	}
 	result, err := client.CatalogManifests(ctx, request)
 	if err != nil {
-		return fmt.Errorf("讀取 Store packages 失敗：%w", err)
+		return fmt.Errorf("failed to read Store packages: %w", err)
 	}
 	if *flags.json {
 		return writeCatalogJSON(out, result)
@@ -157,21 +157,21 @@ func runCatalogPackageAdd(ctx context.Context, argv []string, out, errOut io.Wri
 	fs := flag.NewFlagSet("catalog package add", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	flags := addCatalogTransportFlags(fs)
-	artifactSHA := fs.String("artifact", "", "已驗證 artifact SHA-256")
-	nodeVersion := fs.String("node-runtime-version", "", "OpenClaw 使用的已發布 Node runtime 版本")
-	previewOnly := fs.Bool("preview", false, "只顯示精確 manifest")
-	confirm := fs.String("confirm", "", "確認 package@version")
-	reason := fs.String("reason", "", "發布理由")
-	requestKey := fs.String("idempotency-key", "", "重送時沿用的 request key")
+	artifactSHA := fs.String("artifact", "", "verified artifact SHA-256")
+	nodeVersion := fs.String("node-runtime-version", "", "published Node runtime version used by OpenClaw")
+	previewOnly := fs.Bool("preview", false, "show exact manifest only")
+	confirm := fs.String("confirm", "", "confirm package@version")
+	reason := fs.String("reason", "", "publish reason")
+	requestKey := fs.String("idempotency-key", "", "reused request key on retry")
 	recoveryFile := fs.String("recovery-file", "", "private canonical replay receipt path")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("catalog package add: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("catalog package add: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	if !artifact.ValidSHA256Hex(*artifactSHA) {
-		return errors.New("catalog package add: --artifact 必須是 64 個小寫 hex")
+		return errors.New("catalog package add: --artifact must be 64 lowercase hex characters")
 	}
 	client, hubURL, err := catalogHTTPClient(flags, fs, deps)
 	if err != nil {
@@ -181,14 +181,14 @@ func runCatalogPackageAdd(ctx context.Context, argv []string, out, errOut io.Wri
 		ArtifactSHA256: *artifactSHA, NodeRuntimeVersion: *nodeVersion,
 	})
 	if err != nil {
-		return fmt.Errorf("建立 Store package preview 失敗：%w", err)
+		return fmt.Errorf("failed to create Store package preview: %w", err)
 	}
 	if *previewOnly {
 		return writeCatalogPackagePreview(out, preview, *flags.json)
 	}
 	wanted := preview.Manifest.ID + "@" + preview.Manifest.Version
 	if *confirm != wanted {
-		return fmt.Errorf("catalog package add: --confirm 必須是 %s", wanted)
+		return fmt.Errorf("catalog package add: --confirm must be %s", wanted)
 	}
 	if err := validateCatalogReason(*reason); err != nil {
 		return err
@@ -205,13 +205,13 @@ func runCatalogPackageAdd(ctx context.Context, argv []string, out, errOut io.Wri
 	return applyCatalogMutationWithRecovery(receipt, *recoveryFile, errOut, func() (any, error) {
 		result, err := client.PublishStandardCatalogManifest(ctx, key, request)
 		if err != nil {
-			return nil, fmt.Errorf("發布 Store package 失敗：%w", err)
+			return nil, fmt.Errorf("failed to publish Store package: %w", err)
 		}
 		return result, nil
 	}, func(resultAny any) error {
 		result, ok := resultAny.(operator.CatalogManifestPublishResult)
 		if !ok {
-			return errors.New("發布 Store package 回應型別不符")
+			return errors.New("unexpected response type for publishing Store package")
 		}
 		if *flags.json {
 			return writeCatalogJSON(out, struct {
@@ -231,14 +231,14 @@ func runCatalogProfileList(ctx context.Context, argv []string, out, errOut io.Wr
 	fs := flag.NewFlagSet("catalog profile list", flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	flags := addCatalogTransportFlags(fs)
-	profileID := fs.String("profile", "", "只看指定 profile ID")
-	limit := fs.Int("limit", operator.DefaultCatalogReadLimit, "每頁筆數（1..100）")
-	cursor := fs.String("cursor", "", "上一頁的 opaque next cursor")
+	profileID := fs.String("profile", "", "filter by profile ID")
+	limit := fs.Int("limit", operator.DefaultCatalogReadLimit, "items per page (1..100)")
+	cursor := fs.String("cursor", "", "opaque next cursor from previous page")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("catalog profile list: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("catalog profile list: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	client, _, err := catalogHTTPClient(flags, fs, deps)
 	if err != nil {
@@ -248,7 +248,7 @@ func runCatalogProfileList(ctx context.Context, argv []string, out, errOut io.Wr
 		ProfileID: *profileID, Limit: *limit, Cursor: *cursor,
 	})
 	if err != nil {
-		return fmt.Errorf("讀取 profiles 失敗：%w", err)
+		return fmt.Errorf("failed to read profiles: %w", err)
 	}
 	if *flags.json {
 		return writeCatalogJSON(out, result)
@@ -285,31 +285,31 @@ func runCatalogProfilePublish(ctx context.Context, argv []string, out, errOut io
 	flags := addCatalogTransportFlags(fs)
 	profileIdentity := fs.String("profile", "", "profile@revision")
 	var packages catalogPackageRefs
-	fs.Var(&packages, "package", "直接選取的 package@version；可重複")
-	previewOnly := fs.Bool("preview", false, "只顯示解析結果")
-	confirm := fs.String("confirm", "", "確認 profile@revision")
-	reason := fs.String("reason", "", "發布理由")
-	requestKey := fs.String("idempotency-key", "", "重送時沿用的 request key")
+	fs.Var(&packages, "package", "directly selected package@version; repeatable")
+	previewOnly := fs.Bool("preview", false, "show resolution preview only")
+	confirm := fs.String("confirm", "", "confirm profile@revision")
+	reason := fs.String("reason", "", "publish reason")
+	requestKey := fs.String("idempotency-key", "", "reused request key on retry")
 	recoveryFile := fs.String("recovery-file", "", "private canonical replay receipt path")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("catalog profile publish: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("catalog profile publish: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	profileID, revision, err := parseCatalogProfileIdentity(*profileIdentity)
 	if err != nil {
 		return err
 	}
 	if len(packages) == 0 {
-		return errors.New("catalog profile publish: 至少提供一個 --package")
+		return errors.New("catalog profile publish: at least one --package must be provided")
 	}
 	refs := make([]appcatalog.PackageRef, 0, len(packages))
 	seen := make(map[string]bool, len(packages))
 	for _, value := range packages {
 		packageID, version, parseErr := parseCatalogPackageIdentity(value)
 		if parseErr != nil || seen[value] {
-			return fmt.Errorf("catalog profile publish: --package %q 不合法或重複", value)
+			return fmt.Errorf("catalog profile publish: --package %q is invalid or duplicate", value)
 		}
 		seen[value] = true
 		refs = append(refs, appcatalog.PackageRef{PackageID: packageID, Version: version})
@@ -321,13 +321,13 @@ func runCatalogProfilePublish(ctx context.Context, argv []string, out, errOut io
 	}
 	preview, err := client.PreviewMachineProfile(ctx, operator.MachineProfilePreviewRequest{Profile: profile})
 	if err != nil {
-		return fmt.Errorf("建立 profile preview 失敗：%w", err)
+		return fmt.Errorf("failed to create profile preview: %w", err)
 	}
 	if *previewOnly {
 		return writeCatalogProfilePreview(out, preview, *flags.json)
 	}
 	if *confirm != *profileIdentity {
-		return fmt.Errorf("catalog profile publish: --confirm 必須是 %s", *profileIdentity)
+		return fmt.Errorf("catalog profile publish: --confirm must be %s", *profileIdentity)
 	}
 	if err := validateCatalogReason(*reason); err != nil {
 		return err
@@ -344,13 +344,13 @@ func runCatalogProfilePublish(ctx context.Context, argv []string, out, errOut io
 	return applyCatalogMutationWithRecovery(receipt, *recoveryFile, errOut, func() (any, error) {
 		result, err := client.PublishReviewedMachineProfile(ctx, key, request)
 		if err != nil {
-			return nil, fmt.Errorf("發布 profile 失敗：%w", err)
+			return nil, fmt.Errorf("failed to publish profile: %w", err)
 		}
 		return result, nil
 	}, func(resultAny any) error {
 		result, ok := resultAny.(operator.MachineProfilePublishResult)
 		if !ok {
-			return errors.New("發布 profile 回應型別不符")
+			return errors.New("unexpected response type for publishing profile")
 		}
 		if *flags.json {
 			return writeCatalogJSON(out, struct {
@@ -372,19 +372,19 @@ func runCatalogAssign(ctx context.Context, argv []string, out, errOut io.Writer,
 	flags := addCatalogTransportFlags(fs)
 	machineID := fs.String("machine", "", "machine ID")
 	profileIdentity := fs.String("profile", "", "profile@revision")
-	previewOnly := fs.Bool("preview", false, "只顯示工作單影響")
-	confirmName := fs.String("confirm-name", "", "確認 machine display name")
-	reason := fs.String("reason", "", "指派理由")
-	requestKey := fs.String("idempotency-key", "", "重送時沿用的 request key")
+	previewOnly := fs.Bool("preview", false, "show job impact only")
+	confirmName := fs.String("confirm-name", "", "confirm machine display name")
+	reason := fs.String("reason", "", "assignment reason")
+	requestKey := fs.String("idempotency-key", "", "reused request key on retry")
 	recoveryFile := fs.String("recovery-file", "", "private canonical replay receipt path")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("catalog assign: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+		return fmt.Errorf("catalog assign: positional arguments are not accepted: %q", strings.Join(fs.Args(), " "))
 	}
 	if err := validateDeploymentReadCLIValue("machine", *machineID, 128); err != nil || strings.Contains(*machineID, "/") {
-		return errors.New("catalog assign: --machine 必須是 canonical machine ID")
+		return errors.New("catalog assign: --machine must be a canonical machine ID")
 	}
 	profileID, revision, err := parseCatalogProfileIdentity(*profileIdentity)
 	if err != nil {
@@ -398,13 +398,13 @@ func runCatalogAssign(ctx context.Context, argv []string, out, errOut io.Writer,
 		MachineID: *machineID, ProfileID: profileID, ProfileRevision: revision,
 	})
 	if err != nil {
-		return fmt.Errorf("建立 profile assignment preview 失敗：%w", err)
+		return fmt.Errorf("failed to create profile assignment preview: %w", err)
 	}
 	if *previewOnly {
 		return writeCatalogAssignmentPreview(out, preview, *flags.json)
 	}
 	if *confirmName != preview.DisplayName {
-		return fmt.Errorf("catalog assign: --confirm-name 必須是 %s", preview.DisplayName)
+		return fmt.Errorf("catalog assign: --confirm-name must be %s", preview.DisplayName)
 	}
 	if len(preview.Blockers) != 0 {
 		return fmt.Errorf("catalog assign: preview blockers=%s", joinAssignmentBlockers(preview.Blockers))
@@ -424,13 +424,13 @@ func runCatalogAssign(ctx context.Context, argv []string, out, errOut io.Writer,
 	return applyCatalogMutationWithRecovery(receipt, *recoveryFile, errOut, func() (any, error) {
 		result, err := client.AssignMachineProfile(ctx, key, request)
 		if err != nil {
-			return nil, fmt.Errorf("指派 profile 失敗：%w", err)
+			return nil, fmt.Errorf("failed to assign profile: %w", err)
 		}
 		return result, nil
 	}, func(resultAny any) error {
 		result, ok := resultAny.(operator.MachineProfileAssignmentResult)
 		if !ok {
-			return errors.New("指派 profile 回應型別不符")
+			return errors.New("unexpected response type for assigning profile")
 		}
 		if *flags.json {
 			return writeCatalogJSON(out, struct {
@@ -517,7 +517,7 @@ func parseCatalogPackageIdentity(value string) (string, string, error) {
 	id, version, ok := strings.Cut(value, "@")
 	if !ok || strings.Contains(version, "@") || validateDeploymentReadCLIValue("package", id, 128) != nil ||
 		validateDeploymentReadCLIValue("version", version, 128) != nil {
-		return "", "", errors.New("package identity 必須是 canonical package@version")
+		return "", "", errors.New("package identity must be canonical package@version")
 	}
 	return id, version, nil
 }
@@ -525,18 +525,18 @@ func parseCatalogPackageIdentity(value string) (string, string, error) {
 func parseCatalogProfileIdentity(value string) (string, int64, error) {
 	id, revisionText, ok := strings.Cut(value, "@")
 	if !ok || strings.Contains(revisionText, "@") || validateDeploymentReadCLIValue("profile", id, 128) != nil {
-		return "", 0, errors.New("catalog profile: --profile 必須是 profile@positive-revision")
+		return "", 0, errors.New("catalog profile: --profile must be profile@positive-revision")
 	}
 	revision, err := strconv.ParseInt(revisionText, 10, 64)
 	if err != nil || revision <= 0 || strconv.FormatInt(revision, 10) != revisionText {
-		return "", 0, errors.New("catalog profile: --profile 必須是 profile@positive-revision")
+		return "", 0, errors.New("catalog profile: --profile must be profile@positive-revision")
 	}
 	return id, revision, nil
 }
 
 func validateCatalogReason(value string) error {
 	if validateDeploymentReadCLIValue("reason", value, 500) != nil {
-		return errors.New("catalog: --reason 必填，最多 500 bytes，且不可含控制字元")
+		return errors.New("catalog: --reason is required, maximum 500 bytes, and cannot contain control characters")
 	}
 	return nil
 }
@@ -544,7 +544,7 @@ func validateCatalogReason(value string) error {
 func catalogMutationKey(supplied, prefix string) (string, error) {
 	if supplied != "" {
 		if err := validateDeploymentIdempotencyKey(supplied); err != nil {
-			return "", fmt.Errorf("catalog: --idempotency-key 不合法：%w", err)
+			return "", fmt.Errorf("catalog: invalid --idempotency-key: %w", err)
 		}
 		return supplied, nil
 	}

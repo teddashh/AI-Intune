@@ -67,7 +67,7 @@ func (h *hub) handleListOperatorCatalogManifests(w http.ResponseWriter, r *http.
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "catalog manifest filter 或 cursor 不合法")
 			return
 		}
-		log.Printf("讀取 catalog manifests 失敗: %v", err)
+		log.Printf("failed to read catalog manifests: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 catalog manifests 失敗")
 		return
 	}
@@ -173,7 +173,7 @@ func (h *hub) handleListOperatorMachineProfiles(w http.ResponseWriter, r *http.R
 			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "machine profile filter 或 cursor 不合法")
 			return
 		}
-		log.Printf("讀取 machine profiles 失敗: %v", err)
+		log.Printf("failed to read machine profiles: %v", err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取 machine profiles 失敗")
 		return
 	}
@@ -360,7 +360,7 @@ func writeOperatorCatalogMutationError(w http.ResponseWriter, err error, operati
 		w.Header().Set("Idempotency-Replayed", "true")
 	}
 	if status == http.StatusInternalServerError {
-		log.Printf("%s 失敗: %v", operation, err)
+		log.Printf("%s failed: %v", operation, err)
 	}
 	writeErr(w, status, code, detail)
 }

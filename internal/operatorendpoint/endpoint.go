@@ -34,53 +34,53 @@ type Endpoint struct {
 // trailing slash.
 func ParseBaseURL(raw string) (Endpoint, error) {
 	if raw == "" || strings.TrimSpace(raw) != raw {
-		return Endpoint{}, errors.New("operator endpoint: URL 不可為空或帶前後空白")
+		return Endpoint{}, errors.New("operator endpoint: URL must not be empty or contain leading/trailing whitespace")
 	}
 	if !strings.HasPrefix(raw, "http://") {
-		return Endpoint{}, errors.New("operator endpoint: 只接受 canonical http:// scheme")
+		return Endpoint{}, errors.New("operator endpoint: only canonical http:// scheme is accepted")
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
 		// net/url's parse error includes the original URL. A rejected authority
 		// can contain mistaken userinfo, so returning that error verbatim would
 		// copy credentials into CLI logs even though userinfo is never accepted.
-		return Endpoint{}, errors.New("operator endpoint: URL 格式錯誤")
+		return Endpoint{}, errors.New("operator endpoint: malformed URL")
 	}
 	if u.Scheme != "http" || u.Opaque != "" || u.Host == "" {
-		return Endpoint{}, errors.New("operator endpoint: 只接受完整的 http:// literal Tailscale IP 位址")
+		return Endpoint{}, errors.New("operator endpoint: only full http:// literal Tailscale IP addresses are accepted")
 	}
 	if u.User != nil {
-		return Endpoint{}, errors.New("operator endpoint: URL 不可帶 userinfo")
+		return Endpoint{}, errors.New("operator endpoint: URL must not contain userinfo")
 	}
 	// Check both the parsed fields and delimiters. net/url intentionally drops
 	// an empty fragment marker, while an empty query is represented by
 	// ForceQuery; neither spelling belongs in an origin.
 	if u.RawQuery != "" || u.ForceQuery || strings.Contains(raw, "?") {
-		return Endpoint{}, errors.New("operator endpoint: URL 不可帶 query")
+		return Endpoint{}, errors.New("operator endpoint: URL must not contain query")
 	}
 	if u.Fragment != "" || u.RawFragment != "" || strings.Contains(raw, "#") {
-		return Endpoint{}, errors.New("operator endpoint: URL 不可帶 fragment")
+		return Endpoint{}, errors.New("operator endpoint: URL must not contain fragment")
 	}
 	if u.RawPath != "" || (u.Path != "" && u.Path != "/") {
-		return Endpoint{}, errors.New("operator endpoint: URL 不可帶 base path")
+		return Endpoint{}, errors.New("operator endpoint: URL must not contain base path")
 	}
 
 	authority, ok := CanonicalLiteralAuthority(u.Host)
 	if !ok || authority != u.Host {
-		return Endpoint{}, errors.New("operator endpoint: authority 必須是 canonical literal-ip:nonzero-port")
+		return Endpoint{}, errors.New("operator endpoint: authority must be canonical literal-ip:nonzero-port")
 	}
 	host, portText, _ := net.SplitHostPort(authority)
 	destination, err := netip.ParseAddr(host)
 	if err != nil {
-		return Endpoint{}, fmt.Errorf("operator endpoint: literal IP 格式錯誤: %w", err)
+		return Endpoint{}, fmt.Errorf("operator endpoint: malformed literal IP: %w", err)
 	}
 	destination = destination.Unmap()
 	if !tsaddr.IsTailscaleIP(destination) {
-		return Endpoint{}, fmt.Errorf("operator endpoint: %s 不是 Tailscale IP", destination)
+		return Endpoint{}, fmt.Errorf("operator endpoint: %s is not a Tailscale IP", destination)
 	}
 	if destination == tsaddr.TailscaleServiceIP() || destination == tsaddr.TailscaleServiceIPv6() ||
 		tsaddr.TailscaleViaRange().Contains(destination) {
-		return Endpoint{}, fmt.Errorf("operator endpoint: %s 不是 Tailscale node IP", destination)
+		return Endpoint{}, fmt.Errorf("operator endpoint: %s is not a Tailscale node IP", destination)
 	}
 	parsedPort, _ := strconv.ParseUint(portText, 10, 16)
 	return Endpoint{
@@ -95,14 +95,14 @@ func ParseBaseURL(raw string) (Endpoint, error) {
 // authority, such as "100.64.0.1:8787".
 func ParseListen(listen string) (Endpoint, error) {
 	if listen == "" || strings.TrimSpace(listen) != listen {
-		return Endpoint{}, errors.New("operator endpoint: listen authority 不可為空或帶前後空白")
+		return Endpoint{}, errors.New("operator endpoint: listen authority must not be empty or contain leading/trailing whitespace")
 	}
 	endpoint, err := ParseBaseURL("http://" + listen)
 	if err != nil {
 		return Endpoint{}, err
 	}
 	if endpoint.Authority() != listen {
-		return Endpoint{}, errors.New("operator endpoint: listen 必須是 canonical literal-ip:nonzero-port authority")
+		return Endpoint{}, errors.New("operator endpoint: listen must be canonical literal-ip:nonzero-port authority")
 	}
 	return endpoint, nil
 }

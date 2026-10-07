@@ -163,16 +163,16 @@ func dispatch(args []string) string {
 	return actUnknown
 }
 
-const usage = `clawctl-agent —— 觀測這一台機器並回報給 Hub。
+const usage = `clawctl-agent -- observe this machine and report to Hub.
 
-用法：
-  clawctl-agent                             以 daemon 跑（systemd service 用的是這個）
-  clawctl-agent enroll --hub URL --token T  用一次性的票報到
-  clawctl-agent probe                       印出一次觀測就結束，不回報
-  clawctl-agent verify                      等 Hub 確認這個版本已開始接單
+Usage:
+  clawctl-agent                             Run as daemon (used by systemd service)
+  clawctl-agent enroll --hub URL --token T  Enroll with a one-time token
+  clawctl-agent probe                       Print one observation and exit without reporting
+  clawctl-agent verify                      Wait for Hub to confirm this version has begun receiving jobs
   clawctl-agent verifier --hub URL \
-      --token-file T --targets F            以獨立 verifier 的身分，驗 Hub 指名給它的工作單
-  clawctl-agent version                     印出版本
+      --token-file T --targets F            Run as standalone verifier to verify jobs assigned by Hub
+  clawctl-agent version                     Print version
 `
 
 // unknownArgError 是「認不得的第一個參數」。
@@ -197,7 +197,7 @@ const usage = `clawctl-agent —— 觀測這一台機器並回報給 Hub。
 // 一個會把不認識的指令解釋成「那就跑 daemon 吧」的 CLI，
 // 等於在替使用者的打錯字啟動背景程序。
 func unknownArgError(arg string) string {
-	return fmt.Sprintf("認不得的參數 %q。\n%s", arg, usage)
+	return fmt.Sprintf("unrecognized argument %q\n%s", arg, usage)
 }
 
 // ---------------------------------------------------------------- enroll
@@ -209,19 +209,19 @@ func runEnroll(args []string) {
 	tokenFile := fs.String("token-file", "", "private file containing the one-time enrollment token")
 	_ = fs.Parse(args)
 	if *hub == "" || (*tok == "") == (*tokenFile == "") {
-		log.Fatal("enroll 需要 --hub，並且只指定 --token 或 --token-file 其中一個")
+		log.Fatal("enroll requires --hub and exactly one of --token or --token-file")
 	}
 	token := *tok
 	if *tokenFile != "" {
 		var err error
 		token, err = readSecretFile(*tokenFile)
 		if err != nil {
-			log.Fatalf("讀取 enroll token 失敗：%v", err)
+			log.Fatalf("failed to read enroll token: %v", err)
 		}
 	}
 	canonicalHub, err := agenthub.Parse(*hub)
 	if err != nil {
-		log.Fatalf("enroll --hub 不合法：%v", err)
+		log.Fatalf("invalid enroll --hub: %v", err)
 	}
 	*hub = canonicalHub
 
@@ -229,7 +229,7 @@ func runEnroll(args []string) {
 	if err != nil {
 		// ⚠ 觀測失敗不該擋住報到。一台量不到東西的機器仍然應該出現在名冊裡 ——
 		// 那正是我們最想看到的那種機器。
-		log.Printf("報到前觀測失敗：%v", err)
+		log.Printf("pre-enrollment observation failed: %v", err)
 	}
 
 	req := model.EnrollRequest{
@@ -246,15 +246,15 @@ func runEnroll(args []string) {
 
 	var resp model.EnrollResponse
 	if err := postJSONStrict(context.Background(), *hub+"/v1/enrollments", "", req, &resp); err != nil {
-		log.Fatalf("報到失敗：%v", err)
+		log.Fatalf("enrollment failed: %v", err)
 	}
 
 	cfg, err := enrollmentConfig(*hub, resp)
 	if err != nil {
-		log.Fatalf("報到失敗：Hub 回應不完整：%v", err)
+		log.Fatalf("enrollment failed: incomplete Hub response: %v", err)
 	}
 	if err := saveConfig(cfg); err != nil {
-		log.Fatalf("寫入設定失敗：%v", err)
+		log.Fatalf("failed to write config: %v", err)
 	}
 	fmt.Print(enrollmentStoredNotice(resp.MachineID, configPath(), runtime.GOOS))
 }
@@ -266,7 +266,7 @@ func readSecretFile(path string) (string, error) {
 	}
 	secret := strings.TrimSpace(string(b))
 	if secret == "" || strings.ContainsAny(secret, "\r\n\t ") {
-		return "", errors.New("secret file 內容格式不符")
+		return "", errors.New("secret file content format invalid")
 	}
 	return secret, nil
 }
@@ -291,21 +291,21 @@ func validateEnrollmentAuthority(schemaVersion int, machineID, agentToken string
 	checkinIntervalSeconds, observationIntervalSeconds int, settingsDigest string,
 ) error {
 	if schemaVersion != model.SchemaVersion {
-		return fmt.Errorf("schema_version=%d，預期 %d", schemaVersion, model.SchemaVersion)
+		return fmt.Errorf("schema_version=%d, expected %d", schemaVersion, model.SchemaVersion)
 	}
 	if machineID == "" || machineID != strings.TrimSpace(machineID) || len(machineID) > 200 {
-		return errors.New("缺少或不合法的 machine_id")
+		return errors.New("missing or invalid machine_id")
 	}
 	if agentToken == "" || agentToken != strings.TrimSpace(agentToken) ||
 		strings.ContainsAny(agentToken, "\r\n\t ") || len(agentToken) > 200 {
-		return errors.New("缺少或不合法的 agent_token")
+		return errors.New("missing or invalid agent_token")
 	}
 	wantDigest, err := assignedSettingsDigest(checkinIntervalSeconds, observationIntervalSeconds)
 	if err != nil {
-		return fmt.Errorf("Hub 沒有給有效的 check-in/observation interval：%w", err)
+		return fmt.Errorf("Hub did not provide valid check-in/observation intervals: %w", err)
 	}
 	if settingsDigest != wantDigest {
-		return errors.New("Hub 的 settings_digest 未綁定回應中的 interval")
+		return errors.New("Hub settings_digest is not bound to intervals in response")
 	}
 	return nil
 }
@@ -325,7 +325,7 @@ func runProbeOnce(args []string) {
 
 	obs, err := probe.Collect(context.Background())
 	if err != nil {
-		log.Printf("觀測有部分失敗（仍輸出已取得的部分）：%v", err)
+		log.Printf("observation partially failed (still outputting acquired parts): %v", err)
 	}
 	enc := json.NewEncoder(os.Stdout)
 	if *pretty {
@@ -343,33 +343,33 @@ func runVerify(args []string) {
 		"require fresh Hub-stored identity evidence matching this binary's platform")
 	_ = fs.Parse(args)
 	if fs.NArg() != 0 {
-		log.Fatal("verify 不接受位置參數")
+		log.Fatal("verify does not accept positional arguments")
 	}
 	timeout, err := time.ParseDuration(*timeoutText)
 	if err != nil || timeout < time.Second || timeout > 10*time.Minute {
-		log.Fatal("verify --timeout 必須介於 1s 與 10m")
+		log.Fatal("verify --timeout must be between 1s and 10m")
 	}
 	var since time.Time
 	if *sinceText != "" {
 		since, err = time.Parse(time.RFC3339, *sinceText)
 		if err != nil {
-			log.Fatal("verify --since 必須是 RFC3339")
+			log.Fatal("verify --since must be RFC3339")
 		}
 	}
 	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatalf("讀取設定失敗：%v", err)
+		log.Fatalf("failed to read config: %v", err)
 	}
 	if cfg.MachineID == "" {
-		log.Fatal("設定缺少 machine_id")
+		log.Fatal("config missing machine_id")
 	}
 	if *expectedHub != "" && strings.TrimRight(*expectedHub, "/") != strings.TrimRight(cfg.HubURL, "/") {
-		log.Fatal("設定的 Hub 與 --hub 不符")
+		log.Fatal("configured Hub does not match --hub")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	last := "Hub 尚未收到符合條件的 check-in"
+	last := "Hub has not received an eligible check-in"
 	for {
 		var receipt model.AgentReadinessResponse
 		if err := doJSON(ctx, http.MethodGet, cfg.HubURL+"/v1/agent/readiness", cfg.AgentToken, nil, &receipt); err != nil {
@@ -390,7 +390,7 @@ func runVerify(args []string) {
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			log.Fatalf("Hub readiness 驗證逾時：%s", last)
+			log.Fatalf("Hub readiness verification timed out: %s", last)
 		case <-timer.C:
 		}
 	}
@@ -400,36 +400,36 @@ func readinessPending(receipt model.AgentReadinessResponse, machineID, agentVers
 	requirePlatformEvidence bool,
 ) string {
 	if receipt.MachineID != machineID {
-		return "machine_id 不符"
+		return "machine_id does not match"
 	}
 	if receipt.LastCheckinReceivedAt == nil {
-		return "Hub 尚未收到 check-in"
+		return "Hub has not received a check-in"
 	}
 	if receipt.AgentStartedAt == nil || (!since.IsZero() && receipt.AgentStartedAt.Before(since)) {
-		return "Hub 尚未收到本次 agent process 的 check-in"
+		return "Hub has not received a check-in from current agent process"
 	}
 	if receipt.AgentVersion != agentVersion {
-		return "Hub 收到的 agent 版本不符"
+		return "agent version received by Hub does not match"
 	}
 	if receipt.JobsEnabled == nil || !*receipt.JobsEnabled {
-		return "Hub 尚未確認 jobs enabled"
+		return "Hub has not confirmed jobs enabled"
 	}
 	if receipt.DeviceSyncV1 == nil || !*receipt.DeviceSyncV1 {
-		return "Hub 尚未確認 device-sync v1 executor"
+		return "Hub has not confirmed device-sync v1 executor"
 	}
 	if requirePlatformEvidence {
 		// The installer cutoff and measurement use the agent's clock. The Hub
 		// receipt proves storage, but its clock cannot establish agent freshness.
 		if receipt.IdentityReceivedAt == nil || receipt.IdentityMeasuredAt == nil ||
 			(!since.IsZero() && receipt.IdentityMeasuredAt.Before(since)) {
-			return "Hub 尚未保存本次啟動後的 identity evidence"
+			return "Hub has not saved identity evidence from current startup"
 		}
 		platform, err := catalog.PlatformFromProbeIdentity(receipt.IdentityOS, receipt.IdentityArch)
 		if err != nil {
-			return "Hub 保存的 identity evidence 無法辨識平台"
+			return "identity evidence saved by Hub cannot recognize platform"
 		}
 		if platform.OS != runtime.GOOS || platform.Arch != runtime.GOARCH {
-			return fmt.Sprintf("Hub 保存的 identity evidence 平台不符：收到 %s/%s，需要 %s/%s",
+			return fmt.Sprintf("Hub-saved identity evidence platform does not match: got %s/%s, want %s/%s",
 				platform.OS, platform.Arch, runtime.GOOS, runtime.GOARCH)
 		}
 	}
@@ -442,7 +442,7 @@ func runAgent() {
 	applySoftMemoryLimit()
 	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatalf("讀不到設定（跑過 `clawctl-agent enroll` 了嗎？）：%v", err)
+		log.Fatalf("cannot read config (has `clawctl-agent enroll` been run?): %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -501,7 +501,7 @@ func runAgent() {
 			lastTurn.Store(time.Now().UnixNano())
 			hb, err := probe.Heartbeat(ctx, seq.Add(1))
 			if err != nil {
-				log.Printf("心跳量測失敗：%v", err)
+				log.Printf("heartbeat measurement failed: %v", err)
 			}
 			if t := lastObs.Load(); t != nil {
 				age := int64(time.Since(*t).Seconds())
@@ -549,7 +549,7 @@ func runAgent() {
 					logHubBusy(wait)
 				} else {
 					// ⚠ Hub 掛掉不是這台機器的錯，也不該讓 agent 停。只記錄，繼續。
-					log.Printf("check-in 送不出去（會重試）：%v", postErr)
+					log.Printf("cannot send check-in (will retry): %v", postErr)
 				}
 			}
 			saveState(agentState{AgentSeq: seq.Load(), SettingsDigest: now.digest})
@@ -573,7 +573,7 @@ func runAgent() {
 			// ⚠ 部分失敗仍然要送。一台「claude 讀得到、openclaw 讀不到」的機器，
 			// 它的 claude 狀態依然是有價值的事實。全有全無會讓最壞的機器
 			// 剛好變成資料最少的機器。
-			log.Printf("觀測部分失敗：%v", err)
+			log.Printf("observation partially failed: %v", err)
 		}
 		obs.SchemaVersion = model.SchemaVersion
 		obs.MeasuredAt = time.Now().UTC()
@@ -596,7 +596,7 @@ func runAgent() {
 				floor = serverFloor
 				logHubBusy(wait)
 			} else {
-				log.Printf("觀測送不出去（會重試）：%v", postErr)
+				log.Printf("cannot send observation (will retry): %v", postErr)
 			}
 		}
 
@@ -719,7 +719,7 @@ func adoptSettings(current *appliedSettings, resp model.CheckinResponse,
 	holder *atomic.Pointer[appliedSettings], cfg config, seq *atomic.Int64) *appliedSettings {
 	wantDigest, err := assignedSettingsDigest(resp.CheckinIntervalSeconds, resp.ObservationIntervalSeconds)
 	if err != nil || resp.SettingsDigest != wantDigest {
-		log.Printf("拒絕未綁定 interval 的 Hub 設定回應")
+		log.Printf("rejected Hub settings response not bound to intervals")
 		return current
 	}
 	next := &appliedSettings{
@@ -736,10 +736,10 @@ func adoptSettings(current *appliedSettings, resp model.CheckinResponse,
 	cfg.ObservationIntervalSeconds = resp.ObservationIntervalSeconds
 	cfg.EnrollmentSettingsDigest = resp.SettingsDigest
 	if err := saveConfig(cfg); err != nil {
-		log.Printf("新設定已採用，但寫回 agent.json 失敗（重啟後會退回舊節奏）：%v", err)
+		log.Printf("new settings applied, but failed to write back to agent.json (will revert to old intervals on restart): %v", err)
 	}
 	saveState(agentState{AgentSeq: seq.Load(), SettingsDigest: next.digest})
-	log.Printf("採用新設定：check-in %s、observation %s", next.checkin, next.observation)
+	log.Printf("applied new settings: check-in %s, observation %s", next.checkin, next.observation)
 	return next
 }
 
@@ -765,7 +765,7 @@ func postJSONStrict(ctx context.Context, url, token string, body, out any) error
 		return err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("Hub authority receipt 回了未預期的 HTTP %d，需要 200", status)
+		return fmt.Errorf("Hub authority receipt returned unexpected HTTP %d, want 200", status)
 	}
 	return nil
 }
@@ -829,15 +829,15 @@ func doJSONStatusMode(ctx context.Context, method, url, token string, body, out 
 			return resp.StatusCode, err
 		}
 		if len(raw) > 1<<20 {
-			return resp.StatusCode, errors.New("Hub JSON 回應超過 1 MiB")
+			return resp.StatusCode, errors.New("Hub JSON response exceeds 1 MiB")
 		}
 		if err := validateUniqueJSONFields(raw); err != nil {
-			return resp.StatusCode, fmt.Errorf("Hub JSON 回應不是唯一欄位文件：%w", err)
+			return resp.StatusCode, fmt.Errorf("Hub JSON response is not a unique-field document: %w", err)
 		}
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(out); err != nil {
-			return resp.StatusCode, fmt.Errorf("Hub JSON 回應不符合 schema：%w", err)
+			return resp.StatusCode, fmt.Errorf("Hub JSON response does not match schema: %w", err)
 		}
 		return resp.StatusCode, nil
 	}
@@ -875,22 +875,22 @@ func loadConfig() (config, error) {
 		return c, err
 	}
 	if c.HubURL == "" || c.HubURL != strings.TrimSpace(c.HubURL) {
-		return c, errors.New("設定不完整：缺少或不合法的 hub_url")
+		return c, errors.New("incomplete config: missing or invalid hub_url")
 	}
 	if err := validateEnrollmentAuthority(c.EnrollmentSchemaVersion, c.MachineID, c.AgentToken,
 		c.CheckinIntervalSeconds, c.ObservationIntervalSeconds, c.EnrollmentSettingsDigest); err != nil {
-		return c, fmt.Errorf("設定中的 enrollment receipt 無效：%w", err)
+		return c, fmt.Errorf("invalid enrollment receipt in config: %w", err)
 	}
 	return c, nil
 }
 
 func saveConfig(c config) error {
 	if c.HubURL == "" || c.HubURL != strings.TrimSpace(c.HubURL) {
-		return errors.New("設定不完整：缺少或不合法的 hub_url")
+		return errors.New("incomplete config: missing or invalid hub_url")
 	}
 	if err := validateEnrollmentAuthority(c.EnrollmentSchemaVersion, c.MachineID, c.AgentToken,
 		c.CheckinIntervalSeconds, c.ObservationIntervalSeconds, c.EnrollmentSettingsDigest); err != nil {
-		return fmt.Errorf("設定中的 enrollment receipt 無效：%w", err)
+		return fmt.Errorf("invalid enrollment receipt in config: %w", err)
 	}
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {

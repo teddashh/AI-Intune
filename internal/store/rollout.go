@@ -232,7 +232,7 @@ func (s *Store) SetMachineChannel(machineID, channel string) error {
 		return fmt.Errorf("store: inspect machine active jobs: %w", err)
 	}
 	if active {
-		return fmt.Errorf("%w: %s 仍有未終態 job；請先讓工作單結束，再把 channel 從 %q 改成 %q",
+		return fmt.Errorf("%w: %s has active jobs; wait for jobs to complete before changing channel from %q to %q",
 			ErrMachineActiveJob, machineID, currentChannel, channel)
 	}
 	res, err := tx.Exec(`UPDATE machine_registry
@@ -445,7 +445,7 @@ func validateNewDeployment(n NewDeployment) error {
 		return ErrBadChannel
 	}
 	if n.BatchSize <= 0 || n.BatchSize > MaxDeploymentBatchSize {
-		return fmt.Errorf("%w: batch_size 必須在 1 到 %d", ErrDeploymentInvalidBatchPlan, MaxDeploymentBatchSize)
+		return fmt.Errorf("%w: batch_size must be between 1 and %d", ErrDeploymentInvalidBatchPlan, MaxDeploymentBatchSize)
 	}
 	if len(n.Targets) == 0 {
 		return fmt.Errorf("%w: deployment needs targets", ErrDeploymentInvalidBatchPlan)
@@ -460,7 +460,7 @@ func validateNewDeployment(n NewDeployment) error {
 		}
 		if target.ExcludedReason != "" {
 			if target.BatchNo != 0 {
-				return fmt.Errorf("%w: excluded target %s 的 batch_no 必須是 0", ErrDeploymentInvalidBatchPlan, target.MachineID)
+				return fmt.Errorf("%w: excluded target %s batch_no must be 0", ErrDeploymentInvalidBatchPlan, target.MachineID)
 			}
 			continue
 		}
@@ -469,7 +469,7 @@ func validateNewDeployment(n NewDeployment) error {
 		}
 		counts[target.BatchNo]++
 		if counts[target.BatchNo] > n.BatchSize {
-			return fmt.Errorf("%w: batch %d 有 %d 台，超過 batch_size %d",
+			return fmt.Errorf("%w: batch %d has %d machines, exceeding batch_size %d",
 				ErrDeploymentInvalidBatchPlan, target.BatchNo, counts[target.BatchNo], n.BatchSize)
 		}
 		if target.BatchNo > maxBatch {
@@ -768,13 +768,13 @@ func createDeploymentBatchTx(tx dbTx, d Deployment, batchNo int, n NewJob, now t
 		err := tx.QueryRow(`SELECT channel,retired_at FROM machine_registry WHERE machine_id=?`, target.machineID).
 			Scan(&currentChannel, &retiredAt)
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("%w: target %s 不在名冊，請重新預覽", ErrDeploymentTargetChannelChanged, target.machineID)
+			return nil, fmt.Errorf("%w: target %s is not in registry, preview again", ErrDeploymentTargetChannelChanged, target.machineID)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("store: recheck delayed deployment target %s: %w", target.machineID, err)
 		}
 		if retiredAt.Valid || !currentChannel.Valid || currentChannel.String != d.Channel {
-			return nil, fmt.Errorf("%w: target %s 不再是未退場的 %s 成員，請重新預覽",
+			return nil, fmt.Errorf("%w: target %s is no longer an active %s member, preview again",
 				ErrDeploymentTargetChannelChanged, target.machineID, d.Channel)
 		}
 		var active bool
@@ -790,7 +790,7 @@ func createDeploymentBatchTx(tx dbTx, d Deployment, batchNo int, n NewJob, now t
 			return nil, fmt.Errorf("store: recheck delayed deployment conflict for %s: %w", target.machineID, err)
 		}
 		if active {
-			return nil, fmt.Errorf("%w: target %s 已有另一張 active %s job，請重新預覽或 retry",
+			return nil, fmt.Errorf("%w: target %s already has another active %s job, preview again or retry",
 				ErrDeploymentConflict, target.machineID, d.ResourceKind)
 		}
 		var newest deploy.Revision
@@ -801,7 +801,7 @@ func createDeploymentBatchTx(tx dbTx, d Deployment, batchNo int, n NewJob, now t
 			return nil, fmt.Errorf("store: recheck delayed deployment revision for %s: %w", target.machineID, err)
 		}
 		if newest > d.Revision {
-			return nil, fmt.Errorf("%w: target %s 已有 revision %d，高於這次 deployment 的 %d；請 retry 取得新 revision",
+			return nil, fmt.Errorf("%w: target %s already has revision %d, higher than this deployment revision %d; retry to get a newer revision",
 				ErrDeploymentStaleRevision, target.machineID, newest, d.Revision)
 		}
 	}
@@ -876,20 +876,20 @@ func validateDeploymentSnapshotTargets(tx dbTx, n NewDeployment) error {
 	seen := make(map[string]struct{}, len(n.Targets))
 	for _, target := range n.Targets {
 		if _, duplicate := seen[target.MachineID]; duplicate {
-			return fmt.Errorf("%w: target %s 重複，請重新預覽", ErrDeploymentTargetChannelChanged, target.MachineID)
+			return fmt.Errorf("%w: target %s is duplicated, preview again", ErrDeploymentTargetChannelChanged, target.MachineID)
 		}
 		seen[target.MachineID] = struct{}{}
 		var channel, retiredAt sql.NullString
 		err := tx.QueryRow(`SELECT channel,retired_at FROM machine_registry WHERE machine_id=?`, target.MachineID).
 			Scan(&channel, &retiredAt)
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("%w: target %s 不在名冊，請重新預覽", ErrDeploymentTargetChannelChanged, target.MachineID)
+			return fmt.Errorf("%w: target %s is not in registry, preview again", ErrDeploymentTargetChannelChanged, target.MachineID)
 		}
 		if err != nil {
 			return fmt.Errorf("store: recheck deployment target %s: %w", target.MachineID, err)
 		}
 		if retiredAt.Valid || !channel.Valid || channel.String != n.Channel {
-			return fmt.Errorf("%w: target %s 不再是未退場的 %s 成員，請重新預覽", ErrDeploymentTargetChannelChanged, target.MachineID, n.Channel)
+			return fmt.Errorf("%w: target %s is no longer an active %s member, preview again", ErrDeploymentTargetChannelChanged, target.MachineID, n.Channel)
 		}
 	}
 	if n.RetryOf != "" {
@@ -912,12 +912,12 @@ func validateDeploymentSnapshotTargets(tx dbTx, n NewDeployment) error {
 		return fmt.Errorf("store: scan deployment channel members: %w", err)
 	}
 	if len(seen) != len(members) {
-		return fmt.Errorf("%w: %s snapshot 有 %d 台、目前通道有 %d 台，請重新預覽",
+		return fmt.Errorf("%w: %s snapshot has %d machines, current channel has %d machines, preview again",
 			ErrDeploymentTargetChannelChanged, n.Channel, len(seen), len(members))
 	}
 	for machineID := range members {
 		if _, ok := seen[machineID]; !ok {
-			return fmt.Errorf("%w: %s snapshot 漏掉 target %s，請重新預覽",
+			return fmt.Errorf("%w: %s snapshot missing target %s, preview again",
 				ErrDeploymentTargetChannelChanged, n.Channel, machineID)
 		}
 	}
@@ -991,7 +991,7 @@ func activeDeploymentResourceOwnersTx(tx dbTx, resourceKind, resourceID string) 
 }
 
 func deploymentActiveResourceConflict(resourceKind, resourceID string, owners []string) error {
-	return fmt.Errorf("%w: %s:%s active deployments=[%s]；同一資源跨 channel 一次只能有一張 running/paused deployment",
+	return fmt.Errorf("%w: %s:%s active deployments=[%s]; only one running/paused deployment per resource across channels is allowed at a time",
 		ErrDeploymentActiveResource, resourceKind, resourceID, strings.Join(owners, ","))
 }
 
@@ -1128,7 +1128,7 @@ func rejectLegacyDuplicateActiveDeploymentResources(db *sql.DB) error {
 	}
 	for _, key := range order {
 		if len(groups[key]) > 1 {
-			return fmt.Errorf("%w: %s:%s 目前有 %d 個 running/paused deployment [%s]；這個 Hub 開不了這份帳本，要恢復服務請用舊 Hub",
+			return fmt.Errorf("%w: %s:%s currently has %d running/paused deployments [%s]; this Hub cannot open this ledger, use the previous Hub to restore service",
 				ErrDeploymentActiveResource, key.kind, key.id, len(groups[key]), strings.Join(groups[key], ","))
 		}
 	}
@@ -1553,7 +1553,7 @@ type deploymentBatchStatus struct {
 // Initial create 的 validation 不能替數小時後才真正開 job 的批次保證 blast radius。
 func validateStoredDeploymentBatchPlan(q deploymentQueryRower, d Deployment) error {
 	if d.BatchSize <= 0 || d.BatchSize > MaxDeploymentBatchSize {
-		return fmt.Errorf("%w: deployment %s batch_size=%d，不在 1..%d",
+		return fmt.Errorf("%w: deployment %s batch_size=%d, not in 1..%d",
 			ErrDeploymentInvalidBatchPlan, d.DeploymentID, d.BatchSize, MaxDeploymentBatchSize)
 	}
 	rows, err := q.Query(`SELECT batch_no,excluded_reason FROM deployment_targets WHERE deployment_id=?`, d.DeploymentID)
@@ -1716,10 +1716,10 @@ func (s *Store) OpenDeploymentBatch(id string, batchNo int, now time.Time) ([]Jo
 		return nil, err
 	}
 	if status.targets == 0 {
-		return nil, fmt.Errorf("%w: deployment %s 沒有 batch %d", ErrDeploymentBatchNotReady, id, batchNo)
+		return nil, fmt.Errorf("%w: deployment %s has no batch %d", ErrDeploymentBatchNotReady, id, batchNo)
 	}
 	if status.opened != 0 && status.opened != status.targets {
-		return nil, fmt.Errorf("%w: deployment %s batch %d 只開了一部分", ErrDeploymentBatchNotReady, id, batchNo)
+		return nil, fmt.Errorf("%w: deployment %s batch %d is only partially opened", ErrDeploymentBatchNotReady, id, batchNo)
 	}
 	if status.opened == 0 {
 		if err := validateDeploymentJobMaterialGraph(tx, d.DeploymentID); err != nil {
@@ -1743,11 +1743,11 @@ func (s *Store) OpenDeploymentBatch(id string, batchNo int, now time.Time) ([]Jo
 			return nil, err
 		}
 		if !prefixComplete {
-			return nil, fmt.Errorf("%w: deployment %s 的 batch 1..%d 有未開空洞",
+			return nil, fmt.Errorf("%w: deployment %s batches 1..%d have unopened gaps",
 				ErrDeploymentBatchNotReady, id, opened)
 		}
 		if opened == 0 || batchNo != opened+1 {
-			return nil, fmt.Errorf("%w: deployment %s 目前開到 batch %d，不能開 batch %d",
+			return nil, fmt.Errorf("%w: deployment %s is currently opened through batch %d, cannot open batch %d",
 				ErrDeploymentBatchNotReady, id, opened, batchNo)
 		}
 		ready, err := deploymentOpenedPrefixAllSucceededTx(tx, d, opened)
@@ -1755,7 +1755,7 @@ func (s *Store) OpenDeploymentBatch(id string, batchNo int, now time.Time) ([]Jo
 			return nil, err
 		}
 		if !ready {
-			return nil, fmt.Errorf("%w: deployment %s 的 batch 1..%d 尚未全部成功", ErrDeploymentBatchNotReady, id, opened)
+			return nil, fmt.Errorf("%w: deployment %s batches 1..%d have not all succeeded", ErrDeploymentBatchNotReady, id, opened)
 		}
 		activeResourceJobs, err := deploymentResourceHasNonTerminalJobsTx(tx, d.ResourceKind, d.ResourceID)
 		if err != nil {
@@ -1828,7 +1828,7 @@ func (s *Store) SetDeploymentState(id, from, to string, now time.Time) (bool, er
 			return false, err
 		}
 		if active {
-			return false, fmt.Errorf("%w: deployment %s 仍有未終態 job",
+			return false, fmt.Errorf("%w: deployment %s has active jobs remaining",
 				ErrDeploymentFinishNotReady, d.DeploymentID)
 		}
 		var included, opened, succeeded int
@@ -1843,7 +1843,7 @@ func (s *Store) SetDeploymentState(id, from, to string, now time.Time) (bool, er
 			return false, fmt.Errorf("store: inspect deployment finish readiness: %w", err)
 		}
 		if included == 0 || opened != included || succeeded != included {
-			return false, fmt.Errorf("%w: deployment %s included=%d opened=%d succeeded=%d；running 只能在所有目標已開且成功後 finished",
+			return false, fmt.Errorf("%w: deployment %s included=%d opened=%d succeeded=%d; running can only transition to finished after all targets are opened and succeeded",
 				ErrDeploymentFinishNotReady, id, included, opened, succeeded)
 		}
 		// finished_at is the business-day authority used by the stable promote
@@ -1931,7 +1931,7 @@ func (s *Store) abandonDeploymentTx(tx dbTx, id string, now time.Time) (Deployme
 		return Deployment{}, err
 	}
 	if active {
-		return Deployment{}, fmt.Errorf("%w: deployment %s 仍有未終態 job", ErrDeploymentAbandonActiveJobs, id)
+		return Deployment{}, fmt.Errorf("%w: deployment %s has active jobs remaining", ErrDeploymentAbandonActiveJobs, id)
 	}
 	// Abandon also releases the active resource owner and materializes a
 	// finished_at.  Use the Store clock after the writer transaction begins;
@@ -2116,14 +2116,14 @@ func (s *Store) continueDeploymentTx(tx dbTx, id string, now time.Time, policy d
 		return Deployment{}, nil, err
 	}
 	if opened == 0 {
-		return Deployment{}, nil, fmt.Errorf("%w: paused deployment %s 沒有已開的 batch", ErrDeploymentBatchNotReady, id)
+		return Deployment{}, nil, fmt.Errorf("%w: paused deployment %s has no opened batches", ErrDeploymentBatchNotReady, id)
 	}
 	prefixComplete, err := deploymentOpenedPrefixCompleteTx(tx, id, opened)
 	if err != nil {
 		return Deployment{}, nil, err
 	}
 	if !prefixComplete {
-		return Deployment{}, nil, fmt.Errorf("%w: paused deployment %s 的 batch 1..%d 有未開空洞",
+		return Deployment{}, nil, fmt.Errorf("%w: paused deployment %s batches 1..%d have unopened gaps",
 			ErrDeploymentBatchNotReady, id, opened)
 	}
 	// Continue 是唯一能越過已終態失敗、把 paused deployment 往前推的入口；
@@ -2135,7 +2135,7 @@ func (s *Store) continueDeploymentTx(tx dbTx, id string, now time.Time, policy d
 		return Deployment{}, nil, err
 	}
 	if active {
-		return Deployment{}, nil, fmt.Errorf("%w: paused deployment %s 仍有未終態 job",
+		return Deployment{}, nil, fmt.Errorf("%w: paused deployment %s has active jobs remaining",
 			ErrDeploymentBatchNotReady, id)
 	}
 	currentTerminal, err := deploymentBatchAllTerminalTx(tx, id, opened)
@@ -2143,7 +2143,7 @@ func (s *Store) continueDeploymentTx(tx dbTx, id string, now time.Time, policy d
 		return Deployment{}, nil, err
 	}
 	if !currentTerminal {
-		return Deployment{}, nil, fmt.Errorf("%w: paused deployment %s 的 batch %d 尚有非終態 job",
+		return Deployment{}, nil, fmt.Errorf("%w: paused deployment %s batch %d still has non-terminal jobs",
 			ErrDeploymentBatchNotReady, id, opened)
 	}
 	failedBatch, err := deploymentBatchHasFailureTerminalTx(tx, id, opened)
@@ -2202,7 +2202,7 @@ func (s *Store) continueDeploymentTx(tx dbTx, id string, now time.Time, policy d
 			return Deployment{}, nil, statusErr
 		}
 		if status.targets == 0 || status.opened != 0 {
-			return Deployment{}, nil, fmt.Errorf("%w: paused deployment %s 的 next batch %d 不是完整未開狀態",
+			return Deployment{}, nil, fmt.Errorf("%w: paused deployment %s next batch %d is not in an unopened state",
 				ErrDeploymentBatchNotReady, id, nextBatch)
 		}
 		var n NewJob

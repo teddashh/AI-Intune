@@ -191,7 +191,7 @@ func TestVerifierSendsOneRowPerRuleWhenTheTargetAnswers(t *testing.T) {
 			t.Fatalf("Hub 收到的憑證是 %q；verifier 平面只用 verifier bearer", auth)
 		}
 	}
-	if got := out.String(); !strings.Contains(got, "已送出 3 列證據") {
+	if got := out.String(); !strings.Contains(got, "Submitted 3 rows of evidence") {
 		t.Errorf("輸出沒說送了幾列：\n%s", got)
 	}
 }
@@ -228,7 +228,7 @@ func TestVerifierReportsASilentGatewayAsFailedEvidence(t *testing.T) {
 	}
 	wantCalls := 1 + int(verifierGatewaySettleTimeout/verifierGatewayRetryInterval)
 	if ssh.rules[model.IndependentRuleOpenClawGatewayHTTP] != wantCalls ||
-		!strings.Contains(out.String(), "gateway 收斂窗：30s 後採用這次量測") {
+		!strings.Contains(out.String(), "gateway settle window: adopting measurement after 30s") {
 		t.Fatalf("gateway calls=%d want=%d output=%s",
 			ssh.rules[model.IndependentRuleOpenClawGatewayHTTP], wantCalls, out.String())
 	}
@@ -269,7 +269,7 @@ func TestVerifierLetsAnActiveGatewaySettleBeforeReporting(t *testing.T) {
 			t.Fatalf("gateway final evidence=%+v", row)
 		}
 	}
-	if !strings.Contains(out.String(), "gateway 收斂窗：15s 後採用這次量測") {
+	if !strings.Contains(out.String(), "gateway settle window: adopting measurement after 15s") {
 		t.Fatalf("輸出沒有說明採用哪次量測：\n%s", out.String())
 	}
 }
@@ -324,7 +324,7 @@ func TestVerifierSendsNothingWhenGatewayBecomesUnobservableDuringSettle(t *testi
 	if err := run.once(context.Background()); err == nil {
 		t.Fatal("settle 期間量不到卻回 nil")
 	}
-	if len(hub.posted) != 0 || gatewayCalls != 2 || !strings.Contains(out.String(), "ssh 走不到這台") {
+	if len(hub.posted) != 0 || gatewayCalls != 2 || !strings.Contains(out.String(), "ssh cannot reach machine") {
 		t.Fatalf("posted=%+v calls=%d output=%s", hub.posted, gatewayCalls, out.String())
 	}
 }
@@ -363,10 +363,10 @@ func TestVerifierSendsNothingWhenOneRuleCannotBeObserved(t *testing.T) {
 		t.Fatalf("送出了 %d 列；整張單應該一列都不送", len(hub.posted))
 	}
 	text := out.String()
-	if !strings.Contains(text, "量不到") || !strings.Contains(text, "ssh 走不到這台") {
+	if !strings.Contains(text, "unobserved") || !strings.Contains(text, "ssh cannot reach machine") {
 		t.Errorf("輸出沒說清楚卡在哪：\n%s", text)
 	}
-	if !strings.Contains(err.Error(), "等它回報") {
+	if !strings.Contains(err.Error(), "pending report") {
 		t.Errorf("錯誤訊息 = %q；要說明那張派工現在的狀態", err)
 	}
 }
@@ -387,7 +387,7 @@ func TestVerifierTreatsAMissingToolAsUnobservedRatherThanFailed(t *testing.T) {
 	if len(hub.posted) != 0 {
 		t.Fatalf("送出了 %d 列", len(hub.posted))
 	}
-	if !strings.Contains(out.String(), "缺了這條規則要用的指令") {
+	if !strings.Contains(out.String(), "machine is missing command required by this rule") {
 		t.Errorf("輸出沒說是缺工具：\n%s", out.String())
 	}
 }
@@ -451,7 +451,7 @@ func TestVerifierSaysSoWhenNothingWasAssigned(t *testing.T) {
 	if len(ssh.calls) != 0 {
 		t.Fatalf("沒有派工卻連了 %d 次 ssh", len(ssh.calls))
 	}
-	if !strings.Contains(out.String(), "沒有指名給這個 verifier 的工作單") {
+	if !strings.Contains(out.String(), "No jobs assigned to this verifier") {
 		t.Errorf("輸出 = %q", out.String())
 	}
 }

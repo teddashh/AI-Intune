@@ -304,44 +304,44 @@ func TestOpenClawGateRejectsWithoutWritingOrSystemctl(t *testing.T) {
 	}{
 		{"bad json", func(_ *execFixture, j *model.JobResponse) {
 			j.Spec = []byte(`{"kind":`)
-		}, "spec 不是合法 JSON"},
+		}, "is not valid JSON"},
 		{"kind", func(_ *execFixture, j *model.JobResponse) {
 			j.Spec = []byte(`{"kind":"other","version":"x","artifact":{}}`)
-		}, "kind 必須"},
+		}, "kind must be openclaw"},
 		{"resource kind", func(_ *execFixture, j *model.JobResponse) { j.ResourceKind = "other" }, "job identity"},
 		{"resource id", func(_ *execFixture, j *model.JobResponse) { j.ResourceID = "other" }, "job identity"},
-		{"artifact", func(_ *execFixture, j *model.JobResponse) { j.Spec = []byte(`{"kind":"openclaw","version":"x"}`) }, "artifact 缺少"},
-		{"version", func(_ *execFixture, j *model.JobResponse) { j.Spec = []byte(`{"kind":"openclaw","artifact":{}}`) }, "version 是空的"},
+		{"artifact", func(_ *execFixture, j *model.JobResponse) { j.Spec = []byte(`{"kind":"openclaw","version":"x"}`) }, "missing artifact"},
+		{"version", func(_ *execFixture, j *model.JobResponse) { j.Spec = []byte(`{"kind":"openclaw","artifact":{}}`) }, "version is empty"},
 		{"artifact size", func(_ *execFixture, j *model.JobResponse) {
 			j.Spec = []byte(strings.Replace(string(j.Spec), fmt.Sprintf(`"size":%d`, len("openclaw tarball")), `"size":0`, 1))
 		}, "artifact.size"},
 		{"unit", func(f *execFixture, _ *model.JobResponse) {
 			f.install.UnitFound = false
 			f.install.UnitReason = "unit reason"
-		}, "UnitFound 缺少：unit reason"},
+		}, "missing UnitFound: unit reason"},
 		{"running dir", func(f *execFixture, _ *model.JobResponse) {
 			f.install.RunningDir = ""
 			f.install.RunningDirReason = "dir reason"
-		}, "RunningDir 缺少：dir reason"},
+		}, "missing RunningDir: dir reason"},
 		{"node path", func(f *execFixture, _ *model.JobResponse) {
 			f.install.NodePath = ""
 			f.install.RunningDirReason = "node reason"
-		}, "NodePath 缺少：node reason"},
+		}, "missing NodePath: node reason"},
 		{"node version", func(f *execFixture, _ *model.JobResponse) {
 			f.install.NodeVersion = ""
 			f.install.NodeVersionReason = "version reason"
-		}, "NodeVersion 缺少：version reason"},
-		{"npm", func(f *execFixture, _ *model.JobResponse) { f.install.NpmPath = ""; f.install.NpmReason = "npm reason" }, "NpmPath 缺少：npm reason"},
+		}, "missing NodeVersion: version reason"},
+		{"npm", func(f *execFixture, _ *model.JobResponse) { f.install.NpmPath = ""; f.install.NpmReason = "npm reason" }, "missing NpmPath: npm reason"},
 		{"pid", func(f *execFixture, _ *model.JobResponse) {
 			f.install.MainPID = 0
 			f.install.ProcessReason = "pid reason"
-		}, "MainPID 缺少：pid reason"},
+		}, "missing MainPID: pid reason"},
 		{"process unknown", func(f *execFixture, _ *model.JobResponse) {
 			f.install.ProcessMatchesUnit = nil
 			f.install.ProcessReason = "proc reason"
-		}, "ProcessMatchesUnit 缺少：proc reason"},
-		{"process mismatch", func(f *execFixture, _ *model.JobResponse) { no := false; f.install.ProcessMatchesUnit = &no }, "unit 改過但沒重啟"},
-		{"port", func(f *execFixture, _ *model.JobResponse) { f.install.GatewayArgs = []string{"gateway"} }, "GatewayArgs 缺少 --port N"},
+		}, "missing ProcessMatchesUnit: proc reason"},
+		{"process mismatch", func(f *execFixture, _ *model.JobResponse) { no := false; f.install.ProcessMatchesUnit = &no }, "unit was modified without restart"},
+		{"port", func(f *execFixture, _ *model.JobResponse) { f.install.GatewayArgs = []string{"gateway"} }, "GatewayArgs missing --port N"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -404,7 +404,7 @@ func TestOpenClawGateRejectsUnknownEnginesAndUnwritableRootsWithoutWrites(t *tes
 				old := ">=22.22.3 <23 || >=24.15.0 <25 || >=25.9.0"
 				job.Spec = []byte(strings.Replace(string(job.Spec), old, "^24.0.0", 1))
 			},
-			"engines 語法我不會判：^24.0.0",
+			"unsupported engines syntax: ^24.0.0",
 		},
 		{
 			"share unwritable",
@@ -413,7 +413,7 @@ func TestOpenClawGateRejectsUnknownEnginesAndUnwritableRootsWithoutWrites(t *tes
 					t.Fatal(err)
 				}
 			},
-			"~/.local/share 不可寫",
+			"~/.local/share is not writable",
 		},
 		{
 			"dropin unwritable",
@@ -422,7 +422,7 @@ func TestOpenClawGateRejectsUnknownEnginesAndUnwritableRootsWithoutWrites(t *tes
 					t.Fatal(err)
 				}
 			},
-			"drop-in 目錄不可寫",
+			"drop-in directory is not writable",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -486,7 +486,7 @@ func TestOpenClawDownloadStopsAtDeclaredArtifactSize(t *testing.T) {
 	_, err := (openclawExecutor{deps: f.deps()}).Run(context.Background(), job)
 	var rejected *rejectError
 	if !errors.As(err, &rejected) || rejected.Code != deploy.ArtifactHashMismatch ||
-		!strings.Contains(rejected.Detail, "超過宣告 size") {
+		!strings.Contains(rejected.Detail, "exceeds declared size") {
 		t.Fatalf("oversized response error=%v", err)
 	}
 }
@@ -898,9 +898,9 @@ func TestSweepOrphanStagingStopsScopesBeforeCleaning(t *testing.T) {
 		t.Errorf("staging 沒清掉：%v", err)
 	}
 	wantReports := []string{
-		"已停掉孤兒 npm scope：clawctl-stage-first.scope",
-		"已停掉孤兒 npm scope：clawctl-stage-second.scope",
-		"已清理上次中斷留下的 OpenClaw staging：" + staging,
+		"stopped orphan npm scope: clawctl-stage-first.scope",
+		"stopped orphan npm scope: clawctl-stage-second.scope",
+		"cleaned OpenClaw staging left from previous interruption: " + staging,
 	}
 	if !reflect.DeepEqual(reports, wantReports) {
 		t.Errorf("reports=%v；要 %v", reports, wantReports)
@@ -916,10 +916,10 @@ func TestSweepOrphanStagingListFailureStillCleans(t *testing.T) {
 			return "", "", errors.New("dbus unavailable")
 		})
 	joined := strings.Join(reports, "\n")
-	if !strings.Contains(joined, "掃不到孤兒 scope（不是 0）：dbus unavailable") {
+	if !strings.Contains(joined, "cannot list orphan scopes (not 0): dbus unavailable") {
 		t.Errorf("list 失敗沒有區分 unknown 與 0：%v", reports)
 	}
-	if !strings.Contains(joined, "已清理上次中斷留下的 OpenClaw staging："+staging) {
+	if !strings.Contains(joined, "cleaned OpenClaw staging left from previous interruption: "+staging) {
 		t.Errorf("list 失敗後沒報 staging 清理：%v", reports)
 	}
 	if _, err := os.Stat(f.path(staging)); !errors.Is(err, os.ErrNotExist) {
@@ -950,10 +950,10 @@ func TestSweepOrphanStagingContinuesAfterStopFailure(t *testing.T) {
 		t.Errorf("stop 失敗後沒有繼續：%v", stops)
 	}
 	want := []string{
-		"停不掉孤兒 scope clawctl-stage-bad-1700000000.scope：access denied",
-		"已停掉孤兒 npm scope：clawctl-stage-good-1700000001.scope",
-		"留著 " + filepath.Join(releases, ".staging-bad") + "：它的 npm scope 還沒停，刪了會被寫回來；下次啟動再清",
-		"已清理上次中斷留下的 OpenClaw staging：" + filepath.Join(releases, ".staging-good"),
+		"failed to stop orphan scope clawctl-stage-bad-1700000000.scope: access denied",
+		"stopped orphan npm scope: clawctl-stage-good-1700000001.scope",
+		"keeping " + filepath.Join(releases, ".staging-bad") + ": its npm scope has not stopped and would be recreated; will clean on next startup",
+		"cleaned OpenClaw staging left from previous interruption: " + filepath.Join(releases, ".staging-good"),
 	}
 	if !reflect.DeepEqual(reports, want) {
 		t.Errorf("reports=%v；要 %v", reports, want)
@@ -983,7 +983,7 @@ func TestSweepOrphanStagingReportsTrueZero(t *testing.T) {
 	f := newExecFixture(t)
 	reports := sweepOrphanStaging(context.Background(), testHome, f.root,
 		func(context.Context, ...string) (string, string, error) { return "", "", nil })
-	want := []string{"啟動掃描：沒有孤兒 npm scope、沒有 staging 殘骸"}
+	want := []string{"startup sweep: no orphan npm scopes, no staging remnants"}
 	if !reflect.DeepEqual(reports, want) {
 		t.Errorf("reports=%v；要 %v", reports, want)
 	}
@@ -1009,7 +1009,7 @@ func TestSweepOrphanStagingExpiredContextDoesNotStop(t *testing.T) {
 	if stops != 0 {
 		t.Errorf("ctx 已到期仍呼叫 stop %d 次", stops)
 	}
-	if joined := strings.Join(reports, "\n"); !strings.Contains(joined, "還有 2 個孤兒 scope 沒處理") {
+	if joined := strings.Join(reports, "\n"); !strings.Contains(joined, "2 orphan scopes remain unhandled") {
 		t.Errorf("沒有回報未處理數量：%v", reports)
 	}
 	// 沒輪到停的 scope，它們的 staging 不准刪（刪了 npm 會寫回來）。
@@ -1127,7 +1127,7 @@ func TestOpenClawRetentionSkipsAllReleasesWhenCurrentIsBroken(t *testing.T) {
 	if !reflect.DeepEqual(before, after) {
 		t.Errorf("current 壞掉仍清了 releases：before=%v after=%v", before, after)
 	}
-	if !strings.Contains(strings.Join(reports, "\n"), "沒清 releases：current 讀不到") {
+	if !strings.Contains(strings.Join(reports, "\n"), "did not clean releases: failed to read current") {
 		t.Errorf("current 壞掉沒有明確回報：%v", reports)
 	}
 }

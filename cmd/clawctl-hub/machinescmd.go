@@ -39,35 +39,35 @@ func runMachinesCommandWithDeps(ctx context.Context, argv []string, out, errOut 
 	fs := flag.NewFlagSet("machines "+action, flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub machines list|show|evidence [options]")
-		fmt.Fprintln(errOut, "      clawctl-hub machines [list] [filters] [--json] [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "      clawctl-hub machines show [--json] [--hub-url URL | --db PATH] <machine-id>")
-		fmt.Fprintln(errOut, "      clawctl-hub machines evidence [--limit N] [--json] [--hub-url URL | --db PATH] <machine-id>")
-		fmt.Fprintln(errOut, "  正常模式走 HTTP operator API；--db 僅供 Hub 完全停止時的 fenced break-glass。")
-		fmt.Fprintln(errOut, "  list 依 registry creation ceiling 分頁。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub machines list|show|evidence [options]")
+		fmt.Fprintln(errOut, "       clawctl-hub machines [list] [filters] [--json] [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "       clawctl-hub machines show [--json] [--hub-url URL | --db PATH] <machine-id>")
+		fmt.Fprintln(errOut, "       clawctl-hub machines evidence [--limit N] [--json] [--hub-url URL | --db PATH] <machine-id>")
+		fmt.Fprintln(errOut, "  Normal mode uses HTTP operator API; --db is only for fenced break-glass when Hub is completely stopped.")
+		fmt.Fprintln(errOut, "  list is paginated by registry creation ceiling.")
 		fs.PrintDefaults()
 	}
 	var hubURL, dbPath auditStringFlag
 	var jsonOutput auditBoolFlag
-	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL（省略時自動發現）")
-	fs.Var(&dbPath, "db", "stopped-service direct DB break-glass 的既有 SQLite 檔位置")
-	fs.Var(&jsonOutput, "json", "輸出 stable operator JSON DTO")
+	fs.Var(&hubURL, "hub-url", "HTTP operator API base URL (auto-discovered if omitted)")
+	fs.Var(&dbPath, "db", "Existing SQLite file path for stopped-service direct DB break-glass")
+	fs.Var(&jsonOutput, "json", "Output stable operator JSON DTO")
 	request := operator.MachineListRequest{}
 	var machineIDFilter, displayName, lifecycle, reporting, channel, cursor auditStringFlag
 	limit := auditIntFlag{value: operator.DefaultMachineReadLimit}
 	var states repeatedMachineStates
 	if action == "list" {
-		fs.Var(&machineIDFilter, "machine-id", "精確比對 machine_id")
-		fs.Var(&displayName, "display-name", "精確比對 safe display_name")
-		fs.Var(&states, "state", "canonical state；可重複")
-		fs.Var(&lifecycle, "lifecycle", "any、active 或 retired")
-		fs.Var(&reporting, "reporting", "any、true、false 或 unknown")
-		fs.Var(&channel, "channel", "any、none、canary 或 stable")
-		fs.Var(&limit, "limit", "每頁最多幾台（1..100）")
-		fs.Var(&cursor, "cursor", "上一頁回傳的 opaque next cursor")
+		fs.Var(&machineIDFilter, "machine-id", "Exact match for machine_id")
+		fs.Var(&displayName, "display-name", "Exact match for safe display_name")
+		fs.Var(&states, "state", "Canonical state; repeatable")
+		fs.Var(&lifecycle, "lifecycle", "any, active, or retired")
+		fs.Var(&reporting, "reporting", "any, true, false, or unknown")
+		fs.Var(&channel, "channel", "any, none, canary, or stable")
+		fs.Var(&limit, "limit", "Maximum machines per page (1..100)")
+		fs.Var(&cursor, "cursor", "Opaque next cursor returned from previous page")
 	} else if action == "evidence" {
 		limit = auditIntFlag{}
-		fs.Var(&limit, "limit", "每個 evidence section 的項目上限（1..100）")
+		fs.Var(&limit, "limit", "Maximum items per evidence section (1..100)")
 	}
 	parseArgs := argv
 	if action == "evidence" && len(parseArgs) > 0 && !strings.HasPrefix(parseArgs[0], "-") {
@@ -77,31 +77,31 @@ func runMachinesCommandWithDeps(ctx context.Context, argv []string, out, errOut 
 		return err
 	}
 	if hubURL.set && dbPath.set {
-		return errors.New("machines: --hub-url（HTTP mode）與 --db（direct mode）不可同時明示")
+		return errors.New("machines: --hub-url (HTTP mode) and --db (direct mode) cannot both be specified")
 	}
 	if hubURL.set && strings.TrimSpace(hubURL.value) == "" {
-		return errors.New("machines: --hub-url 不可為空")
+		return errors.New("machines: --hub-url cannot be empty")
 	}
 	if dbPath.set && strings.TrimSpace(dbPath.value) == "" {
-		return errors.New("machines: --db 不可為空")
+		return errors.New("machines: --db cannot be empty")
 	}
 
 	machineID := ""
 	switch action {
 	case "list":
 		if fs.NArg() != 0 {
-			return fmt.Errorf("machines list: 不接受 positional arguments：%q", strings.Join(fs.Args(), " "))
+			return fmt.Errorf("machines list: unexpected positional arguments: %q", strings.Join(fs.Args(), " "))
 		}
 		for name, value := range map[string]auditStringFlag{
 			"machine-id": machineIDFilter, "display-name": displayName, "lifecycle": lifecycle,
 			"reporting": reporting, "channel": channel, "cursor": cursor,
 		} {
 			if value.set && value.value == "" {
-				return fmt.Errorf("machines list: --%s 不可為空", name)
+				return fmt.Errorf("machines list: --%s cannot be empty", name)
 			}
 		}
 		if limit.set && (limit.value < 1 || limit.value > operator.MaxMachineReadLimit) {
-			return fmt.Errorf("machines list: --limit 必須介於 1 與 %d", operator.MaxMachineReadLimit)
+			return fmt.Errorf("machines list: --limit must be between 1 and %d", operator.MaxMachineReadLimit)
 		}
 		request = operator.MachineListRequest{
 			MachineID: machineIDFilter.value, DisplayName: displayName.value,
@@ -118,15 +118,15 @@ func runMachinesCommandWithDeps(ctx context.Context, argv []string, out, errOut 
 		}
 	case "show":
 		if fs.NArg() != 1 || strings.TrimSpace(fs.Arg(0)) == "" {
-			return errors.New("machines show: 必須提供一個 machine-id")
+			return errors.New("machines show: must provide a machine-id")
 		}
 		machineID = fs.Arg(0)
 	case "evidence":
 		if fs.NArg() != 1 || strings.TrimSpace(fs.Arg(0)) == "" {
-			return errors.New("machines evidence: 必須提供一個 machine-id")
+			return errors.New("machines evidence: must provide a machine-id")
 		}
 		if limit.set && (limit.value < 1 || limit.value > store.MaxMachineEvidencePageSize) {
-			return fmt.Errorf("machines evidence: --limit 必須介於 1 與 %d", store.MaxMachineEvidencePageSize)
+			return fmt.Errorf("machines evidence: --limit must be between 1 and %d", store.MaxMachineEvidencePageSize)
 		}
 		machineID = fs.Arg(0)
 		request.Limit = limit.value
@@ -147,7 +147,7 @@ func runMachinesCommandWithDeps(ctx context.Context, argv []string, out, errOut 
 	if action == "show" {
 		result, err := client.Machine(ctx, machineID)
 		if err != nil {
-			return fmt.Errorf("讀取 machine detail 失敗（HTTP operator API）：%w", err)
+			return fmt.Errorf("failed to read machine detail (HTTP operator API): %w", err)
 		}
 		if jsonOutput.value {
 			return writeMachineDetail(out, result, true, "HTTP operator API", nil)
@@ -161,13 +161,13 @@ func runMachinesCommandWithDeps(ctx context.Context, argv []string, out, errOut 
 	if action == "evidence" {
 		result, err := client.MachineEvidence(ctx, machineID, limit.value)
 		if err != nil {
-			return fmt.Errorf("讀取 machine evidence 失敗（HTTP operator API）：%w", err)
+			return fmt.Errorf("failed to read machine evidence (HTTP operator API): %w", err)
 		}
 		return writeMachineEvidence(out, result, jsonOutput.value, "HTTP operator API")
 	}
 	result, err := client.ListMachines(ctx, request)
 	if err != nil {
-		return fmt.Errorf("讀取 machine list 失敗（HTTP operator API）：%w", err)
+		return fmt.Errorf("failed to read machine list (HTTP operator API): %w", err)
 	}
 	return writeMachineList(out, result, jsonOutput.value, "HTTP operator API")
 }
@@ -175,27 +175,27 @@ func runMachinesCommandWithDeps(ctx context.Context, argv []string, out, errOut 
 func machinesHTTPClient(explicitURL string, explicit bool, deps machineCommandDeps) (*operatorclient.Client, error) {
 	if explicit {
 		if deps.newOperatorClient == nil {
-			return nil, errors.New("machines: operator HTTP client 未初始化")
+			return nil, errors.New("machines: operator HTTP client not initialized")
 		}
 		client, err := deps.newOperatorClient(explicitURL)
 		if err != nil {
-			return nil, fmt.Errorf("machines: 建立 HTTP operator client 失敗：%w", err)
+			return nil, fmt.Errorf("machines: failed to construct HTTP operator client: %w", err)
 		}
 		return client, nil
 	}
 	if deps.discoverHubURL == nil {
-		return nil, errors.New("machines: Hub discovery 未初始化")
+		return nil, errors.New("machines: Hub discovery not initialized")
 	}
 	discovered, err := deps.discoverHubURL()
 	if err != nil {
-		return nil, fmt.Errorf("machines: 無法發現 Hub：%w", err)
+		return nil, fmt.Errorf("machines: unable to discover Hub: %w", err)
 	}
 	if deps.newOperatorClient == nil {
-		return nil, errors.New("machines: operator HTTP client 未初始化")
+		return nil, errors.New("machines: operator HTTP client not initialized")
 	}
 	client, err := deps.newOperatorClient(discovered)
 	if err != nil {
-		return nil, fmt.Errorf("machines: 建立 discovered HTTP operator client 失敗：%w", err)
+		return nil, fmt.Errorf("machines: failed to construct discovered HTTP operator client: %w", err)
 	}
 	return client, nil
 }
@@ -210,14 +210,14 @@ func runMachinesDirect(ctx context.Context, action, machineID string, request op
 		// expectation set before it derives State and structured findings.
 		loadExpectations(st)
 		if _, err := st.CurrentWorkloadPolicyToken("operator-machine-read-policy-proof"); err != nil {
-			return fmt.Errorf("machines %s: shell CLAWCTL_EXPECTATIONS 與 Hub 最後發布的 workload policy 不一致；拒絕 direct DB 判決：%w", action, err)
+			return fmt.Errorf("machines %s: shell CLAWCTL_EXPECTATIONS does not match Hub last published workload policy; refusing direct DB judgement: %w", action, err)
 		}
 		service := operator.New(st)
 		evaluatedAt := time.Now().UTC()
 		if action == "show" {
 			result, err := service.MachineDetail(machineID, evaluatedAt)
 			if err != nil {
-				return fmt.Errorf("讀取 machine detail 失敗（direct DB operator service）：%w", err)
+				return fmt.Errorf("failed to read machine detail (direct DB operator service): %w", err)
 			}
 			if jsonOutput {
 				return writeMachineDetail(out, result, true, "direct DB operator service", nil)
@@ -233,13 +233,13 @@ func runMachinesDirect(ctx context.Context, action, machineID string, request op
 				MachineID: machineID, Limit: request.Limit,
 			}, evaluatedAt)
 			if err != nil {
-				return fmt.Errorf("讀取 machine evidence 失敗（direct DB operator service）：%w", err)
+				return fmt.Errorf("failed to read machine evidence (direct DB operator service): %w", err)
 			}
 			return writeMachineEvidence(out, result, jsonOutput, "direct DB operator service")
 		}
 		result, err := service.ListMachinesPage(request, evaluatedAt)
 		if err != nil {
-			return fmt.Errorf("讀取 machine list 失敗（direct DB operator service）：%w", err)
+			return fmt.Errorf("failed to read machine list (direct DB operator service): %w", err)
 		}
 		return writeMachineList(out, result, jsonOutput, "direct DB operator service")
 	})
@@ -250,14 +250,14 @@ func writeMachineList(out io.Writer, result operator.MachineListResult, jsonOutp
 		return writeMachinesJSON(out, result)
 	}
 	if _, err := fmt.Fprintf(out,
-		"%s；Hub 評估時間 %s；consistency %s；registry creation ceiling %d。\n"+
-			"符合 filter %d / 名冊可見 %d 台（active %d、retired %d）；分母 %d 台，%d 台正在回報。\n\n",
+		"%s; Hub evaluated at %s; consistency %s; registry creation ceiling %d.\n"+
+			"filter matched %d / roster visible %d machines (active %d, retired %d); denominator %d machines, %d machines reporting.\n\n",
 		source, result.EvaluatedAt.Format(time.RFC3339Nano), result.Consistency, result.CreationCeiling,
 		result.MatchedTotal, result.Total, result.Active, result.Retired, result.Expected, result.Reporting); err != nil {
 		return err
 	}
 	for _, machine := range result.Items {
-		stateLabel := "Retired（未評估健康燈）"
+		stateLabel := "Retired (health status not evaluated)"
 		if machine.State != nil {
 			stateLabel = string(*machine.State)
 		}
@@ -281,24 +281,24 @@ func writeMachineDetail(out io.Writer, result operator.MachineDetailResult, json
 		return writeMachinesJSON(out, result)
 	}
 	machine := result.Item
-	stateLabel := "Retired（未評估健康燈）"
+	stateLabel := "Retired (health status not evaluated)"
 	if machine.State != nil {
 		stateLabel = string(*machine.State)
 	}
-	channel := "未指派"
+	channel := "unassigned"
 	if machine.Channel != nil {
 		channel = terminalSafe(*machine.Channel)
 	}
-	assignedLabel := "無法取得"
+	assignedLabel := "unavailable"
 	if assigned != nil {
-		assignedLabel = fmt.Sprintf("%s（版本 %d）", assignedUserCLILabel(assigned.UserID, assigned.UserLogin), assigned.Revision)
+		assignedLabel = fmt.Sprintf("%s (revision %d)", assignedUserCLILabel(assigned.UserID, assigned.UserLogin), assigned.Revision)
 	}
-	reporting := "unknown（retired 不評估）"
+	reporting := "unknown (retired not evaluated)"
 	if machine.Reporting != nil {
 		reporting = fmt.Sprintf("%t", *machine.Reporting)
 	}
 	if _, err := fmt.Fprintf(out,
-		"%s；Hub 評估時間 %s。\n%s  %s\nmachine_id: %s\nexpected: %t\nchannel: %s (revision %d)\n指派使用者: %s\nreporting: %s\nlast check-in: %s\nlast observation: %s\n",
+		"%s; Hub evaluated at %s.\n%s  %s\nmachine_id: %s\nexpected: %t\nchannel: %s (revision %d)\nassigned user: %s\nreporting: %s\nlast check-in: %s\nlast observation: %s\n",
 		source, result.EvaluatedAt.Format(time.RFC3339Nano), terminalSafe(machine.DisplayName), stateLabel,
 		terminalSafe(machine.MachineID), machine.Expected, channel, machine.ChannelRevision, assignedLabel, reporting,
 		machineReadTime(machine.LastCheckinReceivedAt), machineReadTime(machine.LastObservationReceivedAt)); err != nil {
@@ -523,7 +523,7 @@ func writeMachineEvidence(out io.Writer, result operator.MachineEvidenceResult, 
 	}
 	d := result.Disclosure
 	if _, err := fmt.Fprintf(out,
-		"%s；Hub 評估時間 %s。\n%s\nmachine_id: %s\n"+
+		"%s; Hub evaluated at %s.\n%s\nmachine_id: %s\n"+
 			"journal_producer: kind=%s authority=%s\nsystemd_producer: kind=%s authority=%s\n"+
 			"credential_producer: kind=%s authority=%s\n"+
 			"occupancy_producer: kind=%s authority=%s\noccupancy_relay: kind=%s authority=%s\n"+
@@ -812,7 +812,7 @@ func writeMachineEvidence(out io.Writer, result operator.MachineEvidenceResult, 
 			return err
 		}
 		if journal.ReadFailed {
-			if _, err := fmt.Fprintf(out, "讀不到 (not-heard): %s%s\n",
+			if _, err := fmt.Fprintf(out, "read failed (not-heard): %s%s\n",
 				terminalSafe(journal.Err.Text), jobEvidenceTextSuffix(*journal.Err)); err != nil {
 				return err
 			}
@@ -820,7 +820,7 @@ func writeMachineEvidence(out io.Writer, result operator.MachineEvidenceResult, 
 		}
 		lowerBound := ""
 		if journal.LinesAreLowerBound {
-			lowerBound = "（至少）"
+			lowerBound = " (at least)"
 		}
 		if _, err := fmt.Fprintf(out, "LINES%s: %d\nSHAPES: %d\n", lowerBound, journal.Lines, journal.Shapes); err != nil {
 			return err

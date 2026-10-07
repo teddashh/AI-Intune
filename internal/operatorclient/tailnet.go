@@ -145,13 +145,13 @@ func validateTailnetResponseHeaders(header http.Header, replayAllowed bool) erro
 func validateTailnetPreviewRequest(body operator.TailnetPeerIgnorePreviewRequest) error {
 	if !validTailnetPeerID(body.PeerID) || !validTailnetReason(body.Reason) ||
 		(body.Action != "ignore" && body.Action != "unignore") {
-		return errors.New("operator client: tailnet peer_id、action 與 reason 必須是 canonical values")
+		return errors.New("operator client: tailnet peer_id, action, and reason must be canonical values")
 	}
 	if body.Action == "ignore" && body.ExpiresAt.IsZero() {
-		return errors.New("operator client: tailnet ignore expires_at 不可省略")
+		return errors.New("operator client: tailnet ignore expires_at cannot be omitted")
 	}
 	if body.Action == "unignore" && !body.ExpiresAt.IsZero() {
-		return errors.New("operator client: tailnet unignore 不接受 expires_at")
+		return errors.New("operator client: tailnet unignore does not accept expires_at")
 	}
 	return nil
 }
@@ -160,7 +160,7 @@ func validateTailnetApplyRequest(peerID, key string, body TailnetPeerIgnoreReque
 	if !validTailnetPeerID(peerID) || strings.TrimSpace(key) != key || key == "" || len(key) > 200 ||
 		strings.TrimSpace(body.ConfirmHostname) != body.ConfirmHostname || body.ConfirmHostname == "" || len(body.ConfirmHostname) > 255 ||
 		body.ExpectedRevision < 0 || !validSHA256Digest(body.PreviewDigest) {
-		return errors.New("operator client: tailnet apply target、key、revision、confirmation 或 preview digest 不合法")
+		return errors.New("operator client: tailnet apply target, key, revision, confirmation, or preview digest is invalid")
 	}
 	return validateTailnetPreviewRequest(operator.TailnetPeerIgnorePreviewRequest{
 		PeerID: peerID, Action: body.Action, ExpiresAt: body.ExpiresAt, Reason: body.Reason,

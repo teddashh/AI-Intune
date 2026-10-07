@@ -28,7 +28,7 @@ import (
 func (h *hub) resolveAgentSettings(machineID string) (settingpolicy.Settings, string) {
 	effective, err := h.store.ResolveMachineSettings(machineID)
 	if err != nil {
-		log.Printf("解析設定失敗 machine=%s: %v", machineID, err)
+		log.Printf("failed to resolve settings machine=%s: %v", machineID, err)
 		effective = settingpolicy.Effective{Settings: settingpolicy.Defaults(),
 			Source: settingpolicy.SourceDefault}
 	}
@@ -156,7 +156,7 @@ func (h *hub) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("已報到 machine=%s host=%s user=%s", machineID, req.Hostname, req.UnixUser)
+	log.Printf("enrolled machine=%s host=%s user=%s", machineID, req.Hostname, req.UnixUser)
 	settings, settingsDigest := h.resolveAgentSettings(machineID)
 	writeJSON(w, http.StatusOK, model.EnrollResponse{
 		SchemaVersion:              model.SchemaVersion,
@@ -268,7 +268,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	// 這裡的 JSON 只給 agent 與 CLI 讀，不進 HTML。
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(v); err != nil {
-		log.Printf("回應寫入失敗：%v", err)
+		log.Printf("failed to write response: %v", err)
 	}
 }
 

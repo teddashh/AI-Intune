@@ -115,7 +115,7 @@ func runRestoreDrillCommandWithDeps(ctx context.Context, argv []string, out, err
 		action, argv = argv[0], argv[1:]
 	}
 	if action != "preview" && action != "run" && action != "list" && action != "show" {
-		return fmt.Errorf("restore-drill: 不認得 subcommand %q", action)
+		return fmt.Errorf("restore-drill: unrecognized subcommand %q", action)
 	}
 	leadingShowID := ""
 	if action == "show" && len(argv) > 0 && !strings.HasPrefix(argv[0], "-") {
@@ -124,62 +124,62 @@ func runRestoreDrillCommandWithDeps(ctx context.Context, argv []string, out, err
 	fs := flag.NewFlagSet("restore-drill "+action, flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	fs.Usage = func() {
-		fmt.Fprintln(errOut, "用法：clawctl-hub restore-drill preview [--json] [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "      clawctl-hub restore-drill run --reason REASON --confirm 'VERIFY FILE' [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "      clawctl-hub restore-drill list [--limit N] [--json] [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "      clawctl-hub restore-drill show OPERATION_ID [--json] [--hub-url URL | --db PATH]")
-		fmt.Fprintln(errOut, "  preview 是預設動作；HTTP operator API 是預設 transport。--db 是 stopped-service break-glass。")
+		fmt.Fprintln(errOut, "Usage: clawctl-hub restore-drill preview [--json] [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "       clawctl-hub restore-drill run --reason REASON --confirm 'VERIFY FILE' [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "       clawctl-hub restore-drill list [--limit N] [--json] [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "       clawctl-hub restore-drill show OPERATION_ID [--json] [--hub-url URL | --db PATH]")
+		fmt.Fprintln(errOut, "  preview is the default action; HTTP operator API is the default transport; --db is stopped-service break-glass")
 		fs.PrintDefaults()
 	}
-	hubURL := fs.String("hub-url", "", "HTTP operator API base URL（省略時自動發現）")
-	dbPath := fs.String("db", "", "stopped-service direct DB break-glass 的既有 SQLite 檔")
-	backupsDir := fs.String("backups", "", "direct DB 模式使用的 canonical absolute 備份目錄")
-	stampPath := fs.String("stamp", "", "direct DB 模式成功後寫入的 canonical absolute 完成章")
-	jsonOutput := fs.Bool("json", false, "輸出 stable operator JSON DTO")
-	limit := fs.Int("limit", 20, "list 最多顯示幾筆 operation（1..100）")
-	reason := fs.String("reason", "", "建立演練的稽核理由")
-	confirm := fs.String("confirm", "", "逐字輸入 preview 顯示的 VERIFY FILE")
-	key := fs.String("idempotency-key", "", "ambiguous response retry 使用原 request key")
-	digest := fs.String("preview-digest", "", "ambiguous response retry 使用原 preview digest")
+	hubURL := fs.String("hub-url", "", "HTTP operator API base URL (auto-discovered if omitted)")
+	dbPath := fs.String("db", "", "existing SQLite file for stopped-service direct DB break-glass")
+	backupsDir := fs.String("backups", "", "canonical absolute backup directory used in direct DB mode")
+	stampPath := fs.String("stamp", "", "canonical absolute completion stamp written after success in direct DB mode")
+	jsonOutput := fs.Bool("json", false, "output stable operator JSON DTO")
+	limit := fs.Int("limit", 20, "maximum operations to display in list (1..100)")
+	reason := fs.String("reason", "", "audit reason for creating restore drill")
+	confirm := fs.String("confirm", "", "exact match of VERIFY FILE shown in preview")
+	key := fs.String("idempotency-key", "", "original request key for ambiguous response retry")
+	digest := fs.String("preview-digest", "", "original preview digest for ambiguous response retry")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
 	seen := visitedFlags(fs)
 	if seen["hub-url"] && seen["db"] {
-		return errors.New("restore-drill: --hub-url 與 --db 不可同時明示")
+		return errors.New("restore-drill: cannot specify both --hub-url and --db")
 	}
 	if (seen["hub-url"] && strings.TrimSpace(*hubURL) == "") || (seen["db"] && strings.TrimSpace(*dbPath) == "") {
-		return errors.New("restore-drill: 明示的 --hub-url / --db 不可為空")
+		return errors.New("restore-drill: explicit --hub-url / --db cannot be empty")
 	}
 	if (seen["backups"] || seen["stamp"]) && !seen["db"] {
-		return errors.New("restore-drill: --backups 與 --stamp 只可搭配明示 --db")
+		return errors.New("restore-drill: --backups and --stamp can only be used with explicit --db")
 	}
 	if action == "show" {
 		operationID := leadingShowID
 		if operationID == "" && fs.NArg() == 1 {
 			operationID = fs.Arg(0)
 		} else if fs.NArg() != 0 {
-			return errors.New("restore-drill show: 需要一個 canonical operation ID")
+			return errors.New("restore-drill show: canonical operation ID required")
 		}
 		if !validRestoreDrillCLIIdentifier(operationID) {
-			return errors.New("restore-drill show: 需要一個 canonical operation ID")
+			return errors.New("restore-drill show: canonical operation ID required")
 		}
 		leadingShowID = operationID
 	} else if fs.NArg() != 0 {
-		return fmt.Errorf("restore-drill %s: 不接受 positional arguments", action)
+		return fmt.Errorf("restore-drill %s: positional arguments not accepted", action)
 	}
 	if action != "run" && (seen["reason"] || seen["confirm"] || seen["idempotency-key"] || seen["preview-digest"]) {
-		return fmt.Errorf("restore-drill %s: 不接受 run confirmation 或 retry coordinates", action)
+		return fmt.Errorf("restore-drill %s: does not accept run confirmation or retry coordinates", action)
 	}
 	if action != "list" && seen["limit"] {
-		return fmt.Errorf("restore-drill %s: 不接受 --limit", action)
+		return fmt.Errorf("restore-drill %s: does not accept --limit", action)
 	}
 	if *limit < 1 || *limit > store.MaxRestoreDrillReadLimit {
-		return errors.New("restore-drill list: --limit 必須介於 1 與 100")
+		return errors.New("restore-drill list: --limit must be between 1 and 100")
 	}
 	canonicalReason := strings.TrimSpace(*reason)
 	if action == "run" && (canonicalReason == "" || canonicalReason != *reason || len(canonicalReason) > 500 || *confirm == "") {
-		return errors.New("restore-drill run: 需要 canonical --reason（最多 500 字）與逐字 --confirm")
+		return errors.New("restore-drill run: requires canonical --reason (at most 500 chars) and exact --confirm")
 	}
 	retryCount := 0
 	for _, name := range []string{"idempotency-key", "preview-digest"} {
@@ -188,10 +188,10 @@ func runRestoreDrillCommandWithDeps(ctx context.Context, argv []string, out, err
 		}
 	}
 	if retryCount != 0 && retryCount != 2 {
-		return errors.New("restore-drill run: retry 必須同時提供原 --idempotency-key 與 --preview-digest")
+		return errors.New("restore-drill run: retry requires original --idempotency-key and --preview-digest together")
 	}
 	if retryCount == 2 && (strings.TrimSpace(*key) != *key || *key == "" || !validLifecycleRetryDigest(*digest)) {
-		return errors.New("restore-drill run: retry coordinates 不合法")
+		return errors.New("restore-drill run: invalid retry coordinates")
 	}
 	options := restoreDrillCommandOptions{
 		Action: action, HubURL: *hubURL, DBPath: *dbPath, BackupsDir: *backupsDir, StampPath: *stampPath,
@@ -227,7 +227,7 @@ func withRestoreDrillBackend(ctx context.Context, options restoreDrillCommandOpt
 			stampPath = filepath.Join(filepath.Dir(options.DBPath), "restore-drill.stamp")
 		}
 		if !filepath.IsAbs(backupsDir) || filepath.Clean(backupsDir) != backupsDir || !filepath.IsAbs(stampPath) || filepath.Clean(stampPath) != stampPath {
-			return errors.New("restore-drill: direct backup 與 stamp 路徑必須是 canonical absolute paths")
+			return errors.New("restore-drill: direct backup and stamp paths must be canonical absolute paths")
 		}
 		service := operator.New(st)
 		service.ConfigureRestoreDrill(restoredrill.Runner{BackupsDir: backupsDir, StampPath: stampPath, Live: st, Now: deps.now})
@@ -242,7 +242,7 @@ func executeRestoreDrillCommand(ctx context.Context, backend restoreDrillCommand
 	case "preview":
 		preview, err := backend.Preview(ctx)
 		if err != nil {
-			return fmt.Errorf("預覽還原演練失敗（%s）：%w", source, err)
+			return fmt.Errorf("failed to preview restore drill (%s): %w", source, err)
 		}
 		if options.JSON {
 			return writeRestoreDrillJSON(out, preview)
@@ -254,7 +254,7 @@ func executeRestoreDrillCommand(ctx context.Context, backend restoreDrillCommand
 	case "list":
 		result, err := backend.List(ctx, options.Limit)
 		if err != nil {
-			return fmt.Errorf("讀取還原演練 operations 失敗（%s）：%w", source, err)
+			return fmt.Errorf("failed to read restore drill operations (%s): %w", source, err)
 		}
 		if options.JSON {
 			return writeRestoreDrillJSON(out, result)
@@ -269,7 +269,7 @@ func executeRestoreDrillCommand(ctx context.Context, backend restoreDrillCommand
 	case "show":
 		operation, err := backend.Show(ctx, options.OperationID)
 		if err != nil {
-			return fmt.Errorf("讀取還原演練 operation 失敗（%s）：%w", source, err)
+			return fmt.Errorf("failed to read restore drill operation (%s): %w", source, err)
 		}
 		return writeRestoreDrillOperation(out, operation, options.JSON)
 	case "run":
@@ -277,10 +277,10 @@ func executeRestoreDrillCommand(ctx context.Context, backend restoreDrillCommand
 		if !options.Retry {
 			preview, err := backend.Preview(ctx)
 			if err != nil {
-				return fmt.Errorf("預覽還原演練失敗（%s）：%w", source, err)
+				return fmt.Errorf("failed to preview restore drill (%s): %w", source, err)
 			}
 			if options.Confirm != preview.Confirmation {
-				return fmt.Errorf("restore-drill run: --confirm 與最新預覽不符；需要逐字輸入 %q", preview.Confirmation)
+				return fmt.Errorf("restore-drill run: --confirm does not match latest preview; exact input %q required", preview.Confirmation)
 			}
 			key, err := operator.NewIdempotencyKey("cli-restore-drill")
 			if err != nil {
@@ -291,7 +291,7 @@ func executeRestoreDrillCommand(ctx context.Context, backend restoreDrillCommand
 		fmt.Fprintf(errOut, "restore-drill private retry coordinates: idempotency-key=%s preview-digest=%s\n", options.IdempotencyKey, body.PreviewDigest)
 		result, err := backend.Create(ctx, options.IdempotencyKey, body)
 		if err != nil {
-			return fmt.Errorf("建立還原演練失敗（%s；idempotency-key=%q%s）：%w", source,
+			return fmt.Errorf("failed to create restore drill (%s; idempotency-key=%q%s): %w", source,
 				options.IdempotencyKey, operatorRejectionReplayNote(err), err)
 		}
 		if options.JSON {

@@ -258,7 +258,7 @@ func (s *Service) SoftwareReport(evaluatedAt time.Time) (SoftwareReport, error) 
 	machines := softwareMachinesFrom(machineSummariesFrom(overview, evaluatedAt))
 	if len(machines) > MaxSoftwareReportMachines {
 		return SoftwareReport{}, fmt.Errorf(
-			"%w: 分母裡有 %d 台，超過這份報告一次讀得了的 %d 台",
+			"%w: denominator has %d machines, exceeding the %d machines this report can read at once",
 			ErrInvalidSoftwareReport, len(machines), MaxSoftwareReportMachines)
 	}
 	rows, err := s.store.FleetTools()
@@ -293,7 +293,7 @@ func (s *Service) SoftwareReport(evaluatedAt time.Time) (SoftwareReport, error) 
 	}
 	if len(toolNames) > MaxSoftwareReportTools {
 		return SoftwareReport{}, fmt.Errorf(
-			"%w: 機隊回報了 %d 個工具，超過這份報告一次讀得了的 %d 個",
+			"%w: fleet reported %d tools, exceeding the %d tools this report can read at once",
 			ErrInvalidSoftwareReport, len(toolNames), MaxSoftwareReportTools)
 	}
 

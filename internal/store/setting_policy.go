@@ -394,17 +394,17 @@ func (s *Store) ApplyOperatorSettingAssignment(req OperatorSettingAssignmentRequ
 
 func validPolicyID(id string) error {
 	if id == "" || len(id) > policyIDLimit {
-		return fmt.Errorf("policy_id 不可空白，最多 %d 個字元", policyIDLimit)
+		return fmt.Errorf("policy_id cannot be blank, at most %d characters", policyIDLimit)
 	}
 	for _, r := range id {
 		switch {
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
 		default:
-			return errors.New("policy_id 只接受小寫英文、數字與連字號")
+			return errors.New("policy_id accepts only lowercase letters, numbers, and hyphens")
 		}
 	}
 	if strings.HasPrefix(id, "-") || strings.HasSuffix(id, "-") {
-		return errors.New("policy_id 不可以連字號開頭或結尾")
+		return errors.New("policy_id cannot begin or end with a hyphen")
 	}
 	return nil
 }

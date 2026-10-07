@@ -38,7 +38,7 @@ func (h *hub) handleGetOperatorMachineAssignedUser(w http.ResponseWriter, r *htt
 			writeErr(w, http.StatusNotFound, store.OperatorCodeMachineNotFound, "找不到這台機器")
 			return
 		}
-		log.Printf("讀取 operator 機器指派使用者 失敗 machine=%s: %v", r.PathValue("id"), err)
+		log.Printf("failed to read operator machine assigned user machine=%s: %v", r.PathValue("id"), err)
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "讀取機器指派使用者失敗")
 		return
 	}
@@ -78,7 +78,7 @@ func (h *hub) handlePutOperatorMachineAssignedUser(w http.ResponseWriter, r *htt
 			detail = "使用者不在名冊；請重新選擇使用者"
 		}
 		if status == http.StatusInternalServerError {
-			log.Printf("operator 機器指派使用者 失敗 machine=%s: %v", r.PathValue("id"), err)
+			log.Printf("operator machine assigned user failed machine=%s: %v", r.PathValue("id"), err)
 		}
 		var rejection *store.OperatorRequestError
 		if errors.As(err, &rejection) && rejection.Replayed {
