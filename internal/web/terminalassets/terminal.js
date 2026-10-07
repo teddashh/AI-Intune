@@ -22,8 +22,31 @@
   var latestCols = 0;
   var latestRows = 0;
 
+  // The server enforces the idle timeout; this only drives a cosmetic
+  // warning two minutes before it, so a missing value just means no warning.
+  var impactElement = document.getElementById("terminal-impact");
+  var idleTimeoutMs = impactElement ? parseInt(impactElement.getAttribute("data-idle-timeout-ms") || "0", 10) : 0;
+  var idleWarningTimer = null;
+  var idleWarningMessage = "注意：終端將在 2 分鐘後因閒置而自動關閉。";
+
   function show(text) {
     status.textContent = text;
+  }
+
+  function resetIdleWarning() {
+    if (idleWarningTimer) {
+      clearTimeout(idleWarningTimer);
+    }
+    if (idleTimeoutMs > 120000 && interactive && !settled) {
+      idleWarningTimer = setTimeout(function () {
+        if (interactive && !settled) {
+          show(idleWarningMessage);
+        }
+      }, idleTimeoutMs - 120000);
+    }
+    if (status.textContent === idleWarningMessage) {
+      show(openedMessage);
+    }
   }
 
   function settle(text) {
@@ -78,6 +101,7 @@
       cols: clampGeometry(latestCols),
       rows: clampGeometry(latestRows)
     }));
+    resetIdleWarning();
   }
 
   function rememberSize(cols, rows) {
@@ -139,6 +163,7 @@
       }));
       offset = end;
     }
+    resetIdleWarning();
   });
 
   var socketURL = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + location.pathname + "/socket";
@@ -176,6 +201,7 @@
         interactive = true;
         term.focus();
         show(openedMessage);
+        resetIdleWarning();
       }
       return;
     }

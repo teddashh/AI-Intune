@@ -289,7 +289,18 @@ It sends no `Authorization` header and does not open the SQLite file.
 
 ---
 
-## 9. Still later
+## 9. Operator Terminal
+
+Hub provides a browser-based web terminal to connected agents. By default, terminal sessions are bounded by two limits, configured via environment variables in `hub.env` (or Hub flags):
+
+*   **Idle Timeout**: `CLAWCTL_TERMINAL_IDLE_TIMEOUT` (default `30m`). The session closes automatically if there is no operator input (keyboard, paste, or resize) from the page for this duration. Output from the machine or background heartbeats do not reset the timer (e.g., a session only running `tail -f` will still idle out). Bounded between `1m` and `24h`.
+*   **Absolute Lifetime**: `CLAWCTL_TERMINAL_MAX_LIFETIME` (default `12h`). The session closes automatically when this duration is reached, measured from the moment the session was created in the ledger (`opened_at`), not from when the socket attaches. It cannot be extended by input or output. If a session is already past its lifetime when an operator connects, it closes immediately. Bounded between `1m` and `720h`.
+
+There is no "disable" value; all sessions are always bounded. Empty values fall back to the defaults. Timeouts must be whole seconds and the idle timeout cannot exceed the max lifetime. A terminal closed by these limits gets its close reason written once to the session ledger (`agent_sessions.close_reason`, also returned as `close_reason` by the operator API): `終端閒置逾時，已自動關閉` (idle timeout) or `終端已達最長使用時間，已自動關閉` (lifetime reached). The Hub also logs one line, `terminal session closed: idle timeout …` / `… lifetime reached …`, with the session and machine IDs. The terminal page states both limits and the session's latest end time, warns two minutes before an idle close, and says why the terminal closed.
+
+---
+
+## 10. Still later
 
 Done:
 

@@ -15,6 +15,7 @@ import (
 	"github.com/teddashh/AI-Intune/internal/agentrelay"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/store"
+	"github.com/teddashh/AI-Intune/internal/web"
 )
 
 const (
@@ -32,15 +33,17 @@ const (
 	operatorTerminalOpenFailed     = "目前無法開啟終端。請回到機器頁再試一次。"
 	operatorTerminalUnavailable    = "終端目前無法使用。請稍後回到機器頁再開啟。"
 
-	operatorTerminalInputInvalid     = "這個終端收到無法處理的輸入，已結束。請回到機器頁重新開啟。"
-	operatorTerminalTooSlow          = "這個終端的輸出超過這一頁的接收速度，終端已結束。請回到機器頁重新開啟。"
-	operatorTerminalEnded            = "這個終端已結束，未再接受輸入。請回到機器頁重新開啟。"
-	operatorTerminalDisconnectedCopy = "這個終端與機器的連線已中斷，終端已結束。請回到機器頁重新開啟。"
-	operatorTerminalRevoked          = "這個終端的存取權已撤銷，終端已結束。請回到機器頁。"
-	operatorTerminalAuthDown         = "Hub 目前無法確認操作者身分，終端已結束。請稍後回到機器頁重新開啟。"
-	operatorTerminalMachineFailed    = "這台機器的終端發生錯誤，終端已結束。請回到機器頁重新開啟。"
-	operatorTerminalNoLinkCopy       = "這台的終端連線目前沒有接上 Hub，這個終端已關閉。請確認機器上的 agent 與 bat-server 都在執行，再回到機器頁重新開啟。"
-	operatorTerminalDuplicateCopy    = "這個終端已在另一個分頁開啟，這一頁沒有連上它。請回到原本的分頁。"
+	operatorTerminalInputInvalid        = "這個終端收到無法處理的輸入，已結束。請回到機器頁重新開啟。"
+	operatorTerminalTooSlow             = "這個終端的輸出超過這一頁的接收速度，終端已結束。請回到機器頁重新開啟。"
+	operatorTerminalEnded               = "這個終端已結束，未再接受輸入。請回到機器頁重新開啟。"
+	operatorTerminalDisconnectedCopy    = "這個終端與機器的連線已中斷，終端已結束。請回到機器頁重新開啟。"
+	operatorTerminalRevoked             = "這個終端的存取權已撤銷，終端已結束。請回到機器頁。"
+	operatorTerminalAuthDown            = "Hub 目前無法確認操作者身分，終端已結束。請稍後回到機器頁重新開啟。"
+	operatorTerminalMachineFailed       = "這台機器的終端發生錯誤，終端已結束。請回到機器頁重新開啟。"
+	operatorTerminalNoLinkCopy          = "這台的終端連線目前沒有接上 Hub，這個終端已關閉。請確認機器上的 agent 與 bat-server 都在執行，再回到機器頁重新開啟。"
+	operatorTerminalDuplicateCopy       = "這個終端已在另一個分頁開啟，這一頁沒有連上它。請回到原本的分頁。"
+	operatorTerminalIdleTimeoutCopy     = "終端閒置逾時，已自動關閉。請回到機器頁重新開啟。"
+	operatorTerminalLifetimeReachedCopy = "終端已達最長使用時間，已自動關閉。請回到機器頁重新開啟。"
 )
 
 // operatorTerminalEnd is the first reason a page socket stops. The zero value
@@ -62,6 +65,8 @@ const (
 	operatorTerminalNoLink
 	operatorTerminalDuplicate
 	operatorTerminalDuplicateEnded
+	operatorTerminalIdleTimeout
+	operatorTerminalLifetimeReached
 )
 
 // operatorTerminalSettings are the timings and test seams for one socket.
@@ -80,6 +85,11 @@ type operatorTerminalSettings struct {
 	busyInitial       time.Duration
 	busyMax           time.Duration
 	busyWait          func(context.Context, time.Duration) error
+	idleTimeout       time.Duration
+	idleTicks         <-chan time.Time
+	onIdleReset       func()
+	maxLifetime       time.Duration
+	lifetimeTicks     <-chan time.Time
 	beforeOpenSession func()
 	afterPageCommand  func()
 	onReaderBlocked   func()
@@ -94,16 +104,24 @@ var (
 	operatorTerminalSettingsOverride *operatorTerminalSettings
 )
 
-func currentOperatorTerminalSettings() operatorTerminalSettings {
+func currentOperatorTerminalSettings(h *hub) operatorTerminalSettings {
 	operatorTerminalSettingsMu.Lock()
 	defer operatorTerminalSettingsMu.Unlock()
 	if operatorTerminalSettingsOverride == nil {
-		return defaultOperatorTerminalSettings()
+		return defaultOperatorTerminalSettings(h)
 	}
-	return operatorTerminalSettingsOverride.normalized()
+	return operatorTerminalSettingsOverride.normalized(h)
 }
 
-func defaultOperatorTerminalSettings() operatorTerminalSettings {
+func defaultOperatorTerminalSettings(h *hub) operatorTerminalSettings {
+	idle := web.DefaultTerminalIdleTimeout
+	lifetime := web.DefaultTerminalMaxLifetime
+	if h != nil && h.terminalIdleTimeout > 0 {
+		idle = h.terminalIdleTimeout
+	}
+	if h != nil && h.terminalMaxLifetime > 0 {
+		lifetime = h.terminalMaxLifetime
+	}
 	return operatorTerminalSettings{
 		openWait:        operatorTerminalOpenWait,
 		duplicateWindow: operatorTerminalDuplicateWindow,
@@ -113,11 +131,13 @@ func defaultOperatorTerminalSettings() operatorTerminalSettings {
 		reauthEvery:     agentSessionRevocationInterval,
 		busyInitial:     operatorTerminalBusyInitial,
 		busyMax:         operatorTerminalBusyMax,
+		idleTimeout:     idle,
+		maxLifetime:     lifetime,
 	}
 }
 
-func (s operatorTerminalSettings) normalized() operatorTerminalSettings {
-	base := defaultOperatorTerminalSettings()
+func (s operatorTerminalSettings) normalized(h *hub) operatorTerminalSettings {
+	base := defaultOperatorTerminalSettings(h)
 	if s.openWait > 0 {
 		base.openWait = s.openWait
 	}
@@ -147,6 +167,15 @@ func (s operatorTerminalSettings) normalized() operatorTerminalSettings {
 		base.busyMax = s.busyMax
 	}
 	base.busyWait = s.busyWait
+	if s.idleTimeout > 0 {
+		base.idleTimeout = s.idleTimeout
+	}
+	base.idleTicks = s.idleTicks
+	base.onIdleReset = s.onIdleReset
+	if s.maxLifetime > 0 {
+		base.maxLifetime = s.maxLifetime
+	}
+	base.lifetimeTicks = s.lifetimeTicks
 	base.beforeOpenSession = s.beforeOpenSession
 	base.afterPageCommand = s.afterPageCommand
 	base.onReaderBlocked = s.onReaderBlocked
@@ -235,11 +264,15 @@ func (h *hub) handleOperatorTerminalSocket(w http.ResponseWriter, r *http.Reques
 	}
 	conn.SetReadLimit(operatorTerminalReadLimit)
 
-	settings := currentOperatorTerminalSettings()
+	settings := currentOperatorTerminalSettings(h)
 	if settings.beforeOpenSession != nil {
 		settings.beforeOpenSession()
 	}
 	session := newOperatorTerminalSession(h, conn, row, settings)
+	if time.Since(row.OpenedAt) >= settings.maxLifetime {
+		h.finishOperatorTerminalNow(session, conn, row.SessionID, operatorTerminalLifetimeReached, 0, false)
+		return
+	}
 	err = h.agentLinks.OpenSession(row.SessionID, row.MachineID, session)
 	switch {
 	case errors.Is(err, agentlink.ErrNoLink):
@@ -272,7 +305,7 @@ func (h *hub) handleOperatorTerminalSocket(w http.ResponseWriter, r *http.Reques
 		cancel()
 		session.loops.Wait()
 	}()
-	session.start(ctx, r, authorizer)
+	session.start(ctx, r, authorizer, row.OpenedAt)
 	end, code := session.waitCause()
 	session.shutdown(end, code)
 }
@@ -332,6 +365,9 @@ func (h *hub) finishOperatorTerminalNow(session *operatorTerminalSession, conn *
 		session.mu.Unlock()
 	}
 	h.persistOperatorTerminalClose(sessionID, end)
+	if session != nil {
+		h.logTerminalClose(sessionID, session.machineID, end, session.settings)
+	}
 	if closeRoute && h.agentLinks != nil {
 		h.agentLinks.CloseSessions([]string{sessionID}, operatorTerminalRegistryReason(end))
 	}
@@ -341,6 +377,14 @@ func (h *hub) finishOperatorTerminalNow(session *operatorTerminalSession, conn *
 		cancel()
 	}
 	_ = conn.Close(websocket.StatusNormalClosure, "")
+}
+
+func (h *hub) logTerminalClose(sessionID, machineID string, end operatorTerminalEnd, settings operatorTerminalSettings) {
+	if end == operatorTerminalIdleTimeout {
+		log.Printf("terminal session closed: idle timeout session=%s machine=%s idle=%v", sessionID, machineID, settings.idleTimeout)
+	} else if end == operatorTerminalLifetimeReached {
+		log.Printf("terminal session closed: lifetime reached session=%s machine=%s lifetime=%v", sessionID, machineID, settings.maxLifetime)
+	}
 }
 
 func (h *hub) persistOperatorTerminalClose(sessionID string, end operatorTerminalEnd) {
@@ -373,6 +417,10 @@ func operatorTerminalLedgerReason(end operatorTerminalEnd) string {
 		return store.AgentSessionCloseReasonMachineError
 	case operatorTerminalNoLink:
 		return store.AgentSessionCloseReasonTerminalNotLinked
+	case operatorTerminalIdleTimeout:
+		return store.AgentSessionCloseReasonIdleTimeout
+	case operatorTerminalLifetimeReached:
+		return store.AgentSessionCloseReasonLifetimeReached
 	default:
 		return ""
 	}
@@ -413,6 +461,10 @@ func operatorTerminalPageFrame(end operatorTerminalEnd, code int) ([]byte, bool)
 		payload, err = agentrelay.EncodePageError(operatorTerminalNoLinkCopy)
 	case operatorTerminalDuplicate:
 		payload, err = agentrelay.EncodePageError(operatorTerminalDuplicateCopy)
+	case operatorTerminalIdleTimeout:
+		payload, err = agentrelay.EncodePageError(operatorTerminalIdleTimeoutCopy)
+	case operatorTerminalLifetimeReached:
+		payload, err = agentrelay.EncodePageError(operatorTerminalLifetimeReachedCopy)
 	default:
 		return nil, false
 	}
@@ -491,6 +543,7 @@ type operatorTerminalSession struct {
 	frames     chan operatorTerminalCommand
 	finishCh   chan operatorTerminalFinish
 	pageWake   chan struct{}
+	inputWake  chan struct{}
 	writerDone chan struct{}
 	loops      sync.WaitGroup
 	hold       operatorTerminalHold
@@ -505,6 +558,7 @@ func newOperatorTerminalSession(h *hub, conn *websocket.Conn, row store.AgentSes
 		frames:     make(chan operatorTerminalCommand, 1),
 		finishCh:   make(chan operatorTerminalFinish, 1),
 		pageWake:   make(chan struct{}, 1),
+		inputWake:  make(chan struct{}, 1),
 		writerDone: make(chan struct{}),
 	}
 }
@@ -612,17 +666,73 @@ func (s *operatorTerminalSession) waitCause() (operatorTerminalEnd, int) {
 	}
 }
 
-func (s *operatorTerminalSession) start(ctx context.Context, r *http.Request, authorizer operatorRequestAuthorizer) {
-	s.loops.Add(5)
+func (s *operatorTerminalSession) start(ctx context.Context, r *http.Request, authorizer operatorRequestAuthorizer, openedAt time.Time) {
+	s.loops.Add(7)
 	go s.writeLoop(ctx)
 	go s.produce(ctx)
 	go s.readLoop(ctx)
 	go s.heartbeat(ctx)
 	go s.reauthorize(ctx, r, authorizer)
+	go s.monitorIdleTimeout(ctx)
+	go s.monitorLifetime(ctx, openedAt)
+}
+
+func (s *operatorTerminalSession) monitorIdleTimeout(ctx context.Context) {
+	defer s.loops.Done()
+	timeout := s.settings.idleTimeout
+	ticks := s.settings.idleTicks
+
+	var timer *time.Timer
+	if ticks == nil {
+		timer = time.NewTimer(timeout)
+		defer timer.Stop()
+		ticks = timer.C
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks:
+			s.requestEnd(operatorTerminalIdleTimeout, 0)
+			return
+		case <-s.inputWake:
+			if timer != nil {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(timeout)
+			}
+			if s.settings.onIdleReset != nil {
+				s.settings.onIdleReset()
+			}
+		}
+	}
+}
+
+func (s *operatorTerminalSession) monitorLifetime(ctx context.Context, openedAt time.Time) {
+	defer s.loops.Done()
+	ticks := s.settings.lifetimeTicks
+
+	if ticks == nil {
+		timer := time.NewTimer(time.Until(openedAt.Add(s.settings.maxLifetime)))
+		defer timer.Stop()
+		ticks = timer.C
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-ticks:
+		s.requestEnd(operatorTerminalLifetimeReached, 0)
+	}
 }
 
 func (s *operatorTerminalSession) shutdown(end operatorTerminalEnd, code int) {
 	s.hub.persistOperatorTerminalClose(s.sessionID, end)
+	s.hub.logTerminalClose(s.sessionID, s.machineID, end, s.settings)
 	if s.hub.agentLinks != nil {
 		s.hub.agentLinks.CloseSessions([]string{s.sessionID}, operatorTerminalRegistryReason(end))
 	}
@@ -803,6 +913,10 @@ func (s *operatorTerminalSession) forward(ctx context.Context) {
 }
 
 func (s *operatorTerminalSession) notePageCommand() {
+	select {
+	case s.inputWake <- struct{}{}:
+	default:
+	}
 	if s.settings.afterPageCommand != nil {
 		s.settings.afterPageCommand()
 	}

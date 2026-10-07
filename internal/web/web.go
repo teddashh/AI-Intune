@@ -80,7 +80,19 @@ type Server struct {
 	// retentionPolicy is the same validated runtime policy used by the
 	// scheduled maintenance loop and the operator JSON boundary.
 	retentionPolicy store.RetentionPolicy
+	// terminalIdleTimeout and terminalMaxLifetime are the Hub's operator
+	// terminal limits, shown on the terminal page. The socket enforces them.
+	terminalIdleTimeout time.Duration
+	terminalMaxLifetime time.Duration
 }
+
+// Default operator terminal limits. The Hub's --terminal-idle-timeout and
+// --terminal-max-lifetime fall back to these, and so does a Server that was
+// never told otherwise, so the page never shows a zero limit.
+const (
+	DefaultTerminalIdleTimeout = 30 * time.Minute
+	DefaultTerminalMaxLifetime = 12 * time.Hour
+)
 
 func New(s *store.Store, hubHost string) (*Server, error) {
 	t, err := template.New("").Funcs(funcs).ParseFS(templateFS, "templates/*.html")
@@ -92,6 +104,7 @@ func New(s *store.Store, hubHost string) (*Server, error) {
 	return &Server{
 		store: s, operator: op, artifactOperator: op, catalogOperator: op, tmpl: t, hubHost: hubHost,
 		tailnet: cache, retentionPolicy: store.DefaultRetention(),
+		terminalIdleTimeout: DefaultTerminalIdleTimeout, terminalMaxLifetime: DefaultTerminalMaxLifetime,
 	}, nil
 }
 
@@ -146,6 +159,17 @@ func (s *Server) SetRetentionPolicy(policy store.RetentionPolicy) error {
 	}
 	s.retentionPolicy = policy
 	return nil
+}
+
+// SetTerminalLimits records the validated limits the Hub enforces so the
+// terminal page can state them. Non-positive values keep the defaults.
+func (s *Server) SetTerminalLimits(idle, lifetime time.Duration) {
+	if idle > 0 {
+		s.terminalIdleTimeout = idle
+	}
+	if lifetime > 0 {
+		s.terminalMaxLifetime = lifetime
+	}
 }
 
 func (s *Server) Routes(mux *http.ServeMux) []string {

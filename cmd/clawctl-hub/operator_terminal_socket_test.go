@@ -1506,3 +1506,112 @@ func drainSignals(ch <-chan struct{}) {
 		}
 	}
 }
+
+func TestOperatorTerminalIdleTimeout(t *testing.T) {
+	ticks := make(chan time.Time)
+	useOperatorTerminalSettings(t, operatorTerminalSettings{
+		idleTicks: ticks,
+	})
+
+	f, conn := openReadyTerminal(t, "opterm-idle")
+	f.secrets = nil
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	ticks <- time.Now()
+	f.awaitReason("opterm-idle", store.AgentSessionCloseReasonIdleTimeout)
+	assertErrorFrame(t, conn, operatorTerminalIdleTimeoutCopy)
+}
+
+func TestOperatorTerminalIdleResetOnInput(t *testing.T) {
+	resetCh := make(chan struct{}, 1)
+	useOperatorTerminalSettings(t, operatorTerminalSettings{
+		onIdleReset: func() {
+			select {
+			case resetCh <- struct{}{}:
+			default:
+			}
+		},
+	})
+
+	f, conn := openReadyTerminal(t, "opterm-idle-reset")
+	f.secrets = nil
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	// send input
+	writePageJSON(t, conn, map[string]any{"type": "input", "data": "eHh4"}) // "xxx"
+	select {
+	case <-resetCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("idle timer not reset on input")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	drainSignals(resetCh)
+
+	// Output does NOT trigger reset; we ensure no reset happens
+	// Deliver output
+	f.deliver("opterm-idle-reset", agentrelay.Upstream{
+		Type: agentrelay.UpstreamOutput, Data: []byte("out"),
+	})
+	select {
+	case <-resetCh:
+		t.Fatal("idle timer should not reset on output")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestOperatorTerminalLifetimeReached(t *testing.T) {
+	ticks := make(chan time.Time)
+	useOperatorTerminalSettings(t, operatorTerminalSettings{
+		lifetimeTicks: ticks,
+	})
+
+	f, conn := openReadyTerminal(t, "opterm-lifetime")
+	f.secrets = nil
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	ticks <- time.Now()
+	f.awaitReason("opterm-lifetime", store.AgentSessionCloseReasonLifetimeReached)
+	assertErrorFrame(t, conn, operatorTerminalLifetimeReachedCopy)
+}
+
+func TestOperatorTerminalLifetimeAttachExpired(t *testing.T) {
+	useOperatorTerminalSettings(t, operatorTerminalSettings{
+		maxLifetime: time.Millisecond,
+	})
+
+	f := newOperatorTerminalFixture(t)
+	conn := f.connect("opterm-lifetime-expired")
+	f.secrets = nil
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	f.awaitReason("opterm-lifetime-expired", store.AgentSessionCloseReasonLifetimeReached)
+	assertErrorFrame(t, conn, operatorTerminalLifetimeReachedCopy)
+}
+
+func TestOperatorTerminalRaceViewerClose(t *testing.T) {
+	ticks := make(chan time.Time)
+	useOperatorTerminalSettings(t, operatorTerminalSettings{
+		idleTicks: ticks,
+	})
+
+	f, conn := openReadyTerminal(t, "opterm-race")
+	f.secrets = nil
+
+	// Close viewer at the same time as idle timeout fires
+	ticks <- time.Now()
+	conn.Close(websocket.StatusNormalClosure, "")
+
+	// Wait for closure by polling f.session
+	deadline := time.Now().Add(2 * time.Second)
+	var reason string
+	for time.Now().Before(deadline) {
+		open, r := f.session("opterm-race")
+		if !open && r != "" {
+			reason = r
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if reason != store.AgentSessionCloseReasonIdleTimeout && reason != store.AgentSessionCloseReasonViewerClosed {
+		t.Fatalf("unexpected reason: %q", reason)
+	}
+}
