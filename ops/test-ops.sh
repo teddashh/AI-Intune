@@ -2149,6 +2149,12 @@ nsend netfail
 expect 'exits 1 on delivery network failure' 1 has 'curl failed (exit 6)'
 expect 'delivery failure never prints token' 1 lacks "$SEKRIT"
 
+if bash "$ROOT/ops/test-fly.sh"; then
+	passed=$((passed + 1))
+else
+	failed=$((failed + 1))
+fi
+
 if bash "$ROOT/ops/test-disk-clean.sh"; then
 	passed=$((passed + 1))
 else

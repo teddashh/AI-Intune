@@ -22,9 +22,15 @@ export CGO_ENABLED=0
 # Init script is POSIX sh (busybox). The Fly entrypoint is POSIX sh too.
 sh -n "$HERE/hub-data-init.sh"
 sh -n "$ROOT/ops/fly/entrypoint.sh"
+sh -n "$ROOT/ops/fly/notify-env.sh"
+sh -n "$ROOT/ops/fly/r2-env.sh"
+sh -n "$ROOT/ops/fly/restore-drill.sh"
 if command -v bash >/dev/null 2>&1; then
   bash -n "$HERE/hub-data-init.sh"
   bash -n "$ROOT/ops/fly/entrypoint.sh"
+  bash -n "$ROOT/ops/fly/notify-env.sh"
+  bash -n "$ROOT/ops/fly/r2-env.sh"
+  bash -n "$ROOT/ops/fly/restore-drill.sh"
 fi
 
 echo "==> parsing ops/fly/fly.toml and ops/fly/litestream.yml"
@@ -44,9 +50,11 @@ mounts = doc["mounts"]
 if mounts[0]["source"] != "clawctl_data" or mounts[0]["destination"] != "/var/lib/clawctl":
     raise SystemExit(f"unexpected mounts: {mounts}")
 build = doc["build"]
-if build.get("build-target") != "hub-fly" or build.get("dockerfile") != "../docker/Dockerfile":
+if "dockerfile" in build:
+    raise SystemExit(f"fly.toml [build] must not contain dockerfile key: {build}")
+if build.get("build-target") != "hub-fly":
     raise SystemExit(f"unexpected build: {build}")
-dockerfile = (root / build["dockerfile"]).resolve()
+dockerfile = (root / ".." / "docker" / "Dockerfile").resolve()
 if not dockerfile.is_file():
     raise SystemExit(f"dockerfile missing: {dockerfile}")
 if doc["env"]["CLAWCTL_PORT"] != "8787":
@@ -54,6 +62,26 @@ if doc["env"]["CLAWCTL_PORT"] != "8787":
 restart = doc["restart"]
 if not any(item.get("policy") == "always" for item in restart):
     raise SystemExit(f"restart policy: {restart}")
+vm = doc.get("vm", {})
+if isinstance(vm, list):
+    vm = vm[0] if vm else {}
+elif not isinstance(vm, dict):
+    vm = {}
+mem_str = str(vm.get("memory", "")).strip().lower()
+if mem_str.endswith("gb"):
+    mem_mb = int(mem_str[:-2]) * 1024
+elif mem_str.endswith("mb"):
+    mem_mb = int(mem_str[:-2])
+elif mem_str.endswith("g"):
+    mem_mb = int(mem_str[:-1]) * 1024
+elif mem_str.endswith("m"):
+    mem_mb = int(mem_str[:-1])
+elif mem_str.isdigit():
+    mem_mb = int(mem_str)
+else:
+    raise SystemExit(f"invalid or missing vm memory: {vm.get('memory')}")
+if mem_mb < 1024:
+    raise SystemExit(f"vm memory must be >= 1024mb, got {vm.get('memory')}")
 text = (root / "litestream.yml").read_text()
 for needle in (
     "${LITESTREAM_BUCKET}",
@@ -63,9 +91,15 @@ for needle in (
     "${R2_SECRET_ACCESS_KEY}",
     "type: s3",
     "/var/lib/clawctl/clawctl.sqlite",
+    "replica:",
+    "sync-interval",
+    "snapshot:",
+    "retention",
 ):
     if needle not in text:
         raise SystemExit(f"litestream.yml missing {needle}")
+if "replicas:" in text:
+    raise SystemExit("litestream.yml must use replica:, not replicas:")
 if "latest" in text:
     raise SystemExit("litestream.yml must pin replicas without the word latest")
 print("    ok fly.toml and litestream.yml")
