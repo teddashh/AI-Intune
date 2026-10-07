@@ -99,6 +99,10 @@ hub.example.com {
 
 Do not add forwarded identity semantics. Follow steps 3–5 above for setup and enrollment after HTTPS is reachable.
 
+## Quick start C: Fly.io
+
+Use [Autopilot on Fly (recommended)](DEPLOY-FLY.md#autopilot-on-fly-recommended) for a hosted Hub without Tailscale: create the app and volume, stage optional R2/Telegram secrets, deploy the `hub-fly` image with `ops/fly/fly.toml`, read the setup code from `fly logs`, and create your admin with TOTP and recovery codes. Fly provides HTTPS at `https://<app>.fly.dev`; choose any custom domain before enrolling machines with keyed installers. Backups are optional but recommended.
+
 ## Headless admin and lost-password recovery
 
 Both commands require an **existing initialized Hub database**, explicit `--db` and `--username`, and read the password from **stdin**, not a password flag. Run as the database owner. Stop the Hub for this maintenance workflow, then restart it. `bootstrap-admin` creates only the first account; `reset-admin-password` changes the existing admin password, clears lockout, and revokes that account's sessions.
@@ -164,7 +168,7 @@ CLAWCTL_TRUSTED_PROXIES=172.16.0.0/12
 CLAWCTL_CLIENT_IP_HEADER=Fly-Client-IP
 ```
 
-On Fly the rightmost `X-Forwarded-For` entry is the app's own edge address. Fly staff describe fly-proxy egress as `172.16.0.0/16`, but `172.19.x` has been observed, hence `/12`. Fly 6PN private networking is IPv6 `fdaa::/16` and is not trusted by this setting. The full Fly public-mode pack comes in a later PR; the existing Fly pack remains Tailscale-only.
+On Fly the rightmost `X-Forwarded-For` entry is the app's own edge address. Fly staff describe fly-proxy egress as `172.16.0.0/16`, but `172.19.x` has been observed, hence `/12`. Fly 6PN private networking is IPv6 `fdaa::/16` and is not trusted by this setting. The Fly entrypoint supplies these defaults in local mode; see [the Fly deployment guide](DEPLOY-FLY.md).
 
 ## Security model and current limits
 
@@ -178,9 +182,9 @@ On Fly the rightmost `X-Forwarded-For` entry is the app's own edge address. Fly 
 
 ## Advanced: private mesh + WhoIs
 
-Keep the existing [Tailscale operator contract](OPERATOR-AUTH.md) and [Fly pack](DEPLOY-FLY.md) for a private mesh deployment. `both` mode accepts local sessions first and can fall back to WhoIs when no session cookie is present. An invalid session cookie does not fall back. WhoIs requires a **literal Tailscale listener**, a reachable LocalAPI, and the configured capability prefix/grants. With a wildcard or loopback listener, `both` has no WhoIs fallback. Public account routes require the public Host even in `both`; direct tailnet operator routes additionally accept the configured Tailscale listener authority. A proxy cannot manufacture a tailnet identity.
+Keep the existing [Tailscale operator contract](OPERATOR-AUTH.md) and [advanced Fly pack](DEPLOY-FLY.md#advanced-tailscale-only-hub-on-fly) for a private mesh deployment. `both` mode accepts local sessions first and can fall back to WhoIs when no session cookie is present. An invalid session cookie does not fall back. WhoIs requires a **literal Tailscale listener**, a reachable LocalAPI, and the configured capability prefix/grants. With a wildcard or loopback listener, `both` has no WhoIs fallback. Public account routes require the public Host even in `both`; direct tailnet operator routes additionally accept the configured Tailscale listener authority. A proxy cannot manufacture a tailnet identity.
 
-Hub-driven Tailscale provisioning, Cloudflare Tunnel automation, and Fly public mode are out of scope for this pass. The Fly pack remains Tailscale-only; public Fly mode is a follow-up.
+Hub-driven Tailscale provisioning and Cloudflare Tunnel automation remain out of scope. The Fly pack supports public Autopilot as its primary path and Tailscale-only as its advanced path; `both` is refused on Fly.
 
 ### Required authenticator MFA
 

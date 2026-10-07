@@ -1,10 +1,8 @@
 # Fly.io pack
 
-Hosted example for one always-on Hub. The primary path is still any Linux host with Docker. See [docs/DEPLOY-FLY.md](../../docs/DEPLOY-FLY.md) and [docs/DEPLOY-OSS.md](../../docs/DEPLOY-OSS.md).
+The primary Fly path is **Autopilot over public HTTPS**: local admin, required TOTP MFA, and keyed agent installers. Follow [docs/DEPLOY-FLY.md](../../docs/DEPLOY-FLY.md#autopilot-on-fly-recommended) from app creation through enrollment and backups.
 
-This directory does not publish a public HTTP service. Hub binds the machine's Tailscale IPv4. `8787` in `fly.toml` is `CLAWCTL_PORT`, the conventional example, not a Hub default.
-
-From the repository root:
+Copy `ops/fly/fly.toml` out of the repository to `~/clawctl-fly/fly.toml`, edit `app` and `primary_region`, create the app and a 3 GB `clawctl_data` volume, and stage optional R2/Telegram/setup-code secrets via a mode-0600 file. Do not commit secrets. From the repository root:
 
 ```sh
 fly deploy . \
@@ -15,6 +13,10 @@ fly deploy . \
   --ha=false
 ```
 
-Do not edit `fly.toml` in the repository tree (it dirties the git version). Copy it to `~/clawctl-fly/fly.toml` (`mkdir -p ~/clawctl-fly && cp ops/fly/fly.toml ~/clawctl-fly/fly.toml`), edit `app` and `primary_region`, and deploy from the root. Create the app, the `clawctl_data` volume (size 3), a Tailscale tagged auth key, and the R2 token before that command. Secrets are `TS_AUTHKEY`, the `R2_*` variables, and optionally `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`. Do not commit them.
+Local mode is the Fly entrypoint default. It listens on `0.0.0.0:8787`, needs neither `TS_AUTHKEY` nor `/dev/net/tun`, and starts no Tailscale process. Fly terminates HTTPS; `CLAWCTL_PUBLIC_URL` defaults to `https://$FLY_APP_NAME.fly.dev` and must be HTTPS. The trusted proxy defaults are `172.16.0.0/12` and `Fly-Client-IP`; IPv6 6PN is not trusted. Read the generated setup code from logs and open `/setup`. Choose any custom domain before enrolling machines because Host is pinned to the public URL.
 
-`entrypoint.sh` is root only for tailscaled and the data-directory setup. Hub and Litestream run as uid 65532. Tailscale state stays on the volume under `tailscale/` and stays root-owned, so the node keeps its Tailscale IP across deploys.
+For the [advanced Tailscale-only path](../../docs/DEPLOY-FLY.md#advanced-tailscale-only-hub-on-fly), copy `fly.tailscale.toml` out of tree and pass that copy as `--config`. **Stage `CLAWCTL_AUTH_MODE=tailscale` as a Fly secret** alongside the initial tagged `TS_AUTHKEY`; the unchanged private config has no public HTTP service. Hub binds the machine's Tailscale IPv4, and state persists under root-owned `tailscale/` on the volume. `both` is refused on Fly because wildcard public listening cannot supply literal Tailscale WhoIs identity.
+
+Both paths share data initialization, versioned bundles, R2/Litestream, Telegram secret files, uid/gid 65532, and PID-1 signal handling. Keep one Machine and the same volume. `8787` is the pack's conventional port, not the binary default. See the deployment guide for restore drills, tuning, and upgrades.
+
+Local validation: `bash ops/test-fly.sh` and `CLAWCTL_SMOKE_STATIC_ONLY=1 bash ops/docker/smoke-build.sh`. No account or deployment is needed.

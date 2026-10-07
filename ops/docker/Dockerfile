@@ -200,5 +200,5 @@ RUN chmod 0755 /usr/local/bin/clawctl-hub /usr/local/bin/tailscaled \
  && chmod 0644 /etc/litestream.yml
 
 VOLUME ["/var/lib/clawctl"]
-# No EXPOSE and no public port. Operators and agents reach Hub over Tailscale.
+# Fly public HTTPS uses fly.toml; the advanced pack uses Tailscale only.
 ENTRYPOINT ["/bin/sh", "/usr/local/bin/clawctl-fly-entrypoint"]

@@ -183,7 +183,7 @@ read current state → preview exact impact → confirm typed target
 
 ### Autopilot quick start (recommended)
 
-Follow [docs/AUTOPILOT.md](docs/AUTOPILOT.md) for the complete setup:
+Follow [docs/AUTOPILOT.md](docs/AUTOPILOT.md) for Docker+Caddy, bare Linux, or [Fly.io Autopilot](docs/DEPLOY-FLY.md#autopilot-on-fly-recommended). For Docker+Caddy:
 
 1. Point DNS at your Linux host and open ports 80/443.
 2. Start the standalone Docker+Caddy Autopilot pack.

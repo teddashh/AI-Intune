@@ -9,12 +9,9 @@ run_test() {
   local name="$1"
   shift
   echo "--- RUN   $name"
-  if "$@"; then
-    echo "--- PASS  $name"
-  else
-    echo "--- FAIL  $name"
-    exit 1
-  fi
+  # Run outside an if condition so errexit remains active inside test bodies.
+  "$@"
+  echo "--- PASS  $name"
 }
 
 test_notify_env() {
@@ -249,3 +246,160 @@ EOF
 run_test "test_notify_env" test_notify_env
 run_test "test_r2_env" test_r2_env
 run_test "test_restore_drill" test_restore_drill
+
+test_entrypoint() (
+  set -euo pipefail
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  trap 'rm -rf "$tmpdir"' EXIT
+  mkdir -p "$tmpdir/bin" "$tmpdir/data"
+  # Rewrite only host-specific absolute paths in a disposable script copy.
+  # No real Hub, Tailscale, privilege changes, tun device, or network access.
+  python3 - "$tmpdir" <<'PY'
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+s = Path('ops/fly/entrypoint.sh').read_text()
+s = s.replace('/usr/local/lib/clawctl-fly/', str(Path('ops/fly').resolve()) + '/')
+s = s.replace('/usr/local/bin/', str(root / 'bin') + '/')
+s = s.replace('/var/run/tailscale', str(root / 'socket-dir'))
+s = s.replace('/run/clawctl', str(root / 'run'))
+s = s.replace('[ ! -c /dev/net/tun ]', '[ "${STUB_TUN:-0}" != 1 ]')
+s = s.replace('[ -S "$socket" ]', '[ -f "$socket" ]')
+s = s.replace('[ ! -S "$socket" ]', '[ ! -f "$socket" ]')
+(root / 'entrypoint.sh').write_text(s)
+PY
+  cat > "$tmpdir/bin/setpriv" <<'SH'
+#!/bin/sh
+printf '%s\n' "$*" >> "$STUB_LOG"
+shift 4
+exec "$@"
+SH
+  cat > "$tmpdir/bin/clawctl-hub" <<'SH'
+#!/bin/sh
+printf 'hub:%s:%s:%s:%s\n' "$CLAWCTL_AUTH_MODE" "$CLAWCTL_LISTEN" "${CLAWCTL_PUBLIC_URL:-}" "${CLAWCTL_TRUSTED_PROXIES:-}|${CLAWCTL_CLIENT_IP_HEADER:-}" >> "$STUB_LOG"
+[ -z "${TS_AUTHKEY:-}${TELEGRAM_BOT_TOKEN:-}${TELEGRAM_CHAT_ID:-}" ] || exit 1
+if [ -n "${CLAWCTL_NOTIFY_ENV:-}" ]; then
+  [ "$(stat -c %a "$CLAWCTL_NOTIFY_ENV")" = 600 ] || exit 1
+fi
+SH
+  cat > "$tmpdir/bin/litestream" <<'SH'
+#!/bin/sh
+printf 'litestream:%s\n' "$1" >> "$STUB_LOG"
+[ -z "${TS_AUTHKEY:-}" ] || exit 1
+if [ "$1" = replicate ]; then
+  exec "$(dirname "$0")/clawctl-hub"
+fi
+SH
+  cat > "$tmpdir/bin/tailscaled" <<'SH'
+#!/bin/sh
+printf 'tailscaled\n' >> "$STUB_LOG"
+[ -z "${TS_AUTHKEY:-}" ] || exit 1
+for arg do
+  case $arg in --socket=*) touch "${arg#--socket=}" ;; esac
+  case $arg in --statedir=*) touch "${arg#--statedir=}/tailscaled.state" ;; esac
+ done
+SH
+  cat > "$tmpdir/bin/tailscale" <<'SH'
+#!/bin/sh
+printf 'tailscale\n' >> "$STUB_LOG"
+[ -z "${TS_AUTHKEY:-}" ] || exit 1
+case " $* " in
+  *' ip -4 '*) echo 100.64.0.7 ;;
+  *' up '*)
+    for arg do
+      case $arg in --auth-key=file:*) [ "$(stat -c %a "${arg#--auth-key=file:}")" = 600 ] || exit 1 ;; esac
+    done ;;
+esac
+SH
+  for command in chown chmod hub-data-init.sh; do
+    printf '#!/bin/sh\nexit 0\n' > "$tmpdir/bin/$command"
+  done
+  # Keep real chmod for notify's mode checks; chown remains a stub.
+  rm "$tmpdir/bin/chmod"
+  chmod +x "$tmpdir/bin/"*
+  boot() {
+    : > "$tmpdir/calls"
+    env -i PATH="$tmpdir/bin:$PATH" STUB_LOG="$tmpdir/calls" \
+      CLAWCTL_DATA="$tmpdir/data" FLY_APP_NAME=stub-hub \
+      CLAWCTL_NOTIFY_OUT_DIR="$tmpdir/notify" CLAWCTL_NOTIFY_CHOWN_TARGET='' \
+      "$@" /bin/sh "$tmpdir/entrypoint.sh" > "$tmpdir/output" 2>&1
+  }
+  fail_boot() {
+    local expected=$1; shift
+    if boot "$@"; then echo "fail: entrypoint accepted invalid configuration"; return 1; fi
+    grep -q "$expected" "$tmpdir/output"
+    ! grep -q 'stub-private-secret' "$tmpdir/output"
+  }
+  boot
+  grep -q '^hub:local:0.0.0.0:8787:https://stub-hub.fly.dev:172.16.0.0/12|Fly-Client-IP$' "$tmpdir/calls"
+  ! grep -q tailscale "$tmpdir/calls"
+  grep -q 'default CLAWCTL_PUBLIC_URL=https://stub-hub.fly.dev' "$tmpdir/output"
+  grep -q -- '--reuid=65532 --regid=65532 --clear-groups --inh-caps=-all' "$tmpdir/calls"
+  boot CLAWCTL_AUTH_MODE=local CLAWCTL_PUBLIC_URL=https://hub.example.com CLAWCTL_TRUSTED_PROXIES=192.0.2.1 CLAWCTL_CLIENT_IP_HEADER=X-Forwarded-For
+  grep -q 'https://hub.example.com:192.0.2.1|X-Forwarded-For$' "$tmpdir/calls"
+  boot CLAWCTL_TRUSTED_PROXIES=''
+  grep -q ':|Fly-Client-IP$' "$tmpdir/calls"
+  fail_boot 'https://' CLAWCTL_PUBLIC_URL=http://hub.example.com
+  fail_boot 'contains whitespace' CLAWCTL_PUBLIC_URL='https://stub-private-secret .example.com'
+  fail_boot 'https://' CLAWCTL_PUBLIC_URL=''
+  fail_boot 'FLY_APP_NAME must' FLY_APP_NAME='stub-private-secret@invalid'
+  fail_boot 'https://' FLY_APP_NAME=''
+  fail_boot 'unsupported on Fly' CLAWCTL_AUTH_MODE=both
+  fail_boot 'must be tailscale, local, or both' CLAWCTL_AUTH_MODE=invalid
+  fail_boot 'TS_AUTHKEY is required' CLAWCTL_AUTH_MODE=tailscale
+  fail_boot 'contains whitespace' CLAWCTL_AUTH_MODE=tailscale TS_AUTHKEY='stub-private-secret key'
+  fail_boot '/dev/net/tun is missing' CLAWCTL_AUTH_MODE=tailscale TS_AUTHKEY=stub-private-secret
+  boot CLAWCTL_AUTH_MODE=tailscale TS_AUTHKEY=stub-private-secret STUB_TUN=1
+  grep -q '^tailscaled$' "$tmpdir/calls"
+  grep -q '^tailscale$' "$tmpdir/calls"
+  grep -q '^hub:tailscale:100.64.0.7:8787:' "$tmpdir/calls"
+  [ ! -e "$tmpdir/run/ts-authkey" ]
+  ! grep -q 'stub-private-secret' "$tmpdir/output"
+  printf 'persisted' > "$tmpdir/data/tailscale/tailscaled.state"
+  boot CLAWCTL_AUTH_MODE=tailscale STUB_TUN=1
+  grep -q '^hub:tailscale:100.64.0.7:8787:' "$tmpdir/calls"
+  fail_boot 'TS_HOSTNAME must' CLAWCTL_AUTH_MODE=tailscale STUB_TUN=1 TS_HOSTNAME='bad/name'
+  fail_boot 'TS_TAGS must' CLAWCTL_AUTH_MODE=tailscale STUB_TUN=1 TS_TAGS=untagged
+  fail_boot 'CLAWCTL_PORT must' CLAWCTL_PORT=65536
+  fail_boot 'contains whitespace' R2_SECRET_ACCESS_KEY='stub-private-secret key'
+  fail_boot 'replication is incomplete' R2_SECRET_ACCESS_KEY=stub-private-secret
+  fail_boot 'replication is incomplete' LITESTREAM_REQUIRED=1
+  fail_boot 'must be a duration' LITESTREAM_SYNC_INTERVAL=5d
+  boot R2_ACCOUNT_ID=12345678901234567890123456789012 R2_ACCESS_KEY_ID=stub-key R2_SECRET_ACCESS_KEY=stub-private-secret R2_BUCKET=stub-bucket TELEGRAM_BOT_TOKEN=stub-private-secret TELEGRAM_CHAT_ID=stub-chat
+  grep -q '^litestream:restore$' "$tmpdir/calls"
+  grep -q '^litestream:replicate$' "$tmpdir/calls"
+  grep -q '^hub:local:0.0.0.0:8787:' "$tmpdir/calls"
+  ! grep -q tailscale "$tmpdir/calls"
+  ! grep -q 'stub-private-secret' "$tmpdir/output"
+  touch "$tmpdir/data/clawctl.sqlite"
+  boot R2_ENDPOINT=https://stub.example.com R2_ACCESS_KEY_ID=stub-key R2_SECRET_ACCESS_KEY=stub-private-secret R2_BUCKET=stub-bucket
+  ! grep -q '^litestream:restore$' "$tmpdir/calls"
+  grep -q '^litestream:replicate$' "$tmpdir/calls"
+)
+
+test_fly_configs() {
+  python3 - <<'PY'
+import tomllib
+from pathlib import Path
+public = tomllib.loads(Path('ops/fly/fly.toml').read_text())
+private = tomllib.loads(Path('ops/fly/fly.tailscale.toml').read_text())
+assert public['env']['CLAWCTL_AUTH_MODE'] == 'local'
+assert public['env']['CLAWCTL_PORT'] == '8787'
+assert 'CLAWCTL_OPERATOR_CAPABILITY_PREFIX' not in public['env']
+assert 'http_service' not in private and 'services' not in private
+service = public['http_service']
+assert service['internal_port'] == 8787 and service['force_https'] is True
+assert service['auto_stop_machines'] == 'off' and service['auto_start_machines'] is True
+assert service['min_machines_running'] == 1
+assert service['checks'] == [dict(method='GET', path='/healthz', grace_period='30s', interval='30s', timeout='5s')]
+assert service['concurrency']['type'] == 'connections'
+assert 0 < service['concurrency']['soft_limit'] < service['concurrency']['hard_limit']
+for key in ('mounts', 'restart', 'vm', 'build'):
+    assert public[key] == private[key]
+assert public['vm'][0]['memory'] == '1024mb'
+PY
+}
+
+run_test "test_entrypoint" test_entrypoint
+run_test "test_fly_configs" test_fly_configs
