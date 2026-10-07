@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -292,5 +293,60 @@ func TestMFAPendingLoginTrustedProxyBinding(t *testing.T) {
 				t.Fatal(source, err)
 			}
 		})
+	}
+}
+
+func TestRequiredMFAGatesEveryOperatorRoute(t *testing.T) {
+	unsetMFARequirement(t)
+	h, st := localAccountHandler(t)
+	if _, err := st.CreateFirstAdmin("admin", "a long test password"); err != nil {
+		t.Fatal(err)
+	}
+	w := accountRequest(h, "POST", "/login", "username=admin&password=a+long+test+password", nil)
+	if w.Code != 303 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	session := w.Result().Cookies()[0]
+	placeholder := regexp.MustCompile(`\{[^}]+\}`)
+	for pattern, policy := range operatorRoutePolicies {
+		if isSecurityEnrollmentRoute(pattern) {
+			continue
+		}
+		method, path, _ := strings.Cut(pattern, " ")
+		path = strings.ReplaceAll(path, "{$}", "")
+		path = placeholder.ReplaceAllString(path, "test")
+		w = accountRequest(h, method, path, "", session)
+		want := 403
+		if policy.Representation == operatorHTML {
+			want = 303
+		}
+		if w.Code != want {
+			t.Errorf("%s: got %d, want %d: %s", pattern, w.Code, want, w.Body.String())
+		}
+		if want == 303 && w.Header().Get("Location") != "/account/security" {
+			t.Errorf("%s: redirect = %s", pattern, w.Header().Get("Location"))
+		}
+	}
+}
+
+func TestMFAEnrollmentPOSTsRejectCrossOrigin(t *testing.T) {
+	unsetMFARequirement(t)
+	h, st := localAccountHandler(t)
+	if _, err := st.CreateFirstAdmin("admin", "a long test password"); err != nil {
+		t.Fatal(err)
+	}
+	w := accountRequest(h, "POST", "/login", "username=admin&password=a+long+test+password", nil)
+	session := w.Result().Cookies()[0]
+	for _, path := range []string{"/login/mfa", "/account/security/totp/begin", "/account/security/totp/confirm"} {
+		r := httptest.NewRequest("POST", "https://hub.example.com"+path, strings.NewReader("code=123456"))
+		r.RemoteAddr = "192.0.2.1:1234"
+		r.Header.Set("Origin", "https://attacker.example")
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.AddCookie(session)
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != 403 {
+			t.Errorf("%s: %d %s", path, w.Code, w.Body.String())
+		}
 	}
 }

@@ -212,7 +212,10 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 				renderMFAForm(w, "Invalid code")
 				return
 			}
-			pending.remove(c.Value)
+			if !pending.consume(c.Value, ip) {
+				http.Error(w, "Pending login expired", 401)
+				return
+			}
 			http.SetCookie(w, &http.Cookie{Name: "hub_pending_mfa", Value: "", Path: "/login", HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode, MaxAge: -1})
 		} else if setup {
 			if !boundary.cloud.setupCode.matches(r.PostForm.Get("setup_code")) {

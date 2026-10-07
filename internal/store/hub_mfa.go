@@ -52,6 +52,12 @@ func (s *Store) BeginTOTPEnrollment(id string) (string, error) {
 	return secret, tx.Commit()
 }
 func (s *Store) ConfirmTOTP(id, code string, metadata ...AuditEntry) ([]string, error) {
+	return s.ConfirmTOTPForSession(id, code, "", metadata...)
+}
+
+// ConfirmTOTPForSession promotes only the session that proved possession of the factor.
+// Other password-only sessions and in-flight password logins must not gain access.
+func (s *Store) ConfirmTOTPForSession(id, code, keepToken string, metadata ...AuditEntry) ([]string, error) {
 	tx, err := s.beginWrite(context.Background(), "confirm_totp")
 	if err != nil {
 		return nil, err
@@ -85,6 +91,9 @@ func (s *Store) ConfirmTOTP(id, code string, metadata ...AuditEntry) ([]string, 
 		}
 	}
 	if _, err = tx.Exec(`UPDATE hub_account_mfa SET totp_secret=pending_secret,pending_secret=NULL,enabled_at=?,last_used_step=? WHERE account_id=?`, fmtTime(s.nowFn()), step, id); err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(`UPDATE hub_sessions SET revoked_at=? WHERE account_id=? AND session_hash<>? AND revoked_at IS NULL`, fmtTime(s.nowFn()), id, sessionHash(keepToken)); err != nil {
 		return nil, err
 	}
 	if err = s.recordAuditTx(tx, accountAudit(AuditMFAEnabled, HubAccount{AccountID: id, Username: username}, true, metadata...)); err != nil {

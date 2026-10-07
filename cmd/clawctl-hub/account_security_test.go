@@ -183,8 +183,9 @@ func TestRequireMFA(t *testing.T) {
 	}
 	secret, _ := st.BeginTOTPEnrollment(a.AccountID)
 	code, _ := totp.Code(secret, time.Now().Unix()/30)
-	if _, err = st.ConfirmTOTP(a.AccountID, code); err != nil {
-		t.Fatal(err)
+	w = accountRequest(h, "POST", "/account/security/totp/confirm", "code="+code, session)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
 	}
 	w = accountRequest(h, "GET", "/", "", session)
 	if w.Code != 200 {
@@ -308,5 +309,79 @@ func TestPendingLoginIgnoresEphemeralPort(t *testing.T) {
 	r.RemoteAddr = "192.0.2.1:2000"
 	if _, ok := p.get(token, resolver.Resolve(r)); !ok {
 		t.Fatal("ephemeral port broke pending login")
+	}
+}
+
+func TestPendingLoginConcurrentConsumption(t *testing.T) {
+	p := newPendingLogins()
+	token, err := p.add(store.HubAccount{}, "192.0.2.1", "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.consume(token, "192.0.2.2") {
+		t.Fatal("different IP consumed challenge")
+	}
+	results := make(chan bool, 32)
+	for range 32 {
+		go func() { results <- p.consume(token, "192.0.2.1") }()
+	}
+	wins := 0
+	for range 32 {
+		if <-results {
+			wins++
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("consumption winners = %d", wins)
+	}
+	token, err = p.add(store.HubAccount{}, "192.0.2.1", "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.now = func() time.Time { return time.Now().Add(6 * time.Minute) }
+	if p.consume(token, "192.0.2.1") {
+		t.Fatal("expired challenge consumed")
+	}
+}
+
+func TestConcurrentMFALoginIssuesOneSession(t *testing.T) {
+	h, st := localAccountHandler(t)
+	a, err := st.CreateFirstAdmin("admin", "a long test password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := st.BeginTOTPEnrollment(a.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _ := totp.Code(secret, time.Now().Unix()/30)
+	codes, err := st.ConfirmTOTP(a.AccountID, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := accountRequest(h, "POST", "/login", "username=admin&password=a+long+test+password", nil)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	pending := w.Result().Cookies()[0]
+	results := make(chan *httptest.ResponseRecorder, 2)
+	for _, recovery := range codes[:2] {
+		go func(code string) { results <- accountRequest(h, "POST", "/login/mfa", "code="+code, pending) }(recovery)
+	}
+	successes := 0
+	for range 2 {
+		result := <-results
+		if result.Code == 303 {
+			successes++
+		} else if result.Code != 401 {
+			t.Fatal(result.Code, result.Body.String())
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("successful completions = %d", successes)
+	}
+	var sessions int
+	if err = st.DB().QueryRow(`SELECT count(*) FROM hub_sessions WHERE revoked_at IS NULL`).Scan(&sessions); err != nil || sessions != 1 {
+		t.Fatal("issued sessions", sessions, err)
 	}
 }

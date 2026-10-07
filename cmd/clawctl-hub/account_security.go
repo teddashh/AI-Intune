@@ -59,10 +59,19 @@ func (p *pendingLogins) get(token, addr string) (pendingLogin, bool) {
 	v, ok := p.entries[sha256.Sum256([]byte(token))]
 	return v, ok && v.addr == addr && p.now().Before(v.expires)
 }
-func (p *pendingLogins) remove(token string) {
+
+// consume is the single atomic winner after factor verification. A failed factor
+// leaves the challenge available, but concurrent valid factors cannot issue two sessions.
+func (p *pendingLogins) consume(token, addr string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	delete(p.entries, sha256.Sum256([]byte(token)))
+	key := sha256.Sum256([]byte(token))
+	v, ok := p.entries[key]
+	if !ok || v.addr != addr || !p.now().Before(v.expires) {
+		return false
+	}
+	delete(p.entries, key)
+	return true
 }
 
 var mfaForm = template.Must(template.New("mfa").Parse(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Second factor · clawctl</title><h1>Second factor</h1><p role="alert">{{.Error}}</p><form method="post" action="/login/mfa"><label>Authenticator or recovery code <input name="code" autocomplete="one-time-code" required maxlength="32"></label><button>Sign in</button></form></html>`))
@@ -141,7 +150,11 @@ func registerSecurityRoutes(mux *http.ServeMux, st *store.Store, authority strin
 			case "/account/security/totp/begin":
 				begin()
 			case "/account/security/totp/confirm":
-				data.Codes, err = st.ConfirmTOTP(id, r.PostForm.Get("code"), metadata)
+				var c *http.Cookie
+				c, err = r.Cookie(localauth.CookieName(len(cloud) > 0 && cloud[0].public.Scheme() == "https"))
+				if err == nil {
+					data.Codes, err = st.ConfirmTOTPForSession(id, r.PostForm.Get("code"), c.Value, metadata)
+				}
 				data.Enabled = err == nil
 			case "/account/security/totp/disable", "/account/security/password":
 				var a store.HubAccount

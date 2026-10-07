@@ -277,3 +277,55 @@ func TestMFAFailuresFeedDistributedGuessingSignal(t *testing.T) {
 		t.Fatal(signals, err)
 	}
 }
+
+func TestEnrollmentRevokesPasswordOnlySessionsAndLogins(t *testing.T) {
+	fastAccountHashes(t)
+	s := newTestStore(t)
+	a, err := s.CreateFirstAdmin("admin", testAdminPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.CreateSession(a, "192.0.2.1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.CreateSession(a, "192.0.2.2", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inFlight, err := s.VerifyPassword("admin", testAdminPassword, "192.0.2.2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := s.BeginTOTPEnrollment(a.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _ := totp.Code(secret, s.nowFn().Unix()/30)
+	if _, err = s.ConfirmTOTPForSession(a.AccountID, code, current); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.LookupSession(current); err != nil {
+		t.Fatal("enrolling session revoked", err)
+	}
+	if _, err = s.LookupSession(other); !errors.Is(err, ErrSessionAuth) {
+		t.Fatal("password-only session survived", err)
+	}
+	if _, err = s.CreateSession(inFlight, "192.0.2.2", ""); !errors.Is(err, ErrSessionAuth) {
+		t.Fatal("in-flight password login gained session", err)
+	}
+	fresh, err := s.VerifyPassword("admin", testAdminPassword, "192.0.2.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.CreateSession(fresh, "192.0.2.1", ""); err != nil {
+		t.Fatal("current factor snapshot rejected", err)
+	}
+	// A pending login for an old factor must also fail after host recovery.
+	if err = s.DisableMFA(a.AccountID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.CreateSession(fresh, "192.0.2.1", ""); !errors.Is(err, ErrSessionAuth) {
+		t.Fatal("stale factor snapshot accepted", err)
+	}
+}

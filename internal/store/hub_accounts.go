@@ -31,6 +31,7 @@ type HubAccount struct {
 	AccountID    string
 	Username     string
 	passwordHash string // also guards session issuance against a concurrent password reset
+	mfaSecret    string // snapshots the factor at password verification; enrollment invalidates it
 }
 
 func passwordHash(password string) (string, error) {
@@ -154,7 +155,7 @@ func (s *Store) VerifyPassword(username, password, clientIP string, metadata ...
 	}
 	var disabled sql.NullString
 	var currentHash string
-	err = tx.QueryRow(`SELECT password_hash,disabled_at FROM hub_accounts WHERE account_id=?`, a.AccountID).Scan(&currentHash, &disabled)
+	err = tx.QueryRow(`SELECT password_hash,disabled_at,COALESCE((SELECT totp_secret FROM hub_account_mfa WHERE account_id=hub_accounts.account_id AND enabled_at IS NOT NULL),'') FROM hub_accounts WHERE account_id=?`, a.AccountID).Scan(&currentHash, &disabled, &a.mfaSecret)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return HubAccount{}, err
 	}
@@ -224,7 +225,7 @@ func (s *Store) CreateSession(a HubAccount, sourceAddr, userAgent string) (strin
 		return "", err
 	}
 	now := s.nowFn()
-	res, err := s.execWrite(context.Background(), "create_hub_session", `INSERT INTO hub_sessions(session_hash,account_id,created_at,last_seen_at,idle_expires_at,absolute_expires_at,source_addr,user_agent) SELECT ?,account_id,?,?,?,?,?,? FROM hub_accounts WHERE account_id=? AND password_hash=? AND disabled_at IS NULL`, sessionHash(token), fmtTime(now), fmtTime(now), fmtTime(now.Add(12*time.Hour)), fmtTime(now.Add(7*24*time.Hour)), sourceAddr, truncAudit(userAgent, 200), a.AccountID, a.passwordHash)
+	res, err := s.execWrite(context.Background(), "create_hub_session", `INSERT INTO hub_sessions(session_hash,account_id,created_at,last_seen_at,idle_expires_at,absolute_expires_at,source_addr,user_agent) SELECT ?,account_id,?,?,?,?,?,? FROM hub_accounts WHERE account_id=? AND password_hash=? AND disabled_at IS NULL AND COALESCE((SELECT totp_secret FROM hub_account_mfa WHERE account_id=hub_accounts.account_id AND enabled_at IS NOT NULL),'')=?`, sessionHash(token), fmtTime(now), fmtTime(now), fmtTime(now.Add(12*time.Hour)), fmtTime(now.Add(7*24*time.Hour)), sourceAddr, truncAudit(userAgent, 200), a.AccountID, a.passwordHash, a.mfaSecret)
 	if err != nil {
 		return "", err
 	}
