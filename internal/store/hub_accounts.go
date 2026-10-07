@@ -156,7 +156,8 @@ func (s *Store) VerifyPassword(username, password string, metadata ...AuditEntry
 	blocked := disabled.Valid || now.Before(until) || err != nil || currentHash != a.passwordHash
 	action := AuditAction(AuditHubLoginFailed)
 	if valid && !blocked {
-		_, err = tx.Exec(`UPDATE hub_accounts SET failed_attempts=0,locked_until=NULL WHERE account_id=?`, a.AccountID)
+		// With MFA, only completion of the second factor clears the shared failure count.
+		_, err = tx.Exec(`UPDATE hub_accounts SET failed_attempts=0,locked_until=NULL WHERE account_id=? AND NOT EXISTS (SELECT 1 FROM hub_account_mfa WHERE account_id=? AND enabled_at IS NOT NULL)`, a.AccountID, a.AccountID)
 		action = AuditHubLoginOK
 	} else if !blocked {
 		if locked.Valid {

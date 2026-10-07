@@ -47,7 +47,7 @@ func TestRouteTallyDocumentsMatchManifest(t *testing.T) {
 	if !ok || policy.Permission != operatorauth.Admin || policy.Representation != operatorHTML || policy.SecurityProfile != operatorSecurityLocked {
 		t.Fatal("keyed installer must remain an Admin-only locked HTML route")
 	}
-	// The Tailscale contract excludes the five public local-account operations.
+	// The Tailscale contract excludes the six public local-account operations.
 	assertOperatorAuthTally(t, tailscale)
 }
 
@@ -100,8 +100,8 @@ func routeTallyFromPolicies(t *testing.T) routeTally {
 		}
 	}
 	tally.verifier = len(verifierSet)
-	if accounts != 5 {
-		t.Fatalf("account routes=%d, want 5", accounts)
+	if accounts != 6 {
+		t.Fatalf("account routes=%d, want 6", accounts)
 	}
 	if tally.machine+tally.verifier+health+accounts != tally.nonOperator {
 		t.Fatalf("machine %d + verifier %d + health %d != non-operator %d",

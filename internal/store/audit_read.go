@@ -76,6 +76,7 @@ var allAuditActions = [...]AuditAction{
 	AuditMaintenanceAbandon,
 	AuditOperatorDenied,
 	AuditHubSetup, AuditHubLoginOK, AuditHubLoginFailed, AuditHubLockout, AuditHubLogout,
+	AuditMFAEnabled, AuditMFADisabled, AuditMFAFailed, AuditRecoveryCodeUsed,
 }
 
 // AuditActions returns a copy so callers cannot mutate validation or cursor

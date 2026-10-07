@@ -1,0 +1,296 @@
+package main
+
+import (
+	"fmt"
+	"github.com/teddashh/AI-Intune/internal/operatorauth"
+	"github.com/teddashh/AI-Intune/internal/store"
+	"github.com/teddashh/AI-Intune/internal/totp"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestMFALogin(t *testing.T) {
+	h, st := localAccountHandler(t)
+	a, err := st.CreateFirstAdmin("admin", "a long test password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, err := st.BeginTOTPEnrollment(a.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Enroll using the previous skew step, leaving the current step for login.
+	code, _ := totp.Code(secret, time.Now().Unix()/30-1)
+	codes, err := st.ConfirmTOTP(a.AccountID, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := accountRequest(h, "POST", "/login/mfa", "code=123456", nil)
+	if w.Code != 401 {
+		t.Fatal(w.Code)
+	}
+	w = accountRequest(h, "POST", "/login", "username=admin&password=a+long+test+password", nil)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "Second factor") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	cookies := w.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != "hub_pending_mfa" {
+		t.Fatal(cookies)
+	}
+	pending := cookies[0]
+	code, _ = totp.Code(secret, time.Now().Unix()/30)
+	w = accountRequest(h, "POST", "/login/mfa", "code="+code, pending)
+	if w.Code != 303 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	w = accountRequest(h, "POST", "/login/mfa", "code="+url.QueryEscape(codes[0]), pending)
+	if w.Code != 401 {
+		t.Fatal("pending token reused", w.Code)
+	}
+}
+func TestMFARecoveryLogin(t *testing.T) {
+	h, st := localAccountHandler(t)
+	a, err := st.CreateFirstAdmin("admin", "a long test password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _ := st.BeginTOTPEnrollment(a.AccountID)
+	code, _ := totp.Code(secret, time.Now().Unix()/30)
+	codes, err := st.ConfirmTOTP(a.AccountID, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := accountRequest(h, "POST", "/login", "username=admin&password=a+long+test+password", nil)
+	pending := w.Result().Cookies()[0]
+	w = accountRequest(h, "POST", "/login/mfa", "code="+code, pending)
+	if w.Code != 401 {
+		t.Fatal("replay accepted", w.Code)
+	}
+	w = accountRequest(h, "POST", "/login/mfa", "code="+codes[0], pending)
+	if w.Code != 303 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if err = st.VerifySecondFactor(a.AccountID, codes[0]); err == nil {
+		t.Fatal("recovery reused")
+	}
+}
+func TestPendingLoginExpiryAndBinding(t *testing.T) {
+	p := newPendingLogins()
+	now := time.Now()
+	p.now = func() time.Time { return now }
+	token, err := p.add(store.HubAccount{AccountID: "id"}, "peer", "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := p.get(token, "other"); ok {
+		t.Fatal("wrong source")
+	}
+	if _, ok := p.get(token, "peer"); !ok {
+		t.Fatal("missing pending")
+	}
+	now = now.Add(5 * time.Minute)
+	if _, ok := p.get(token, "peer"); ok {
+		t.Fatal("expired pending accepted")
+	}
+}
+func TestAccountSecurityEnableDisablePassword(t *testing.T) {
+	h, st := localAccountHandler(t)
+	a, err := st.CreateFirstAdmin("admin", "a long test password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	login := accountRequest(h, "POST", "/login", "username=admin&password=a+long+test+password", nil)
+	session := login.Result().Cookies()[0]
+	w := accountRequest(h, "GET", "/account/security", "", session)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	w = accountRequest(h, "POST", "/account/security/totp/begin", "", session)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	// Read the displayed URI, not internal DB state.
+	body := w.Body.String()
+	at := strings.Index(body, "secret=")
+	if at < 0 {
+		t.Fatal(body)
+	}
+	secret := body[at+7 : at+7+32]
+	code, _ := totp.Code(secret, time.Now().Unix()/30)
+	w = accountRequest(h, "POST", "/account/security/totp/confirm", "code="+code, session)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "save these now") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	body = w.Body.String()
+	at = strings.Index(body, "<pre>")
+	recovery := body[at+5 : at+5+14]
+	w = accountRequest(h, "GET", "/account/security", "", session)
+	if strings.Contains(w.Body.String(), recovery) {
+		t.Fatal("codes shown again")
+	}
+	w = accountRequest(h, "POST", "/account/security/totp/disable", "password=wrong&code="+recovery, session)
+	if w.Code != 400 {
+		t.Fatal(w.Code)
+	}
+	w = accountRequest(h, "POST", "/account/security/totp/disable", "password=a+long+test+password&code="+recovery, session)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	enabled, err := st.MFAEnabled(a.AccountID)
+	if enabled || err != nil {
+		t.Fatal(enabled, err)
+	}
+	other, err := st.CreateSession(a, "peer", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = accountRequest(h, "POST", "/account/security/password", "password=a+long+test+password&new_password=another+long+password", session)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if _, err = st.LookupSession(other); err == nil {
+		t.Fatal("other session survived")
+	}
+	if _, err = st.LookupSession(session.Value); err != nil {
+		t.Fatal("current session revoked", err)
+	}
+}
+func TestRequireMFA(t *testing.T) {
+	t.Setenv("CLAWCTL_REQUIRE_MFA", "1")
+	h, st := localAccountHandler(t)
+	a, err := st.CreateFirstAdmin("admin", "a long test password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := accountRequest(h, "POST", "/login", "username=admin&password=a+long+test+password", nil)
+	session := w.Result().Cookies()[0]
+	w = accountRequest(h, "GET", "/", "", session)
+	if w.Code != 303 || w.Header().Get("Location") != "/account/security" {
+		t.Fatal(w.Code, w.Header())
+	}
+	w = accountRequest(h, "GET", "/v1/operator/machines", "", session)
+	if w.Code != 403 || !strings.Contains(w.Body.String(), "MFA_ENROLLMENT_REQUIRED") {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	w = accountRequest(h, "GET", "/account/security", "", session)
+	if w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	secret, _ := st.BeginTOTPEnrollment(a.AccountID)
+	code, _ := totp.Code(secret, time.Now().Unix()/30)
+	if _, err = st.ConfirmTOTP(a.AccountID, code); err != nil {
+		t.Fatal(err)
+	}
+	w = accountRequest(h, "GET", "/", "", session)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+}
+func TestSecurityTailscale404(t *testing.T) {
+	st := boundaryStore(t)
+	mux := http.NewServeMux()
+	registerSecurityRoutes(mux, st, "host")
+	for _, pattern := range securityPatterns {
+		method, path, _ := strings.Cut(pattern, " ")
+		r := httptest.NewRequest(method, path, nil)
+		r = operatorauth.WithPrincipal(r, boundaryPrincipal(operatorauth.Admin))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		if w.Code != 404 {
+			t.Fatal(pattern, w.Code)
+		}
+	}
+}
+
+func TestMFABadCodesLockoutAcrossPendingLogins(t *testing.T) {
+	h, st := localAccountHandler(t)
+	a, err := st.CreateFirstAdmin("admin", "a long test password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _ := st.BeginTOTPEnrollment(a.AccountID)
+	code, _ := totp.Code(secret, time.Now().Unix()/30)
+	codes, err := st.ConfirmTOTP(a.AccountID, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Different peers avoid hitting the IP limiter first; the account counter is shared.
+	request := func(peer, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "https://hub.example.com"+path, strings.NewReader(body))
+		r.RemoteAddr = peer
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	for i := range 5 {
+		peer := fmt.Sprintf("192.0.2.%d:1234", i+1)
+		w := request(peer, "/login", "username=admin&password=a+long+test+password", nil)
+		if w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		pending := w.Result().Cookies()[0]
+		w = request(peer, "/login/mfa", "code=bad", pending)
+		if w.Code != 401 {
+			t.Fatal(w.Code)
+		}
+		if i == 4 {
+			w = request(peer, "/login/mfa", "code="+codes[0], pending)
+			if w.Code != 401 {
+				t.Fatal("locked recovery accepted", w.Code)
+			}
+		}
+	}
+	w := request("192.0.2.99:1234", "/login", "username=admin&password=a+long+test+password", nil)
+	if w.Code != 401 {
+		t.Fatal("password cleared second factor failures", w.Code)
+	}
+}
+func TestResetAdminPasswordDisableMFA(t *testing.T) {
+	st := boundaryStore(t)
+	a, err := st.CreateFirstAdmin("admin", "a long test password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _ := st.BeginTOTPEnrollment(a.AccountID)
+	code, _ := totp.Code(secret, time.Now().Unix()/30)
+	if _, err = st.ConfirmTOTP(a.AccountID, code); err != nil {
+		t.Fatal(err)
+	}
+	var seq int
+	var name, path string
+	if err = st.DB().QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"--db", path, "--username", "admin"}
+	if err = runResetAdminPassword(args, strings.NewReader("a replacement password")); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, _ := st.MFAEnabled(a.AccountID); !enabled {
+		t.Fatal("reset unexpectedly disabled MFA")
+	}
+	if err = runResetAdminPassword(append(args, "--disable-mfa"), strings.NewReader("another replacement password")); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, _ := st.MFAEnabled(a.AccountID); enabled {
+		t.Fatal("host recovery preserved MFA")
+	}
+}
+
+func TestPendingLoginIgnoresEphemeralPort(t *testing.T) {
+	p := newPendingLogins()
+	token, err := p.add(store.HubAccount{}, "192.0.2.1:1000", "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := p.get(token, "192.0.2.1:2000"); !ok {
+		t.Fatal("ephemeral port broke pending login")
+	}
+}

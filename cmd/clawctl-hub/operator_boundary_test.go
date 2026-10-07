@@ -114,22 +114,23 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 	nonOperatorRegistered = append(nonOperatorRegistered, registerAccountRoutes(nonOperatorMux, st, ui, testOperatorAuthority)...)
 	operatorMux := http.NewServeMux()
 	operatorRegistered := h.operatorRoutes(operatorMux)
+	operatorRegistered = append(operatorRegistered, registerSecurityRoutes(operatorMux, st, testOperatorAuthority)...)
 	operatorRegistered = append(operatorRegistered, ui.Routes(operatorMux)...)
 	operatorRegistered = append(operatorRegistered, registerOperatorTerminalSocket(operatorMux, h, nil, testOperatorAuthority))
 	if err := validateRouteManifests(nonOperatorRegistered, nonOperatorRoutePolicies,
 		operatorRegistered, operatorRoutePolicies); err != nil {
 		t.Fatal(err)
 	}
-	if len(nonOperatorRegistered) != 23 || len(nonOperatorRoutePolicies) != 23 {
-		t.Fatalf("non-operator registered=%d policies=%d, want 23/23",
+	if len(nonOperatorRegistered) != 24 || len(nonOperatorRoutePolicies) != 24 {
+		t.Fatalf("non-operator registered=%d policies=%d, want 24/24",
 			len(nonOperatorRegistered), len(nonOperatorRoutePolicies))
 	}
-	if len(operatorRegistered) != 204 || len(operatorRoutePolicies) != 204 {
-		t.Fatalf("operator registered=%d policies=%d, want 204/204",
+	if len(operatorRegistered) != 209 || len(operatorRoutePolicies) != 209 {
+		t.Fatalf("operator registered=%d policies=%d, want 209/209",
 			len(operatorRegistered), len(operatorRoutePolicies))
 	}
-	if len(nonOperatorRegistered)+len(operatorRegistered) != 227 {
-		t.Fatalf("all registered routes=%d, 預期 227", len(nonOperatorRegistered)+len(operatorRegistered))
+	if len(nonOperatorRegistered)+len(operatorRegistered) != 233 {
+		t.Fatalf("all registered routes=%d, 預期 233", len(nonOperatorRegistered)+len(operatorRegistered))
 	}
 	counts := map[operatorauth.Permission]int{}
 	representations := map[operatorRepresentation]int{}
@@ -139,14 +140,14 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		representations[policy.Representation]++
 		profiles[policy.SecurityProfile]++
 	}
-	if counts[operatorauth.View] != 83 || counts[operatorauth.Operate] != 24 || counts[operatorauth.Admin] != 97 {
-		t.Fatalf("permission counts=%v, want view=83 operate=24 admin=97", counts)
+	if counts[operatorauth.View] != 83 || counts[operatorauth.Operate] != 24 || counts[operatorauth.Admin] != 102 {
+		t.Fatalf("permission counts=%v, want view=83 operate=24 admin=102", counts)
 	}
-	if representations[operatorJSON] != 107 || representations[operatorHTML] != 96 || representations[operatorPlain] != 1 {
-		t.Fatalf("representation counts=%v, want JSON=107 HTML=96 plain=1", representations)
+	if representations[operatorJSON] != 107 || representations[operatorHTML] != 101 || representations[operatorPlain] != 1 {
+		t.Fatalf("representation counts=%v, want JSON=107 HTML=101 plain=1", representations)
 	}
-	if profiles[operatorSecurityLocked] != 203 || profiles[operatorSecurityTerminal] != 1 {
-		t.Fatalf("security profiles=%v, want locked=203 terminal=1", profiles)
+	if profiles[operatorSecurityLocked] != 208 || profiles[operatorSecurityTerminal] != 1 {
+		t.Fatalf("security profiles=%v, want locked=208 terminal=1", profiles)
 	}
 }
 
@@ -251,6 +252,7 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 	}
 	probeMux := http.NewServeMux()
 	h.operatorRoutes(probeMux)
+	registerSecurityRoutes(probeMux, st, testOperatorAuthority)
 	ui.Routes(probeMux)
 	registerOperatorTerminalSocket(probeMux, h, authorizer, testOperatorAuthority)
 	tests := []struct {
@@ -462,6 +464,11 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		{"POST /v1/operator/disk-clean/continuations", "/v1/operator/disk-clean/continuations", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"POST /v1/operator/disk-clean/abandonment-preview", "/v1/operator/disk-clean/abandonment-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
 		{"POST /v1/operator/disk-clean/abandonments", "/v1/operator/disk-clean/abandonments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
+		{"GET /account/security", "/account/security", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
+		{"POST /account/security/totp/begin", "/account/security/totp/begin", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
+		{"POST /account/security/totp/confirm", "/account/security/totp/confirm", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
+		{"POST /account/security/totp/disable", "/account/security/totp/disable", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
+		{"POST /account/security/password", "/account/security/password", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
 	}
 	casePatterns := make(map[string]struct{}, len(tests))
 	for _, test := range tests {

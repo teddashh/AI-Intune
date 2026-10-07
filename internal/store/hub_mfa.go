@@ -1,0 +1,190 @@
+package store
+
+import (
+	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/base32"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/teddashh/AI-Intune/internal/totp"
+)
+
+func (s *Store) MFAEnabled(id string) (bool, error) {
+	var enabled sql.NullString
+	err := s.rdb.QueryRow(`SELECT enabled_at FROM hub_account_mfa WHERE account_id=?`, id).Scan(&enabled)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return enabled.Valid, err
+}
+
+// TOTP secrets must remain readable for verification: DB read access = MFA bypass.
+// Protect DB backups as sensitive credentials, just like the live database.
+func (s *Store) BeginTOTPEnrollment(id string) (string, error) {
+	secret, err := totp.NewSecret()
+	if err != nil {
+		return "", err
+	}
+	// Do not replace an enabled factor without authenticating and disabling it.
+	res, err := s.execWrite(context.Background(), "begin_totp", `INSERT INTO hub_account_mfa(account_id,totp_secret,pending_secret) VALUES (?,'',?) ON CONFLICT(account_id) DO UPDATE SET pending_secret=excluded.pending_secret WHERE enabled_at IS NULL`, id, secret)
+	if err != nil {
+		return "", err
+	}
+	n, _ := res.RowsAffected()
+	if n != 1 {
+		return "", ErrAccountAuth
+	}
+	return secret, nil
+}
+func (s *Store) ConfirmTOTP(id, code string, metadata ...AuditEntry) ([]string, error) {
+	tx, err := s.beginWrite(context.Background(), "confirm_totp")
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var secret, username string
+	err = tx.QueryRow(`SELECT m.pending_secret,a.username FROM hub_account_mfa m JOIN hub_accounts a USING(account_id) WHERE m.account_id=? AND m.enabled_at IS NULL`, id).Scan(&secret, &username)
+	step, ok := totp.Verify(secret, code, s.nowFn())
+	if err != nil {
+		return nil, ErrAccountAuth
+	}
+	if !ok {
+		if err = s.recordAuditTx(tx, accountAudit(AuditMFAFailed, HubAccount{AccountID: id, Username: username}, false, metadata...)); err != nil {
+			return nil, err
+		}
+		if err = tx.Commit(); err != nil {
+			return nil, err
+		}
+		return nil, ErrAccountAuth
+	}
+	codes := make([]string, 10)
+	for i := range codes {
+		b := make([]byte, 8)
+		if _, err = rand.Read(b); err != nil {
+			return nil, err
+		}
+		raw := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
+		codes[i] = strings.ToLower(raw[:4] + "-" + raw[4:8] + "-" + raw[8:12])
+		if _, err = tx.Exec(`INSERT INTO hub_account_recovery_codes(account_id,code_hash) VALUES (?,?)`, id, sessionHash(codes[i])); err != nil {
+			return nil, err
+		}
+	}
+	if _, err = tx.Exec(`UPDATE hub_account_mfa SET totp_secret=pending_secret,pending_secret=NULL,enabled_at=?,last_used_step=? WHERE account_id=?`, fmtTime(s.nowFn()), step, id); err != nil {
+		return nil, err
+	}
+	if err = s.recordAuditTx(tx, accountAudit(AuditMFAEnabled, HubAccount{AccountID: id, Username: username}, true, metadata...)); err != nil {
+		return nil, err
+	}
+	return codes, tx.Commit()
+}
+func (s *Store) VerifySecondFactor(id, code string, metadata ...AuditEntry) error {
+	tx, err := s.beginWrite(context.Background(), "verify_second_factor")
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var a HubAccount
+	a.AccountID = id
+	var failed int
+	var locked, disabled sql.NullString
+	if err = tx.QueryRow(`SELECT username,failed_attempts,locked_until,disabled_at FROM hub_accounts WHERE account_id=?`, id).Scan(&a.Username, &failed, &locked, &disabled); err != nil {
+		return err
+	}
+	now := s.nowFn()
+	until, _ := time.Parse(time.RFC3339, locked.String)
+	blocked := disabled.Valid || now.Before(until)
+	var secret string
+	var last int64
+	err = tx.QueryRow(`SELECT totp_secret,last_used_step FROM hub_account_mfa WHERE account_id=? AND enabled_at IS NOT NULL`, id).Scan(&secret, &last)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	step, valid := totp.Verify(secret, code, now)
+	valid = valid && step > last && err == nil && !blocked
+	action := AuditMFAFailed
+	if valid {
+		var res sql.Result
+		res, err = tx.Exec(`UPDATE hub_account_mfa SET last_used_step=? WHERE account_id=? AND last_used_step<?`, step, id, step)
+		if err == nil {
+			var n int64
+			n, err = res.RowsAffected()
+			valid = n == 1
+		}
+	} else if !blocked && secret != "" {
+		var res sql.Result
+		res, err = tx.Exec(`UPDATE hub_account_recovery_codes SET used_at=? WHERE account_id=? AND code_hash=? AND used_at IS NULL`, fmtTime(now), id, sessionHash(strings.ToLower(strings.TrimSpace(code))))
+		if err == nil {
+			n, _ := res.RowsAffected()
+			valid = n == 1
+			if valid {
+				action = AuditRecoveryCodeUsed
+			}
+		}
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if valid {
+		_, err = tx.Exec(`UPDATE hub_accounts SET failed_attempts=0,locked_until=NULL WHERE account_id=?`, id)
+	} else if !blocked {
+		if locked.Valid {
+			failed = 0
+		}
+		failed++
+		var lock any
+		if failed >= 5 {
+			lock = fmtTime(now.Add(15 * time.Minute))
+			if err = s.recordAuditTx(tx, accountAudit(AuditHubLockout, a, false, metadata...)); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(`UPDATE hub_accounts SET failed_attempts=?,locked_until=? WHERE account_id=?`, failed, lock, id)
+	}
+	if err != nil {
+		return err
+	}
+	if !valid || action == AuditRecoveryCodeUsed {
+		if err = s.recordAuditTx(tx, accountAudit(action, a, valid, metadata...)); err != nil {
+			return err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	if !valid {
+		return ErrAccountAuth
+	}
+	return nil
+}
+func (s *Store) DisableMFA(id string, metadata ...AuditEntry) error {
+	tx, err := s.beginWrite(context.Background(), "disable_mfa")
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var a HubAccount
+	a.AccountID = id
+	if err = tx.QueryRow(`SELECT username FROM hub_accounts WHERE account_id=?`, id).Scan(&a.Username); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`DELETE FROM hub_account_recovery_codes WHERE account_id=?`, id); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`DELETE FROM hub_account_mfa WHERE account_id=?`, id); err != nil {
+		return err
+	}
+	if err = s.recordAuditTx(tx, accountAudit(AuditMFADisabled, a, true, metadata...)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func (s *Store) DisableAdminMFA(username string) error {
+	var id string
+	if err := s.rdb.QueryRow(`SELECT account_id FROM hub_accounts WHERE username=?`, username).Scan(&id); err != nil {
+		return err
+	}
+	return s.DisableMFA(id)
+}

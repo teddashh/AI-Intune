@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -111,11 +112,12 @@ type nonOperatorRoutePolicy struct {
 // public account traffic. In particular, /v1/operator/* can never be classified as
 // a machine route.
 var nonOperatorRoutePolicies = map[string]nonOperatorRoutePolicy{
-	"GET /setup":   {nonOperatorAccount},
-	"POST /setup":  {nonOperatorAccount},
-	"GET /login":   {nonOperatorAccount},
-	"POST /login":  {nonOperatorAccount},
-	"POST /logout": {nonOperatorAccount},
+	"GET /setup":      {nonOperatorAccount},
+	"POST /setup":     {nonOperatorAccount},
+	"GET /login":      {nonOperatorAccount},
+	"POST /login":     {nonOperatorAccount},
+	"POST /logout":    {nonOperatorAccount},
+	"POST /login/mfa": {nonOperatorAccount},
 
 	"POST /v1/enrollments":             {nonOperatorAgent},
 	"POST /v1/checkins":                {nonOperatorAgent},
@@ -141,6 +143,12 @@ var nonOperatorRoutePolicies = map[string]nonOperatorRoutePolicy{
 // A newly registered control route therefore fails closed until somebody
 // classifies that exact ServeMux pattern in review.
 var operatorRoutePolicies = map[string]operatorRoutePolicy{
+	"GET /account/security":               {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/security/totp/begin":   {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/security/totp/confirm": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/security/totp/disable": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/security/password":     {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+
 	"GET /metrics":             {operatorauth.View, operatorPlain, operator.SourceKindWeb, operatorSecurityLocked},
 	"GET /{$}":                 {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	navigationLanguagePattern:  {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
@@ -415,6 +423,7 @@ func newHubHTTPHandler(h *hub, ui *web.Server, authorizer operatorRequestAuthori
 
 	operatorMux := http.NewServeMux()
 	operatorRegistered := h.operatorRoutes(operatorMux)
+	operatorRegistered = append(operatorRegistered, registerSecurityRoutes(operatorMux, h.store, authority)...)
 	operatorRegistered = append(operatorRegistered, ui.Routes(operatorMux)...)
 	operatorRegistered = append(operatorRegistered, registerOperatorTerminalSocket(operatorMux, h, authorizer, authority, cloud...))
 	if err := validateRouteManifests(nonOperatorRegistered, nonOperatorRoutePolicies,
@@ -631,7 +640,7 @@ func (b *operatorBoundary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeOperatorBoundaryError(w, policy.Representation, decision.HTTPStatus, string(decision.Code), decision.Detail)
 		return
 	}
-	_, breach := validateAuthorizedResult(before, authed, decision, policy.Permission, b.authMode())
+	principal, breach := validateAuthorizedResult(before, authed, decision, policy.Permission, b.authMode())
 	if breach != "" {
 		b.observeAuthDenial(r, pattern, policy, string(operatorauth.AuthConfigurationInvalid),
 			string(breach), operatorauth.Principal{}, nil)
@@ -640,6 +649,21 @@ func (b *operatorBoundary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if os.Getenv("CLAWCTL_REQUIRE_MFA") == "1" && principal.AuthMethod == operatorauth.AuthMethodLocalAccountSession && !strings.HasPrefix(r.URL.Path, "/account/security") {
+		enabled, err := b.store.MFAEnabled(strings.TrimPrefix(principal.StableSubject(), "local-user:"))
+		if err != nil {
+			writeOperatorBoundaryError(w, policy.Representation, 503, "INTERNAL", "Authentication unavailable")
+			return
+		}
+		if !enabled {
+			if policy.Representation == operatorHTML {
+				http.Redirect(w, r, "/account/security", 303)
+			} else {
+				writeOperatorBoundaryError(w, policy.Representation, 403, "MFA_ENROLLMENT_REQUIRED", "Enroll an authenticator at /account/security")
+			}
+			return
+		}
+	}
 	b.csrfNext.ServeHTTP(w, authed)
 }
 

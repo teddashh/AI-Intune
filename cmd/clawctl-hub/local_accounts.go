@@ -106,7 +106,7 @@ func withSessionAuthorizer(st *store.Store, mode authMode, secure bool, prefix s
 	return sessionFirstAuthorizer{a, fallback}, nil
 }
 
-var accountRoutePatterns = []string{"GET /setup", "POST /setup", "GET /login", "POST /login", "POST /logout"}
+var accountRoutePatterns = []string{"GET /setup", "POST /setup", "GET /login", "POST /login", "POST /login/mfa", "POST /logout"}
 
 func isAccountRoute(pattern string) bool {
 	for _, p := range accountRoutePatterns {
@@ -129,6 +129,7 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 	boundary := newOperatorBoundary(http.NewServeMux(), nil, st, nil, authority, cloud...)
 	limiter := newIPLimiter(10, 5)
 	csrf := http.NewCrossOriginProtection()
+	pending := newPendingLogins()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if boundary.authMode() != authModeLocal && boundary.authMode() != authModeBoth {
 			http.NotFound(w, r)
@@ -190,7 +191,29 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 		var account store.HubAccount
 		var err error
 		username := strings.ToLower(strings.TrimSpace(r.PostForm.Get("username")))
-		if setup {
+		if r.URL.Path == "/login/mfa" {
+			c, cookieErr := r.Cookie("hub_pending_mfa")
+			if cookieErr != nil {
+				http.Error(w, "Pending login required", 401)
+				return
+			}
+			login, ok := pending.get(c.Value, r.RemoteAddr)
+			if !ok {
+				http.Error(w, "Pending login expired", 401)
+				return
+			}
+			account = login.account
+			next = login.next
+			err = st.VerifySecondFactor(account.AccountID, r.PostForm.Get("code"), metadata)
+			if err != nil {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.WriteHeader(401)
+				renderMFAForm(w, "Invalid code")
+				return
+			}
+			pending.remove(c.Value)
+			http.SetCookie(w, &http.Cookie{Name: "hub_pending_mfa", Value: "", Path: "/login", HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode, MaxAge: -1})
+		} else if setup {
 			if !boundary.cloud.setupCode.matches(r.PostForm.Get("setup_code")) {
 				err = store.ErrAccountAuth
 			} else {
@@ -212,6 +235,23 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 			}
 			ui.RenderAccountForm(w, setup, next, message)
 			return
+		}
+		if !setup && r.URL.Path != "/login/mfa" {
+			enabled, e := st.MFAEnabled(account.AccountID)
+			if e != nil {
+				http.Error(w, "Authentication unavailable", 503)
+				return
+			}
+			if enabled {
+				token, e := pending.add(account, r.RemoteAddr, next)
+				if e != nil {
+					http.Error(w, "Authentication unavailable", 503)
+					return
+				}
+				http.SetCookie(w, &http.Cookie{Name: "hub_pending_mfa", Value: token, Path: "/login", HttpOnly: true, Secure: secure, SameSite: http.SameSiteStrictMode, MaxAge: 300})
+				renderMFAForm(w, "")
+				return
+			}
 		}
 		token, err := st.CreateSession(account, r.RemoteAddr, r.UserAgent())
 		if err != nil {
@@ -300,6 +340,10 @@ func runAdminPasswordCommand(command string, args []string, in io.Reader) error 
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	db := fs.String("db", "", "path to existing Hub database")
 	username := fs.String("username", "", "admin username")
+	var disableMFA bool
+	if command == "reset-admin-password" {
+		fs.BoolVar(&disableMFA, "disable-mfa", false, "disable MFA during host password recovery")
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -323,5 +367,11 @@ func runAdminPasswordCommand(command string, args []string, in io.Reader) error 
 		_, err := st.CreateFirstAdmin(*username, password)
 		return err
 	}
-	return st.ResetAdminPassword(*username, password)
+	if err := st.ResetAdminPassword(*username, password); err != nil {
+		return err
+	}
+	if disableMFA {
+		return st.DisableAdminMFA(*username)
+	}
+	return nil
 }
