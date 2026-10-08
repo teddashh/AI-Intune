@@ -4,7 +4,38 @@ Run one always-on Hub with public HTTPS, a local admin, required authenticator M
 
 ## Autopilot on Fly (recommended)
 
-Start with this repository checked out. Docker and Fly build inside the image; you do not need Go installed locally.
+Start with this repository checked out and flyctl installed (`fly` or `flyctl` on PATH). You do not need Go installed locally. The simple path is `deploy.sh`: authenticate with `fly auth login` or a Fly org token in `FLY_API_TOKEN`, then run from the repository root:
+
+```sh
+ops/fly/deploy.sh --org <your-org> --app <your-app-name> --region iad --dry-run
+ops/fly/deploy.sh --org <your-org> --app <your-app-name> --region iad
+# Optional: add --secrets-file ~/clawctl-fly/secrets.env (regular file, mode 0600).
+```
+
+The flags also accept `FLY_ORG`, `FLY_APP`, `FLY_REGION` (default `iad`), and `FLY_SECRETS_FILE`. Dry-run prints the plan without calling Fly or making network requests. The script copies the config outside the repository, creates only missing resources, deploys with `--yes --ha=false`, scales to one 1024mb Machine, and waits up to about three minutes for HTTPS `/healthz`. It keeps the 3GB `clawctl_data` volume and never allocates a dedicated IPv4 or creates Postgres. R2 and Telegram are optional; unset `R2_*` / `LITESTREAM_*` is valid. The caller's secrets file is retained.
+
+flyctl 0.4.115 defaults to Depot. If deployment fails with Depot, handshake (such as `authentication handshake failed: EOF`), or `list workers` output, the script retries once with `--depot=false --yes`. Classic builds can create a running `fly-builder-*` app. The script compares app inventories before and after that retry and destroys only new builder apps, preserving pre-existing builders. Failed teardown warns with the builder name and exits non-zero; inspect and remove that specific builder after confirming its identity.
+
+When `/setup` returns 200, the script prints a generated first-run setup code once on your terminal. Protect terminal and log access. Once an admin exists, `/setup` returns 404 and the script never prints an old code. Finish setup in the browser or use the non-browser helper:
+
+```sh
+# Save the first-run code privately in this file using a terminal editor.
+install -m 600 /dev/null ~/clawctl-fly/setup-code
+nano ~/clawctl-fly/setup-code
+ops/fly/setup-admin.sh --app <your-app-name> --username <your-admin-name> \
+  --setup-code-file ~/clawctl-fly/setup-code --out ~/clawctl-fly/admin-credentials.json
+```
+
+Use `--url https://hub.example.com` for a custom origin. `--setup-code` is also accepted, but a file avoids shell history and process arguments. The helper generates a random password, enrolls RFC 6238 SHA1 TOTP (six digits, 30 seconds), and saves username, password, TOTP secret, and ten recovery codes to a new mode-0600 file. It refuses overwrites and prints only the file path and enrollment status. It uses one keep-alive HTTPS connection: MFA is bound to the full client IP, so opening a new TCP connection for each request can fail when egress IP rotates. First-run setup creates `__Host-clawctl_session` directly; it does not use `hub_pending_mfa`.
+
+To remove a disposable app, preview first, then type the exact app name when prompted (piped input also works). Destroy never deploys:
+
+```sh
+ops/fly/deploy.sh --app <your-app-name> --destroy --dry-run
+ops/fly/deploy.sh --app <your-app-name> --destroy
+```
+
+Destroy removes the app's machines, its `clawctl_data` volumes, and the app. It is irreversible. The manual steps below are the expanded form of the deploy path.
 
 **Only these account setup steps require Ted's / your own accounts:**
 
@@ -33,8 +64,8 @@ cp ops/fly/fly.toml ~/clawctl-fly/fly.toml
 Edit `app` to a unique name and `primary_region` to your preferred region (for example `iad`). Replace `<your-app-name>` and `<your-region>` below with those values. Run from the repository root:
 
 ```sh
-fly apps create <your-app-name>
-fly volumes create clawctl_data --region <your-region> --size 3 -a <your-app-name>
+fly apps create <your-app-name> --org <your-org>
+fly volumes create clawctl_data --region <your-region> --size 3 -a <your-app-name> --yes
 ```
 
 This config selects `CLAWCTL_AUTH_MODE=local`, port 8787, public HTTP service with forced HTTPS, and one always-on Machine. No capability prefix or Tailscale auth key is needed. The entrypoint defaults `CLAWCTL_PUBLIC_URL` to `https://<your-app-name>.fly.dev` from `FLY_APP_NAME` and logs that URL. A configured URL must be HTTPS. `both` is refused: a public wildcard listener cannot provide the literal Tailscale listener required for WhoIs. Use either this pack or the private pack.
@@ -83,8 +114,8 @@ fly deploy . \
   --dockerfile ops/docker/Dockerfile \
   --build-target hub-fly \
   --build-arg CLAWCTL_VERSION="$(git rev-parse --short HEAD)" \
-  --ha=false
-fly scale count 1 -a <your-app-name>
+  --ha=false --yes
+fly scale count 1 -a <your-app-name> --yes
 fly logs -a <your-app-name>
 ```
 
@@ -103,11 +134,11 @@ Configure your domain's DNS using the CNAME or A+AAAA records reported by `fly c
 fly secrets set CLAWCTL_PUBLIC_URL=https://hub.example.com -a <your-app-name>
 ```
 
-Hub pins the operator Host to `CLAWCTL_PUBLIC_URL`: after switching, the `fly.dev` URL stops serving the operator UI. Open `https://hub.example.com/login` (or `/setup` if no admin exists). Agents enrolled with the old `hub-url` must re-enroll against the new URL; choose the domain before enrolling machines. See [Moving agents](MOVE-AGENTS.md).
+Hub pins the operator Host to `CLAWCTL_PUBLIC_URL`. `/` and `/login` return 421 for a wrong Host. `/healthz` intentionally does not enforce Host so Fly's probe works; it is not a Host validation test. Never allocate a dedicated IPv4. After switching domains, the `fly.dev` URL stops serving the operator UI. Open `https://hub.example.com/login` (or `/setup` if no admin exists). Agents enrolled with the old `hub-url` must re-enroll against the new URL; choose the domain before enrolling machines. See [Moving agents](MOVE-AGENTS.md).
 
 ### 6. Enroll your first machine
 
-In the Hub Web console, register a machine and download its **keyed Linux installer** for amd64 or arm64 from the token result page. The package contains a one-time enrollment token and the public Hub URL; transfer it privately. If lost, revoke the pending ticket and issue a new one.
+In the Hub Web console, register a machine and download its **keyed Linux installer** for amd64 or arm64 from the token result page; the download page offers both architectures. The package contains a one-time enrollment token and the public Hub URL; transfer it privately. If lost, revoke the pending ticket and issue a new one.
 
 On the endpoint, as the non-root account that will run the agent, with sudo available:
 
@@ -118,11 +149,11 @@ cd clawctl-enrollment
 ./install-agent.sh
 ```
 
-Use the arm64 archive for ARM. HTTPS enrollment skips Tailscale automatically. The endpoint needs systemd, systemd-logind, sudo, and outbound HTTPS. Delete the archive and transfer copies after success. Verify a fresh Hub-received check-in and identity on the machine page. See [Autopilot](AUTOPILOT.md) for the full enrollment and security model.
+Use the arm64 archive for ARM. HTTPS enrollment skips Tailscale automatically. The endpoint needs systemd, systemd-logind, sudo, and outbound HTTPS. Delete the archive and transfer copies after success. Verify a fresh Hub-received check-in and identity on the machine page. HTTPS check-in alone does not hold a live WebSocket. The agent dials `/v1/agent/terminal-link` only after a local bat-server endpoint exists. See [Autopilot](AUTOPILOT.md) for the full enrollment and security model.
 
 ### 7. Verify backups and keep the Hub current
 
-Check `https://<your-app-name>.fly.dev/healthz` (or your custom domain), then follow [verification, Telegram, and restore drill](#verification-telegram-and-restore-drill). Run the restore drill after R2 is configured and monthly thereafter. It restores to a temporary directory and never touches the live database. Follow [upgrades](#upgrades) to deploy each new commit with a unique version while keeping the same volume and one Machine.
+Check `https://<your-app-name>.fly.dev/healthz` (or your custom domain), then follow [verification, Telegram, and restore drill](#verification-telegram-and-restore-drill). The restore drill requires R2 replication variables; it does not work without R2. Run it after R2 is configured and monthly thereafter. It restores to a temporary directory and never touches the live database. Follow [upgrades](#upgrades) to deploy each new commit with a unique version while keeping the same volume and one Machine.
 
 Public mode defaults to `CLAWCTL_TRUSTED_PROXIES=172.16.0.0/12` (fly-proxy egress) and `CLAWCTL_CLIENT_IP_HEADER=Fly-Client-IP`. On Fly the rightmost X-Forwarded-For entry is the app's edge IP. 6PN uses IPv6 `fdaa::/16` and is not trusted. Explicit proxy/header settings, including empty trust, are respected; see [client IP configuration](AUTOPILOT.md#client-ip-and-reverse-proxies).
 
@@ -321,6 +352,8 @@ The init step seeds that version only when its directory is absent. Reusing a ve
 
 | Symptom | What to check |
 |---|---|
+| Depot handshake / `failed to list workers` | `deploy.sh` retries once with `--depot=false --yes` and removes only builders created during that retry. If teardown fails, inspect the named builder; do not remove pre-existing builders. |
+| MFA says `Pending login expired` | Pending login is bound to the full client IP. Use one keep-alive HTTPS connection when egress changes per TCP connection; `setup-admin.sh` does this for setup and TOTP confirmation. |
 | Public UI returns `421` (wrong host) | `CLAWCTL_PUBLIC_URL` must match the browser's HTTPS origin. After a domain switch, use the new domain; the old Host is refused. |
 | Public health check failing | Check `fly logs` for startup/config/volume errors; `CLAWCTL_PORT` and `http_service.internal_port` must both be 8787. Probe is GET `/healthz`; it needs no admin session. |
 | Setup code absent from logs | Setup is closed once an admin exists; use `/login`. An explicit `CLAWCTL_SETUP_CODE` is never logged. See Autopilot recovery if credentials are lost. |

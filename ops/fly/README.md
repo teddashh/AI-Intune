@@ -2,18 +2,11 @@
 
 The primary Fly path is **Autopilot over public HTTPS**: local admin, required TOTP MFA, and keyed agent installers. Follow [docs/DEPLOY-FLY.md](../../docs/DEPLOY-FLY.md#autopilot-on-fly-recommended) from app creation through enrollment and backups.
 
-Copy `ops/fly/fly.toml` out of the repository to `~/clawctl-fly/fly.toml`, edit `app` and `primary_region`, create the app and a 3 GB `clawctl_data` volume, and stage optional R2/Telegram/setup-code secrets via a mode-0600 file. Do not commit secrets. From the repository root:
+Run `ops/fly/deploy.sh --org <your-org> --app <your-app-name> --region iad --dry-run` to preview, then omit `--dry-run` to deploy. It copies the config outside the tree, keeps one 1024mb Machine and a 3GB volume, and handles Depot fallback and cleanup of new builder apps. Optional secrets use `--secrets-file` with a mode-0600 file; R2 is not required. Never commit or print secrets.
 
-```sh
-fly deploy . \
-  --config ~/clawctl-fly/fly.toml \
-  --dockerfile ops/docker/Dockerfile \
-  --build-target hub-fly \
-  --build-arg CLAWCTL_VERSION="$(git rev-parse --short HEAD)" \
-  --ha=false
-```
+Finish `/setup` in a browser or with `ops/fly/setup-admin.sh --app <your-app-name> --username <your-admin-name> --setup-code-file /private/setup-code --out /private/admin-credentials.json`. The helper uses one keep-alive HTTPS connection, enrolls MFA, and saves credentials privately without printing them. `deploy.sh --app <your-app-name> --destroy` requires typing the exact app name; preview it with `--dry-run`.
 
-Local mode is the default for fresh deployments without Tailscale state or a set `TS_AUTHKEY`. It listens on `0.0.0.0:8787`, needs neither `TS_AUTHKEY` nor `/dev/net/tun`, and starts no Tailscale process. Fly terminates HTTPS; `CLAWCTL_PUBLIC_URL` defaults to `https://$FLY_APP_NAME.fly.dev` and must be HTTPS. The trusted proxy defaults are `172.16.0.0/12` and `Fly-Client-IP`; IPv6 6PN is not trusted. Read the generated setup code from logs and open `/setup`. Choose any custom domain before enrolling machines because Host is pinned to the public URL.
+Local mode is the default for fresh deployments without Tailscale state or a set `TS_AUTHKEY`. It listens on `0.0.0.0:8787`, needs neither `TS_AUTHKEY` nor `/dev/net/tun`, and starts no Tailscale process. Fly terminates HTTPS; `CLAWCTL_PUBLIC_URL` defaults to `https://$FLY_APP_NAME.fly.dev` and must be HTTPS. The trusted proxy defaults are `172.16.0.0/12` and `Fly-Client-IP`; IPv6 6PN is not trusted. On first run, deploy.sh prints the generated setup code once if `/setup` is open; later deploys never print stale codes. Choose any custom domain before enrolling machines because Host is pinned to the public URL.
 
 For the [advanced Tailscale-only path](../../docs/DEPLOY-FLY.md#advanced-tailscale-only-hub-on-fly), copy `fly.tailscale.toml` out of tree and pass that copy as `--config`. The config sets `CLAWCTL_AUTH_MODE = "tailscale"` in `[env]`; stage only the initial tagged `TS_AUTHKEY` and any optional secrets. The private config has no public HTTP service. Hub binds the machine's Tailscale IPv4, and state persists under root-owned `tailscale/` on the volume. `both` is refused on Fly because wildcard public listening cannot supply literal Tailscale WhoIs identity.
 

@@ -427,3 +427,199 @@ PY
 
 run_test "test_entrypoint" test_entrypoint
 run_test "test_fly_configs" test_fly_configs
+
+# Each automation test runs in a subshell so PATH and stub state stay local.
+test_autopilot() (
+  set -euo pipefail
+  tmpdir=$(mktemp -d)
+  trap 'rm -rf "$tmpdir"' EXIT
+  mkdir "$tmpdir/bin"
+  export PATH="$tmpdir/bin:$PATH" STUB_DIR="$tmpdir" FLY_API_TOKEN=stub-auth
+  unset FLY_APP FLY_ORG FLY_REGION FLY_SECRETS_FILE
+  cat > "$tmpdir/bin/fly" <<'STUB'
+#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$STUB_DIR/calls"
+case "$1 $2" in
+  'apps list')
+    if [[ -e "$STUB_DIR/fallback" ]]; then
+      echo '[{"Name":"test-hub"},{"Name":"fly-builder-keep"},{"Name":"fly-builder-new"}]'
+    elif [[ "${STUB_MISSING:-0}" == 1 ]]; then echo '[]'
+    else echo '[{"Name":"test-hub"},{"Name":"fly-builder-keep"}]'; fi ;;
+  'volumes list')
+    if [[ "${STUB_MISSING:-0}" == 1 ]]; then echo '[]'
+    else echo '[{"id":"vol_test","name":"clawctl_data"},{"id":"vol_other","name":"other"}]'; fi ;;
+  'machines list') echo '[{"id":"machine_test"}]' ;;
+  'logs -a') echo 'first-run setup: open https://test-hub.fly.dev/setup and enter setup code stub-first-run-code' ;;
+  'deploy .')
+    if [[ "${STUB_FAIL:-}" == other ]]; then echo 'unrelated failure'; exit 1; fi
+    if [[ "${STUB_FAIL:-}" == depot ]]; then
+      if [[ " $* " == *' --depot=false '* ]]; then
+        touch "$STUB_DIR/fallback"
+      else echo 'authentication handshake failed'; exit 1; fi
+    fi ;;
+  'apps destroy')
+    if [[ "${STUB_CLEANUP_FAIL:-0}" == 1 && "$3" == fly-builder-new ]]; then exit 1; fi ;;
+  'secrets import') cat >/dev/null ;;
+esac
+STUB
+  cat > "$tmpdir/bin/curl" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >> "$STUB_DIR/curl-calls"
+if [[ "${*: -1}" == */setup ]]; then printf '%s' "${STUB_SETUP_STATUS:-404}"; else printf 200; fi
+STUB
+  chmod +x "$tmpdir/bin/"*
+  reset_stub() { : > "$tmpdir/calls"; : > "$tmpdir/curl-calls"; rm -f "$tmpdir/fallback"; }
+  deploy() { bash ops/fly/deploy.sh --org test-org --app test-hub "$@" > "$tmpdir/output" 2>&1; }
+  reset_stub
+  deploy --dry-run
+  grep -q 'apps create' "$tmpdir/output"
+  grep -q 'volumes create' "$tmpdir/output"
+  grep -q 'deploy ' "$tmpdir/output"
+  [[ ! -s "$tmpdir/calls" && ! -s "$tmpdir/curl-calls" ]]
+
+  reset_stub
+  deploy
+  grep -q '^deploy ' "$tmpdir/calls"
+  ! grep -Eq '^(apps|volumes) create' "$tmpdir/calls"
+  ! grep -q '^logs ' "$tmpdir/calls"
+  ! grep -q 'stub-first-run-code' "$tmpdir/output"
+  grep -q 'already closed' "$tmpdir/output"
+
+  reset_stub
+  STUB_MISSING=1 STUB_SETUP_STATUS=200 deploy
+  grep -q '^apps create test-hub --org test-org$' "$tmpdir/calls"
+  grep -q '^volumes create clawctl_data --region iad --size 3 -a test-hub --yes$' "$tmpdir/calls"
+  [[ $(grep -c '^Setup code: stub-first-run-code$' "$tmpdir/output") == 1 ]]
+
+  reset_stub
+  STUB_FAIL=depot deploy
+  [[ $(grep -c '^deploy ' "$tmpdir/calls") == 2 ]]
+  grep -q '^deploy .*--depot=false' "$tmpdir/calls"
+  grep -q '^apps destroy fly-builder-new --yes$' "$tmpdir/calls"
+  ! grep -q '^apps destroy fly-builder-keep' "$tmpdir/calls"
+  reset_stub
+  if STUB_FAIL=depot STUB_CLEANUP_FAIL=1 deploy; then echo 'fail: teardown failure accepted'; exit 1; fi
+  grep -q 'Warning: builder teardown failed for fly-builder-new' "$tmpdir/output"
+  reset_stub
+  if STUB_FAIL=other deploy; then echo 'fail: unrelated failure accepted'; exit 1; fi
+  [[ $(grep -c '^deploy ' "$tmpdir/calls") == 1 ]]
+
+  reset_stub
+  if deploy --destroy <<< 'nope'; then echo 'fail: wrong confirmation accepted'; exit 1; fi
+  ! grep -q 'destroy' "$tmpdir/calls"
+  printf 'test-hub\n' | deploy --destroy
+  grep -q '^machines destroy machine_test -a test-hub --force$' "$tmpdir/calls"
+  grep -q '^volumes destroy vol_test -a test-hub --yes$' "$tmpdir/calls"
+  ! grep -q '^volumes destroy vol_other' "$tmpdir/calls"
+  grep -q '^apps destroy test-hub --yes$' "$tmpdir/calls"
+  ! grep -q '^deploy ' "$tmpdir/calls"
+  reset_stub
+  deploy --dry-run --destroy < /dev/null
+  [[ ! -s "$tmpdir/calls" ]]
+
+  reset_stub
+  touch "$tmpdir/secrets"
+  chmod 644 "$tmpdir/secrets"
+  if deploy --secrets-file "$tmpdir/secrets"; then echo 'fail: insecure file accepted'; exit 1; fi
+  ! grep -q '^secrets import' "$tmpdir/calls"
+  chmod 600 "$tmpdir/secrets"
+  deploy --secrets-file "$tmpdir/secrets"
+  grep -q '^secrets import --stage -a test-hub$' "$tmpdir/calls"
+  [[ -f "$tmpdir/secrets" ]]
+)
+
+test_setup_admin() (
+  set -euo pipefail
+  tmpdir=$(mktemp -d)
+  trap 'rm -rf "$tmpdir"' EXIT
+  # Execute the embedded Python with a fake HTTPSConnection; no socket is opened.
+  python3 - "$tmpdir" <<'PY'
+import base64, hashlib, hmac, http.client, json, os, runpy, struct, sys, time
+from pathlib import Path
+root = Path(sys.argv[1])
+script = Path('ops/fly/setup-admin.sh').read_text().split("<<'PY'\n", 1)[1].rsplit('\nPY', 1)[0]
+(root / 'setup.py').write_text(script)
+secret = base64.b32encode(b'local-test-key-only').decode().rstrip('=')
+requests = []
+instances = []
+closed_setup = False
+lose_connection = False
+class Response:
+    will_close = False
+    def __init__(self, status, body='', location=None, cookie=False):
+        self.status, self.body, self.location, self.cookie = status, body, location, cookie
+    def read(self): return self.body.encode()
+    def getheader(self, name): return self.location
+    def getheaders(self):
+        return [('Set-Cookie', '__Host-clawctl_session=stub; Secure; Path=/')] if self.cookie else []
+class Connection:
+    def __init__(self, *args, **kwargs):
+        self.sock = None
+        instances.append(self)
+    def connect(self): self.sock = object()
+    def close(self): pass
+    def request(self, method, path, body, headers):
+        from urllib.parse import parse_qs
+        fields = parse_qs(body or '')
+        requests.append((method, path))
+        assert headers['Connection'] == 'keep-alive'
+        if path == '/setup':
+            assert len(fields['password'][0]) >= 24
+            assert fields['setup_code'] == ['local-code']
+            self.response = Response(404) if closed_setup else Response(303, location='/account/security?enroll=1', cookie=True)
+        elif method == 'GET':
+            assert '__Host-clawctl_session=stub' in headers['Cookie']
+            spaced = ' '.join(secret[i:i+4] for i in range(0, len(secret), 4))
+            self.response = Response(200, f'<code>{spaced}</code><code>otpauth://totp/test</code>')
+        else:
+            digest = hmac.new(b'local-test-key-only', struct.pack('>Q', int(time.time())//30), hashlib.sha1).digest()
+            offset = digest[-1] & 15
+            expected = (struct.unpack('>I', digest[offset:offset+4])[0] & 0x7fffffff) % 1000000
+            assert fields['code'] == [f'{expected:06d}']
+            self.response = Response(200, '<pre>' + '\n'.join(f'local-recovery-{i}' for i in range(10)) + '</pre>')
+    def getresponse(self):
+        if lose_connection:
+            self.sock = None
+            self.response.will_close = True
+        return self.response
+http.client.HTTPSConnection = Connection
+os.environ['SETUP_ADMIN_CODE'] = 'local-code'
+def execute(output):
+    sys.argv = ['setup.py', 'https://test-hub.fly.dev', 'test-admin', '', str(output)]
+    runpy.run_path(str(root / 'setup.py'), run_name='__main__')
+output = root / 'credentials'
+execute(output)
+assert len(instances) == 1
+assert requests == [('POST', '/setup'), ('GET', '/account/security?enroll=1'), ('POST', '/account/security/totp/confirm')]
+assert output.stat().st_mode & 0o777 == 0o600
+saved = json.loads(output.read_text())
+assert saved['totp_secret'] == secret and len(saved['recovery_codes']) == 10
+try: execute(output)
+except SystemExit as error: assert error.code != 0
+else: raise AssertionError('overwrite accepted')
+closed_setup = True
+try: execute(root / 'closed')
+except SystemExit as error: assert error.code != 0
+else: raise AssertionError('closed setup accepted')
+assert not (root / 'closed').exists()
+closed_setup = False
+lose_connection = True
+try: execute(root / 'disconnected')
+except SystemExit as error: assert error.code != 0
+else: raise AssertionError('lost keep-alive connection accepted')
+assert not (root / 'disconnected').exists()
+PY
+)
+
+test_autopilot_shellcheck() {
+  if command -v shellcheck >/dev/null 2>&1; then
+    shellcheck ops/fly/deploy.sh ops/fly/setup-admin.sh
+  else
+    echo 'shellcheck not installed; skipping automation lint'
+  fi
+}
+
+run_test "test_autopilot" test_autopilot
+run_test "test_setup_admin" test_setup_admin
+run_test "test_autopilot_shellcheck" test_autopilot_shellcheck
