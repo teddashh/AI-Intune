@@ -1,7 +1,7 @@
 #!/bin/sh
 # Fly.io entrypoint for clawctl-hub.
 #
-# Runs as root only long enough to start kernel-mode tailscaled and to
+# Runs as root only long enough to optionally start kernel-mode tailscaled and to
 # prepare the data directory. Hub and Litestream then run as uid/gid 65532.
 # This script execs that process, so SIGTERM reaches Litestream (or Hub)
 # as PID 1. Litestream forwards the signal to the Hub child and flushes.
@@ -48,54 +48,80 @@ reject_whitespace() {
   esac
 }
 
-have_state=0
-if [ -L "$state_file" ]; then
-  echo "clawctl-fly: refusing symlink $state_file" >&2
-  exit 1
+if [ "${CLAWCTL_AUTH_MODE+x}" != x ]; then
+  if { [ -f "$state_file" ] && [ -s "$state_file" ]; } || [ "${TS_AUTHKEY+x}" = x ]; then
+    CLAWCTL_AUTH_MODE=tailscale
+    echo "clawctl-fly: defaulting to tailscale because persisted Tailscale state or TS_AUTHKEY is present."
+  else
+    CLAWCTL_AUTH_MODE=local
+  fi
 fi
-if [ -f "$state_file" ] && [ -s "$state_file" ]; then
-  have_state=1
-fi
-if [ "$have_state" -eq 0 ] && [ -z "${TS_AUTHKEY:-}" ]; then
-  echo "clawctl-fly: TS_AUTHKEY is required until Tailscale state exists at $state_file." >&2
-  echo "clawctl-fly: set the Fly secret TS_AUTHKEY. The key is not printed." >&2
-  exit 1
-fi
-if [ -n "${TS_AUTHKEY:-}" ]; then
-  reject_whitespace TS_AUTHKEY
-fi
+export CLAWCTL_AUTH_MODE
+case $CLAWCTL_AUTH_MODE in
+  local | tailscale) ;;
+  both)
+    echo "clawctl-fly: CLAWCTL_AUTH_MODE=both is unsupported on Fly: public wildcard listening cannot provide literal Tailscale WhoIs identity. Choose local or tailscale." >&2
+    exit 1
+    ;;
+  *)
+    echo "clawctl-fly: CLAWCTL_AUTH_MODE must be tailscale, local, or both (both is unsupported on Fly)." >&2
+    exit 1
+    ;;
+esac
 
-if [ ! -c /dev/net/tun ]; then
-  echo "clawctl-fly: /dev/net/tun is missing." >&2
-  echo "clawctl-fly: kernel-mode tailscaled needs a Fly Firecracker VM, or another host that provides /dev/net/tun." >&2
-  exit 1
-fi
-
-for name in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET R2_ENDPOINT LITESTREAM_BUCKET LITESTREAM_ENDPOINT LITESTREAM_PATH TS_HOSTNAME TS_TAGS; do
+for name in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET R2_ENDPOINT LITESTREAM_BUCKET LITESTREAM_ENDPOINT LITESTREAM_PATH; do
   reject_whitespace "$name"
 done
 
-host=${TS_HOSTNAME:-clawctl-hub}
-tags=${TS_TAGS:-tag:clawctl-hub}
-case $host in
-  *[!A-Za-z0-9.-]* | "")
-    echo "clawctl-fly: TS_HOSTNAME must be letters, digits, dots, and hyphens" >&2
+if [ "$CLAWCTL_AUTH_MODE" = tailscale ]; then
+  reject_whitespace TS_HOSTNAME
+  reject_whitespace TS_TAGS
+  have_state=0
+  if [ -L "$state_file" ]; then
+    echo "clawctl-fly: refusing symlink $state_file" >&2
     exit 1
-    ;;
-esac
-case $tags in
-  *[!A-Za-z0-9:,_-]* | "")
-    echo "clawctl-fly: TS_TAGS must be comma-separated tag: names" >&2
+  fi
+  if [ -f "$state_file" ] && [ -s "$state_file" ]; then
+    have_state=1
+  fi
+  if [ "$have_state" -eq 0 ] && [ -z "${TS_AUTHKEY:-}" ]; then
+    echo "clawctl-fly: TS_AUTHKEY is required until Tailscale state exists at $state_file." >&2
+    echo "clawctl-fly: set the Fly secret TS_AUTHKEY. The key is not printed." >&2
     exit 1
-    ;;
-esac
-case $tags in
-  tag:*) ;;
-  *)
-    echo "clawctl-fly: TS_TAGS must start with tag:" >&2
+  fi
+  if [ -n "${TS_AUTHKEY:-}" ]; then
+    reject_whitespace TS_AUTHKEY
+  fi
+
+  if [ ! -c /dev/net/tun ]; then
+    echo "clawctl-fly: /dev/net/tun is missing." >&2
+    echo "clawctl-fly: kernel-mode tailscaled needs a Fly Firecracker VM, or another host that provides /dev/net/tun." >&2
     exit 1
-    ;;
-esac
+  fi
+
+  host=${TS_HOSTNAME:-clawctl-hub}
+  tags=${TS_TAGS:-tag:clawctl-hub}
+  case $host in
+    *[!A-Za-z0-9.-]* | "")
+      echo "clawctl-fly: TS_HOSTNAME must be letters, digits, dots, and hyphens" >&2
+      exit 1
+      ;;
+  esac
+  case $tags in
+    *[!A-Za-z0-9:,_-]* | "")
+      echo "clawctl-fly: TS_TAGS must be comma-separated tag: names" >&2
+      exit 1
+      ;;
+  esac
+  case $tags in
+    tag:*) ;;
+    *)
+      echo "clawctl-fly: TS_TAGS must start with tag:" >&2
+      exit 1
+      ;;
+  esac
+
+fi
 
 port=${CLAWCTL_PORT:-8787}
 case $port in
@@ -109,80 +135,114 @@ if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
   exit 1
 fi
 
-mkdir -p "$state_dir" /var/run/tailscale /run/clawctl
-chmod 0700 "$state_dir" /run/clawctl
-chown 0:0 "$state_dir"
-
-echo "clawctl-fly: starting tailscaled (state $state_dir)"
-# tailscaled does not read TS_AUTHKEY; keep it out of its environment.
-env -u TS_AUTHKEY tailscaled \
-  --statedir="$state_dir" \
-  --socket="$socket" \
-  --port=41641 \
-  >>"$state_dir/tailscaled.log" 2>&1 &
-ts_pid=$!
-
-i=0
-while [ "$i" -lt 30 ]; do
-  if [ -S "$socket" ]; then
-    break
+if [ "$CLAWCTL_AUTH_MODE" = local ]; then
+  if [ "${TS_AUTHKEY+x}" = x ]; then
+    echo "clawctl-fly: WARNING: TS_AUTHKEY is ignored in explicit local mode." >&2
+    unset TS_AUTHKEY
   fi
-  if ! kill -0 "$ts_pid" 2>/dev/null; then
-    echo "clawctl-fly: tailscaled exited during startup. See $state_dir/tailscaled.log" >&2
-    exit 1
+  if [ "${CLAWCTL_PUBLIC_URL+x}" != x ] && [ -n "${FLY_APP_NAME:-}" ]; then
+    reject_whitespace FLY_APP_NAME
+    case $FLY_APP_NAME in
+      *[!A-Za-z0-9-]*)
+        echo "clawctl-fly: FLY_APP_NAME must contain only letters, digits, and hyphens. The value is not printed." >&2
+        exit 1
+        ;;
+    esac
+    export CLAWCTL_PUBLIC_URL="https://${FLY_APP_NAME}.fly.dev"
+    echo "clawctl-fly: default CLAWCTL_PUBLIC_URL=$CLAWCTL_PUBLIC_URL"
   fi
-  i=$((i + 1))
-  sleep 1
-done
-if [ ! -S "$socket" ]; then
-  echo "clawctl-fly: timed out waiting for $socket" >&2
-  exit 1
-fi
-
-up_base="--socket=$socket up --hostname=$host --advertise-tags=$tags"
-if [ -n "${TS_AUTHKEY:-}" ]; then
-  keyfile=/run/clawctl/ts-authkey
-  umask 077
-  printf '%s' "$TS_AUTHKEY" >"$keyfile"
-  chmod 0600 "$keyfile"
-  unset TS_AUTHKEY || true
-  # file: keeps the key off the process argument list. env -u keeps it out
-  # of tailscale's environment as well.
-  if ! env -u TS_AUTHKEY timeout 60 tailscale $up_base --auth-key="file:$keyfile"; then
-    echo "clawctl-fly: tailscale up failed. The auth key was not printed." >&2
-    exit 1
-  fi
-  rm -f "$keyfile"
-  keyfile=
-else
-  if ! timeout 60 tailscale $up_base; then
-    echo "clawctl-fly: tailscale up failed using persisted state. Set TS_AUTHKEY if the node must log in again." >&2
-    exit 1
-  fi
-fi
-
-ip=
-i=0
-while [ "$i" -lt 30 ]; do
-  ip=$(tailscale --socket="$socket" ip -4 2>/dev/null | head -n 1 || true)
-  case $ip in
-    100.*)
-      break
+  reject_whitespace CLAWCTL_PUBLIC_URL
+  case ${CLAWCTL_PUBLIC_URL:-} in
+    https://?*) ;;
+    *)
+      echo "clawctl-fly: CLAWCTL_PUBLIC_URL must be an https:// origin; set it or FLY_APP_NAME. The value is not printed." >&2
+      exit 1
       ;;
   esac
-  ip=
-  i=$((i + 1))
-  sleep 1
-done
-if [ -z "$ip" ]; then
-  echo "clawctl-fly: timed out waiting for tailscale ip -4" >&2
-  exit 1
-fi
-export CLAWCTL_LISTEN="${ip}:${port}"
-echo "clawctl-fly: CLAWCTL_LISTEN=${CLAWCTL_LISTEN}"
+  # fly-proxy egress uses 172.16.0.0/12. On Fly the rightmost
+  # X-Forwarded-For entry is the app's edge IP, so use Fly-Client-IP.
+  # 6PN is IPv6 fdaa::/16 and is deliberately not trusted.
+  export CLAWCTL_TRUSTED_PROXIES="${CLAWCTL_TRUSTED_PROXIES-172.16.0.0/12}"
+  export CLAWCTL_CLIENT_IP_HEADER="${CLAWCTL_CLIENT_IP_HEADER-Fly-Client-IP}"
+  export CLAWCTL_LISTEN="0.0.0.0:${port}"
+  echo "clawctl-fly: CLAWCTL_LISTEN=$CLAWCTL_LISTEN"
+else
+  mkdir -p "$state_dir" /var/run/tailscale /run/clawctl
+  chmod 0700 "$state_dir" /run/clawctl
+  chown 0:0 "$state_dir"
 
-chown root:65532 "$socket"
-chmod 0660 "$socket"
+  echo "clawctl-fly: starting tailscaled (state $state_dir)"
+  # tailscaled does not read TS_AUTHKEY; keep it out of its environment.
+  env -u TS_AUTHKEY tailscaled \
+    --statedir="$state_dir" \
+    --socket="$socket" \
+    --port=41641 \
+    >>"$state_dir/tailscaled.log" 2>&1 &
+  ts_pid=$!
+
+  i=0
+  while [ "$i" -lt 30 ]; do
+    if [ -S "$socket" ]; then
+      break
+    fi
+    if ! kill -0 "$ts_pid" 2>/dev/null; then
+      echo "clawctl-fly: tailscaled exited during startup. See $state_dir/tailscaled.log" >&2
+      exit 1
+    fi
+    i=$((i + 1))
+    sleep 1
+  done
+  if [ ! -S "$socket" ]; then
+    echo "clawctl-fly: timed out waiting for $socket" >&2
+    exit 1
+  fi
+
+  up_base="--socket=$socket up --hostname=$host --advertise-tags=$tags"
+  if [ -n "${TS_AUTHKEY:-}" ]; then
+    keyfile=/run/clawctl/ts-authkey
+    umask 077
+    printf '%s' "$TS_AUTHKEY" >"$keyfile"
+    chmod 0600 "$keyfile"
+    unset TS_AUTHKEY || true
+    # file: keeps the key off the process argument list. env -u keeps it out
+    # of tailscale's environment as well.
+    if ! env -u TS_AUTHKEY timeout 60 tailscale $up_base --auth-key="file:$keyfile"; then
+      echo "clawctl-fly: tailscale up failed. The auth key was not printed." >&2
+      exit 1
+    fi
+    rm -f "$keyfile"
+    keyfile=
+  else
+    if ! timeout 60 tailscale $up_base; then
+      echo "clawctl-fly: tailscale up failed using persisted state. Set TS_AUTHKEY if the node must log in again." >&2
+      exit 1
+    fi
+  fi
+
+  ip=
+  i=0
+  while [ "$i" -lt 30 ]; do
+    ip=$(tailscale --socket="$socket" ip -4 2>/dev/null | head -n 1 || true)
+    case $ip in
+      100.*)
+        break
+        ;;
+    esac
+    ip=
+    i=$((i + 1))
+    sleep 1
+  done
+  if [ -z "$ip" ]; then
+    echo "clawctl-fly: timed out waiting for tailscale ip -4" >&2
+    exit 1
+  fi
+  export CLAWCTL_LISTEN="${ip}:${port}"
+  echo "clawctl-fly: CLAWCTL_LISTEN=${CLAWCTL_LISTEN}"
+
+  chown root:65532 "$socket"
+  chmod 0660 "$socket"
+
+fi
 
 export CLAWCTL_DATA="$data"
 export CLAWCTL_CHOWN_EXCLUDE=tailscale

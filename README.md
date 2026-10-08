@@ -183,11 +183,11 @@ read current state → preview exact impact → confirm typed target
 
 ### Autopilot quick start (recommended)
 
-Follow [docs/AUTOPILOT.md](docs/AUTOPILOT.md) for the complete setup:
+Follow [docs/AUTOPILOT.md](docs/AUTOPILOT.md) for Docker+Caddy, bare Linux, or [Fly.io Autopilot](docs/DEPLOY-FLY.md#autopilot-on-fly-recommended). For Docker+Caddy:
 
 1. Point DNS at your Linux host and open ports 80/443.
 2. Start the standalone Docker+Caddy Autopilot pack.
-3. Read the setup code from the Hub log and create your local admin.
+3. Read the setup code from the Hub log, create your local admin, confirm TOTP enrollment, and save the recovery codes (MFA is required by default).
 4. Register a machine and download its keyed Linux installer.
 5. Extract the package, run `./install-agent.sh`, and verify check-in on the machine page.
 

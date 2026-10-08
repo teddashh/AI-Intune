@@ -46,8 +46,16 @@ import tomllib
 from pathlib import Path
 root = Path("ops/fly")
 doc = tomllib.loads((root / "fly.toml").read_text())
-if "http_service" in doc or "services" in doc:
-    raise SystemExit("fly.toml must not publish http_service or services")
+if doc["env"].get("CLAWCTL_AUTH_MODE") != "local" or "http_service" not in doc:
+    raise SystemExit("fly.toml must publish Autopilot http_service in local mode")
+advanced = tomllib.loads((root / "fly.tailscale.toml").read_text())
+if advanced["env"].get("CLAWCTL_AUTH_MODE") != "tailscale":
+    raise SystemExit("fly.tailscale.toml must explicitly select tailscale mode")
+if "http_service" in advanced or "services" in advanced:
+    raise SystemExit("fly.tailscale.toml must not publish http_service or services")
+for key in ("mounts", "restart", "vm", "build"):
+    if advanced[key] != doc[key]:
+        raise SystemExit(f"Fly packs disagree on {key}")
 mounts = doc["mounts"]
 if mounts[0]["source"] != "clawctl_data" or mounts[0]["destination"] != "/var/lib/clawctl":
     raise SystemExit(f"unexpected mounts: {mounts}")
@@ -106,6 +114,11 @@ if "latest" in text:
     raise SystemExit("litestream.yml must pin replicas without the word latest")
 print("    ok fly.toml and litestream.yml")
 PY
+fi
+
+if [[ "${CLAWCTL_SMOKE_STATIC_ONLY:-0}" == 1 ]]; then
+  echo "SUCCESS (static checks; Docker and build skipped)"
+  exit 0
 fi
 
 have_docker=0
@@ -246,7 +259,7 @@ if [[ "$have_docker" -eq 1 ]]; then
 
   echo "==> fly entrypoint rejects a missing TS_AUTHKEY"
   fly_err="$(mktemp)"
-  if docker run --rm --entrypoint /bin/sh clawctl-hub-fly:local /usr/local/bin/clawctl-fly-entrypoint >"$fly_err" 2>&1; then
+  if docker run --rm -e CLAWCTL_AUTH_MODE=tailscale --entrypoint /bin/sh clawctl-hub-fly:local /usr/local/bin/clawctl-fly-entrypoint >"$fly_err" 2>&1; then
     echo "FAIL: entrypoint succeeded without TS_AUTHKEY" >&2
     cat "$fly_err" >&2
     rm -f "$fly_err"
