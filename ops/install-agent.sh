@@ -386,10 +386,20 @@ ensure_owned_directory() {
   chmod "$mode" "$path"
 }
 
+# A home ancestor such as ~/.cache may be a symlink to another disk (for example
+# /data/home-user/cache). Accept it only when the resolved target is a directory
+# owned by this user and not group- or world-writable; anything else could let
+# another account redirect the agent's private state.
 ensure_home_ancestor() {
-  local path=$1
-  if [[ -e "$path" || -L "$path" ]]; then
-    [[ -d "$path" && ! -L "$path" ]] || fail "Home path is not safe: $path"
+  local path=$1 target mode
+  if [[ -L "$path" ]]; then
+    target="$(readlink -f -- "$path")" || fail "Home path is not safe: $path"
+    [[ -n "$target" && -d "$target" && ! -L "$target" ]] || fail "Home path is not safe: $path"
+    [[ "$(stat -c '%u' "$target")" == "$EUID" ]] || fail "Home path owner is not $USER: $path -> $target"
+    mode="$(stat -c '%a' "$target")"
+    (( (8#$mode & 8#022) == 0 )) || fail "Home path target is group- or world-writable: $path -> $target"
+  elif [[ -e "$path" ]]; then
+    [[ -d "$path" ]] || fail "Home path is not safe: $path"
     [[ "$(stat -c '%u' "$path")" == "$EUID" ]] || fail "Home path owner is not $USER: $path"
   else
     mkdir "$path"
