@@ -38,6 +38,7 @@ const (
 	AuditMFADisabled               AuditAction = "mfa-disabled"
 	AuditMFAFailed                 AuditAction = "mfa-failed"
 	AuditRecoveryCodeUsed          AuditAction = "recovery-code-used"
+	AuditRecoveryCodesRegenerated  AuditAction = "recovery-codes-regenerated"
 	AuditConnect                   AuditAction = "connect"
 	AuditRetire                    AuditAction = "retire"
 	AuditUnretire                  AuditAction = "unretire"

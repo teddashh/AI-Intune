@@ -203,6 +203,11 @@ func main() {
 				log.Fatal(err)
 			}
 			return
+		case "regenerate-recovery-codes":
+			if err := runRegenerateRecoveryCodes(os.Args[2:], os.Stdout); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "reset-admin-password":
 			if err := runResetAdminPassword(os.Args[2:], os.Stdin); err != nil {
 				log.Fatal(err)
@@ -388,7 +393,7 @@ func classifyTopLevel(argv []string) (string, error) {
 		return "", nil
 	}
 	switch argv[0] {
-	case "bootstrap-admin", "reset-admin-password", "enroll-token", "machines", "audit", "retire", "report", "data", "tickets", "tailnet",
+	case "bootstrap-admin", "reset-admin-password", "regenerate-recovery-codes", "enroll-token", "machines", "audit", "retire", "report", "data", "tickets", "tailnet",
 		"enrollment-limit", "prune", "restore-drill", "job", "machine", "deployment",
 		"artifact", "catalog", "verifier", "settings", "compliance", "version", "notify-check":
 		return argv[0], nil

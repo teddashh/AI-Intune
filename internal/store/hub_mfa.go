@@ -78,17 +78,9 @@ func (s *Store) ConfirmTOTPForSession(id, code, keepToken string, metadata ...Au
 		}
 		return nil, ErrAccountAuth
 	}
-	codes := make([]string, 10)
-	for i := range codes {
-		b := make([]byte, 8)
-		if _, err = rand.Read(b); err != nil {
-			return nil, err
-		}
-		raw := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
-		codes[i] = strings.ToLower(raw[:4] + "-" + raw[4:8] + "-" + raw[8:12])
-		if _, err = tx.Exec(`INSERT INTO hub_account_recovery_codes(account_id,code_hash) VALUES (?,?)`, id, sessionHash(codes[i])); err != nil {
-			return nil, err
-		}
+	codes, err := generateRecoveryCodesTx(tx, id)
+	if err != nil {
+		return nil, err
 	}
 	if _, err = tx.Exec(`UPDATE hub_account_mfa SET totp_secret=pending_secret,pending_secret=NULL,enabled_at=?,last_used_step=? WHERE account_id=?`, fmtTime(s.nowFn()), step, id); err != nil {
 		return nil, err
@@ -108,6 +100,19 @@ func (s *Store) VerifySecondFactor(id, clientIP, code string, metadata ...AuditE
 		return err
 	}
 	defer tx.Rollback()
+	err = s.verifySecondFactorTx(tx, id, clientIP, code, true, metadata...)
+	if err != nil && !errors.Is(err, ErrAccountAuth) {
+		return err
+	}
+	if commitErr := tx.Commit(); commitErr != nil {
+		return commitErr
+	}
+	return err
+}
+
+// Both factor operations share replay protection, failure counters, and audit handling.
+func (s *Store) verifySecondFactorTx(tx *writeTx, id, clientIP, code string, allowRecovery bool, metadata ...AuditEntry) error {
+	var err error
 	var a HubAccount
 	a.AccountID = id
 	var failed int
@@ -142,7 +147,7 @@ func (s *Store) VerifySecondFactor(id, clientIP, code string, metadata ...AuditE
 			n, err = res.RowsAffected()
 			valid = n == 1
 		}
-	} else if !blocked && secret != "" {
+	} else if allowRecovery && !blocked && secret != "" {
 		var res sql.Result
 		res, err = tx.Exec(`UPDATE hub_account_recovery_codes SET used_at=? WHERE account_id=? AND code_hash=? AND used_at IS NULL`, fmtTime(now), id, sessionHash(strings.ToLower(strings.TrimSpace(code))))
 		if err == nil {
@@ -185,14 +190,12 @@ func (s *Store) VerifySecondFactor(id, clientIP, code string, metadata ...AuditE
 			return err
 		}
 	}
-	if err = tx.Commit(); err != nil {
-		return err
-	}
 	if !valid {
 		return ErrAccountAuth
 	}
 	return nil
 }
+
 func (s *Store) DisableMFA(id string, metadata ...AuditEntry) error {
 	tx, err := s.beginWrite(context.Background(), "disable_mfa")
 	if err != nil {
@@ -221,4 +224,83 @@ func (s *Store) DisableAdminMFA(username string) error {
 		return err
 	}
 	return s.DisableMFA(id)
+}
+
+func generateRecoveryCodesTx(tx dbTx, id string) ([]string, error) {
+	var err error
+	codes := make([]string, 10)
+	for i := range codes {
+		b := make([]byte, 8)
+		if _, err = rand.Read(b); err != nil {
+			return nil, err
+		}
+		raw := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
+		codes[i] = strings.ToLower(raw[:4] + "-" + raw[4:8] + "-" + raw[8:12])
+		if _, err = tx.Exec(`INSERT INTO hub_account_recovery_codes(account_id,code_hash) VALUES (?,?)`, id, sessionHash(codes[i])); err != nil {
+			return nil, err
+		}
+	}
+	return codes, nil
+}
+
+// RegenerateRecoveryCodes accepts only an unused authenticator step.
+func (s *Store) RegenerateRecoveryCodes(id, clientIP, code string, metadata ...AuditEntry) ([]string, error) {
+	tx, err := s.beginWrite(context.Background(), "regenerate_recovery_codes")
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err = s.verifySecondFactorTx(tx, id, clientip.Key(clientIP), code, false, metadata...); err != nil {
+		if errors.Is(err, ErrAccountAuth) {
+			if e := tx.Commit(); e != nil {
+				return nil, e
+			}
+		}
+		return nil, err
+	}
+	codes, err := s.replaceRecoveryCodesTx(tx, id, metadata...)
+	if err != nil {
+		return nil, err
+	}
+	return codes, tx.Commit()
+}
+
+func (s *Store) replaceRecoveryCodesTx(tx dbTx, id string, metadata ...AuditEntry) ([]string, error) {
+	var a HubAccount
+	a.AccountID = id
+	if err := tx.QueryRow(`SELECT a.username FROM hub_accounts a JOIN hub_account_mfa m USING(account_id) WHERE a.account_id=? AND a.disabled_at IS NULL AND m.enabled_at IS NOT NULL`, id).Scan(&a.Username); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrAccountAuth
+		}
+		return nil, err
+	}
+	if _, err := tx.Exec(`DELETE FROM hub_account_recovery_codes WHERE account_id=?`, id); err != nil {
+		return nil, err
+	}
+	codes, err := generateRecoveryCodesTx(tx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.recordAuditTx(tx, accountAudit(AuditRecoveryCodesRegenerated, a, true, metadata...)); err != nil {
+		return nil, err
+	}
+	return codes, nil
+}
+
+// RegenerateAdminRecoveryCodes is host recovery and does not require a factor.
+func (s *Store) RegenerateAdminRecoveryCodes(username string) ([]string, error) {
+	tx, err := s.beginWrite(context.Background(), "regenerate_admin_recovery_codes")
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var id string
+	if err = tx.QueryRow(`SELECT account_id FROM hub_accounts WHERE username=?`, username).Scan(&id); err != nil {
+		return nil, err
+	}
+	codes, err := s.replaceRecoveryCodesTx(tx, id)
+	if err != nil {
+		return nil, err
+	}
+	return codes, tx.Commit()
 }

@@ -385,3 +385,93 @@ func TestConcurrentMFALoginIssuesOneSession(t *testing.T) {
 		t.Fatal("issued sessions", sessions, err)
 	}
 }
+
+func TestAccountSecurityRegenerateRecoveryCodes(t *testing.T) {
+	for _, failure := range []string{"", "password", "totp", "recovery"} {
+		t.Run(failure, func(t *testing.T) {
+			t.Setenv("CLAWCTL_REQUIRE_MFA", "0")
+			h, st := localAccountHandler(t)
+			a, err := st.CreateFirstAdmin("admin", "a long test password")
+			if err != nil {
+				t.Fatal(err)
+			}
+			login := accountRequest(h, "POST", "/login", "username=admin&password=a+long+test+password", nil)
+			session := login.Result().Cookies()[0]
+			path := "/account/security/recovery-codes/regenerate"
+			w := accountRequest(h, "GET", "/account/security", "", session)
+			if strings.Contains(w.Body.String(), path) {
+				t.Fatal("unenrolled form")
+			}
+			if failure == "" {
+				w = accountRequest(h, "POST", path, "password=a+long+test+password&code=123456", session)
+				if w.Code != 400 {
+					t.Fatal(w.Code)
+				}
+			}
+			secret, _ := st.BeginTOTPEnrollment(a.AccountID)
+			code, _ := totp.Code(secret, time.Now().Unix()/30-1)
+			old, err := st.ConfirmTOTPForSession(a.AccountID, code, session.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w = accountRequest(h, "GET", "/account/security", "", session)
+			if !strings.Contains(w.Body.String(), path) {
+				t.Fatal("missing enrolled form")
+			}
+			code, _ = totp.Code(secret, time.Now().Unix()/30)
+			body := "password=a+long+test+password&code=" + code
+			if failure == "password" {
+				body = "password=wrong&code=" + code
+			}
+			if failure == "totp" {
+				body = "password=a+long+test+password&code=bad"
+			}
+			if failure == "recovery" {
+				body = "password=a+long+test+password&code=" + old[0]
+			}
+			if failure != "" {
+				for range 5 {
+					w = accountRequest(h, "POST", path, body, session)
+					if w.Code != 400 {
+						t.Fatal(w.Code)
+					}
+				}
+				w = accountRequest(h, "POST", path, "password=a+long+test+password&code="+code, session)
+				if w.Code != 400 && w.Code != 429 {
+					t.Fatal("lockout bypass", w.Code)
+				}
+				if _, err := st.VerifyPassword("admin", "a long test password", "192.0.2.1"); err == nil {
+					t.Fatal("password bypassed lockout")
+				}
+				var count int
+				if err := st.DB().QueryRow(`SELECT count(*) FROM hub_account_recovery_codes WHERE account_id=? AND used_at IS NULL`, a.AccountID).Scan(&count); err != nil || count != 10 {
+					t.Fatal("codes changed after failure", count, err)
+				}
+				if err := st.VerifySecondFactor(a.AccountID, "192.0.2.2", old[0]); err != nil {
+					t.Fatal("old code consumed", err)
+				}
+				return
+			}
+			w = accountRequest(h, "POST", path, body, session)
+			if w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" {
+				t.Fatal(w.Code, w.Header())
+			}
+			at := strings.Index(w.Body.String(), "<pre>")
+			if at < 0 {
+				t.Fatal("missing codes block")
+			}
+			fresh := strings.Fields(strings.SplitN(w.Body.String()[at+5:], "</pre>", 2)[0])
+			if len(fresh) != 10 || !strings.Contains(w.Body.String(), "Previous recovery codes no longer work") {
+				t.Fatal("missing codes")
+			}
+			for _, c := range old {
+				if err := st.VerifySecondFactor(a.AccountID, "192.0.2.2", c); err == nil {
+					t.Fatal("old code accepted")
+				}
+			}
+			if err := st.VerifySecondFactor(a.AccountID, "192.0.2.3", fresh[0]); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
