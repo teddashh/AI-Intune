@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -91,12 +92,12 @@ func TestHubUsersLifecycle(t *testing.T) {
 	}
 }
 func TestEmailValidation(t *testing.T) {
-	for _, email := range []string{"alice", "alice@localhost", "@example.com", "alice@@example.com", "Alice <alice@example.com>", "alice @example.com", "alice\n@example.com", "al\u0131ce@example.com", "alice@ex\u00e4mple.com", "alice@exam\u0440le.com", strings.Repeat("a", 243) + "@example.com"} {
+	for _, email := range []string{"alice", "alice@localhost", "@example.com", "alice@@example.com", "Alice <alice@example.com>", "alice @example.com", "alice\n@example.com", "al\u0131ce@example.com", "\u212Alice@example.com", "alice@exam\xffple.com", "alice@ex\u00e4mple.com", "alice@exam\u0440le.com", strings.Repeat("a", 243) + "@example.com"} {
 		if _, err := NormalizeEmail(email); err == nil {
 			t.Fatalf("accepted %q", email)
 		}
 	}
-	for _, email := range []string{"", " alice@example.com ", "ALICE@EXAMPLE.COM"} {
+	for _, email := range []string{"", " alice@example.com ", "ALICE@EXAMPLE.COM", "alice@xn--exmple-cua.com"} {
 		if _, err := NormalizeEmail(email); err != nil {
 			t.Fatal(email, err)
 		}
@@ -125,7 +126,8 @@ func TestHubUsersLegacyMigration(t *testing.T) {
 		}
 		var email sql.NullString
 		var role, currentHash string
-		if err = s.rdb.QueryRow(`SELECT email,role,password_hash FROM hub_accounts WHERE username='alice'`).Scan(&email, &role, &currentHash); err != nil || email.Valid || role != "admin" || currentHash != hash {
+		var generation int64
+		if err = s.rdb.QueryRow(`SELECT email,role,password_hash,auth_generation FROM hub_accounts WHERE username='alice'`).Scan(&email, &role, &currentHash, &generation); err != nil || email.Valid || role != "admin" || currentHash != hash || generation != 0 {
 			t.Fatal(email, role, err)
 		}
 		var n int
@@ -219,5 +221,103 @@ func TestDisabledHubUserCannotCompleteMFA(t *testing.T) {
 	}
 	if _, err = s.CreateSession(bob, "192.0.2.1", ""); !errors.Is(err, ErrSessionAuth) {
 		t.Fatal(err)
+	}
+}
+
+func TestAuthenticationGenerationInvalidatesPendingLogin(t *testing.T) {
+	for _, enrolled := range []bool{false, true} {
+		for _, change := range []string{"disable-enable", "password-reset", "mfa-disable"} {
+			t.Run(fmt.Sprintf("mfa=%t/%s", enrolled, change), func(t *testing.T) {
+				fastAccountHashes(t)
+				s := newTestStore(t)
+				alice, err := s.CreateFirstAdmin("alice", testAdminPassword)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = s.MutateHubUser("created", "bob", "bob@example.com", testAdminPassword, alice.AccountID); err != nil {
+					t.Fatal(err)
+				}
+				bob, err := s.VerifyPassword("bob", testAdminPassword, "192.0.2.1")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var codes []string
+				if enrolled {
+					secret, err := s.BeginTOTPEnrollment(bob.AccountID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					code, _ := totp.Code(secret, s.nowFn().Unix()/30)
+					codes, err = s.ConfirmTOTP(bob.AccountID, code)
+					if err != nil {
+						t.Fatal(err)
+					}
+					bob, err = s.VerifyPassword("bob", testAdminPassword, "192.0.2.1")
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				switch change {
+				case "disable-enable":
+					for _, action := range []string{"disabled", "enabled"} {
+						if err = s.MutateHubUser(action, "bob", "", "", alice.AccountID); err != nil {
+							t.Fatal(err)
+						}
+					}
+				case "password-reset":
+					if err = s.ResetAdminPassword("bob", testAdminPassword); err != nil {
+						t.Fatal(err)
+					}
+				case "mfa-disable":
+					if err = s.DisableMFA(bob.AccountID); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if enrolled && change != "mfa-disable" {
+					if err = s.VerifyLoginSecondFactor(bob, "192.0.2.1", codes[0]); !errors.Is(err, ErrSessionAuth) {
+						t.Fatal("stale factor step accepted", err)
+					}
+				}
+				if _, err = s.CreateSession(bob, "192.0.2.1", ""); !errors.Is(err, ErrSessionAuth) {
+					t.Fatal("stale password step issued a session", err)
+				}
+				fresh, err := s.VerifyPassword("bob", testAdminPassword, "192.0.2.1")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if enrolled && change != "mfa-disable" {
+					if err = s.VerifySecondFactor(fresh.AccountID, "192.0.2.1", codes[1]); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if _, err = s.CreateSession(fresh, "192.0.2.1", ""); err != nil {
+					t.Fatal("fresh login rejected", err)
+				}
+			})
+		}
+	}
+}
+
+func TestUnknownLoginUsesGuessingAuditWithoutAccounts(t *testing.T) {
+	fastAccountHashes(t)
+	s := newTestStore(t)
+	for i := range 50 {
+		identifier := "unknown"
+		if i%2 == 0 {
+			identifier = "unknown@example.com"
+		}
+		if _, err := s.VerifyPassword(identifier, "wrong password", "192.0.2.1"); !errors.Is(err, ErrAccountAuth) {
+			t.Fatal(err)
+		}
+	}
+	var failures, signals int
+	if err := s.rdb.QueryRow(`SELECT count(*) FROM audit_log WHERE auth_subject='local-user:unknown' AND action=?`, AuditHubLoginFailed).Scan(&failures); err != nil || failures != 50 {
+		t.Fatal(failures, err)
+	}
+	if err := s.rdb.QueryRow(`SELECT count(*) FROM audit_log WHERE auth_subject='local-user:unknown' AND action=?`, AuditHubGuessing).Scan(&signals); err != nil || signals != 1 {
+		t.Fatal(signals, err)
+	}
+	if n, err := s.CountAccounts(); err != nil || n != 0 {
+		t.Fatal("unknown login created an account", n, err)
 	}
 }

@@ -205,8 +205,11 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 			}
 			account = login.account
 			next = login.next
-			err = st.VerifySecondFactor(account.AccountID, ip, r.PostForm.Get("code"), metadata)
+			err = st.VerifyLoginSecondFactor(account, ip, r.PostForm.Get("code"), metadata)
 			if err != nil {
+				if errors.Is(err, store.ErrSessionAuth) {
+					pending.consume(c.Value, ip)
+				}
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(401)
 				renderMFAForm(w, "Invalid code")
@@ -259,6 +262,12 @@ func registerAccountRoutes(mux *http.ServeMux, st *store.Store, ui *web.Server, 
 		}
 		token, err := st.CreateSession(account, ip, r.UserAgent())
 		if err != nil {
+			if r.URL.Path == "/login/mfa" {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.WriteHeader(401)
+				renderMFAForm(w, "Invalid code")
+				return
+			}
 			http.Error(w, "Session unavailable", 503)
 			return
 		}

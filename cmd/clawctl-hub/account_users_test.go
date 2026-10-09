@@ -352,3 +352,78 @@ func TestUsersMutationLifecycle(t *testing.T) {
 		t.Fatal(users, err)
 	}
 }
+
+func TestPendingMFALoginSecurityChanges(t *testing.T) {
+	for _, change := range []string{"disable-enable", "password-reset"} {
+		t.Run(change, func(t *testing.T) {
+			t.Setenv("CLAWCTL_REQUIRE_MFA", "0")
+			h, st := localAccountHandler(t)
+			alice, err := st.CreateFirstAdmin("alice", usersPassword)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = st.MutateHubUser("created", "bob", "bob@example.com", usersPassword, alice.AccountID); err != nil {
+				t.Fatal(err)
+			}
+			bob, err := st.VerifyPassword("bob", usersPassword, "192.0.2.1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			secret, err := st.BeginTOTPEnrollment(bob.AccountID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			code, _ := totp.Code(secret, time.Now().Unix()/30)
+			codes, err := st.ConfirmTOTP(bob.AccountID, code)
+			if err != nil {
+				t.Fatal(err)
+			}
+			login := func() *http.Cookie {
+				t.Helper()
+				w := accountRequest(h, "POST", "/login", url.Values{"username": {"bob"}, "password": {usersPassword}}.Encode(), nil)
+				for _, c := range w.Result().Cookies() {
+					if c.Name == "hub_pending_mfa" {
+						return c
+					}
+				}
+				t.Fatal("no pending MFA cookie", w.Code)
+				return nil
+			}
+			pending := login()
+			// Store mutations simulate another process: no in-memory purge runs.
+			if change == "disable-enable" {
+				for _, action := range []string{"disabled", "enabled"} {
+					if err = st.MutateHubUser(action, "bob", "", "", alice.AccountID); err != nil {
+						t.Fatal(err)
+					}
+				}
+			} else if err = st.ResetAdminPassword("bob", usersPassword); err != nil {
+				t.Fatal(err)
+			}
+			complete := func(c *http.Cookie, factor string) *httptest.ResponseRecorder {
+				return accountRequest(h, "POST", "/login/mfa", url.Values{"code": {factor}}.Encode(), c)
+			}
+			staleCode := codes[0]
+			if change == "password-reset" {
+				staleCode = "wrong-code"
+			}
+			w := complete(pending, staleCode)
+			if w.Code != 401 || !strings.Contains(w.Body.String(), "Invalid code") {
+				t.Fatal("stale challenge accepted", w.Code, w.Body.String())
+			}
+			for _, c := range w.Result().Cookies() {
+				if strings.Contains(c.Name, "session") {
+					t.Fatal("stale challenge issued session")
+				}
+			}
+			w = complete(pending, codes[1])
+			if w.Code != 401 || !strings.Contains(w.Body.String(), "Pending login expired") {
+				t.Fatal("stale pending entry retained", w.Code, w.Body.String())
+			}
+			w = complete(login(), codes[2])
+			if w.Code != 303 {
+				t.Fatal("normal login failed", w.Code, w.Body.String())
+			}
+		})
+	}
+}

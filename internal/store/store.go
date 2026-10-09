@@ -835,7 +835,7 @@ func addMissingColumns(db *sql.DB) error {
 	}
 	defer tx.Rollback()
 	want := map[string]map[string]string{
-		"hub_accounts": {"email": "TEXT", "role": "TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin'))"},
+		"hub_accounts": {"auth_generation": "INTEGER NOT NULL DEFAULT 0", "email": "TEXT", "role": "TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin'))"},
 		// ⚠ agent_started_at 是 2026-09-03 事故後補的。舊 DB 沒有這欄，
 		// 而那些機器正是最需要被抓出來的那批。
 		"machine_checkins": {

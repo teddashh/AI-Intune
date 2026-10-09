@@ -145,6 +145,11 @@ func TestAccountSecurityEnableDisablePassword(t *testing.T) {
 	if enabled || err != nil {
 		t.Fatal(enabled, err)
 	}
+	// Security changes invalidate earlier password-verification snapshots.
+	a, err = st.VerifyPassword("admin", "a long test password", "peer")
+	if err != nil {
+		t.Fatal(err)
+	}
 	other, err := st.CreateSession(a, "peer", "test")
 	if err != nil {
 		t.Fatal(err)

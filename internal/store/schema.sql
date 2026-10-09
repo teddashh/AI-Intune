@@ -1515,7 +1515,8 @@ CREATE TABLE IF NOT EXISTS hub_accounts (
  locked_until TEXT,
  disabled_at TEXT,
  email TEXT,
- role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin'))
+ role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin')),
+ auth_generation INTEGER NOT NULL DEFAULT 0
 );
 -- hub_accounts_email is created by Open after additive email/role migration.
 CREATE TABLE IF NOT EXISTS hub_sessions (

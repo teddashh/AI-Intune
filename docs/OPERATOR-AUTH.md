@@ -603,7 +603,7 @@ secret，create stderr／replay／audit 均無明文；同 key/body replay 非�
 ## Multiple admin accounts
 
 Sign in using a username or optional email; both are trimmed and case-insensitive.
-Emails must be plain ASCII addresses (no display name).
+Emails must be plain ASCII addresses (no display name); use the punycode A-label form for IDN domains.
 All local accounts currently have the admin role. Open `/account/users` from
 Account security to create, enable, disable, rename users, or change/clear email.
 Email and username must be unique. Every mutation requires your current password

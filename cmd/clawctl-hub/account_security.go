@@ -19,7 +19,7 @@ import (
 )
 
 type pendingLogin struct {
-	account    store.HubAccount
+	account    store.HubAccount // includes the durable password-verification generation
 	addr, next string
 	expires    time.Time
 }

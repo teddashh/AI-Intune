@@ -28,15 +28,16 @@ var ErrSessionAuth = errors.New("invalid or expired session")
 var ErrAdminExists = errors.New("admin already exists")
 
 type HubAccount struct {
-	AccountID    string
-	Username     string
-	Email        string
-	Role         string
-	CreatedAt    string
-	Disabled     bool
-	MFAEnrolled  bool
-	passwordHash string // also guards session issuance against a concurrent password reset
-	mfaSecret    string // snapshots the factor at password verification; enrollment invalidates it
+	AccountID      string
+	Username       string
+	Email          string
+	Role           string
+	CreatedAt      string
+	Disabled       bool
+	MFAEnrolled    bool
+	authGeneration int64  // snapshots durable authentication state at password verification
+	passwordHash   string // also guards session issuance against a concurrent password reset
+	mfaSecret      string // snapshots the factor at password verification; enrollment invalidates it
 }
 
 func passwordHash(password string) (string, error) {
@@ -135,7 +136,7 @@ func (s *Store) VerifyPassword(username, password, clientIP string, metadata ...
 	if strings.Contains(username, "@") {
 		column = "email"
 	}
-	err := s.rdb.QueryRow(`SELECT account_id,username,password_hash,role FROM hub_accounts WHERE `+column+`=?`, username).Scan(&a.AccountID, &a.Username, &a.passwordHash, &a.Role)
+	err := s.rdb.QueryRow(`SELECT account_id,username,password_hash,role,auth_generation FROM hub_accounts WHERE `+column+`=?`, username).Scan(&a.AccountID, &a.Username, &a.passwordHash, &a.Role, &a.authGeneration)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return a, err
 	}
@@ -145,6 +146,8 @@ func (s *Store) VerifyPassword(username, password, clientIP string, metadata ...
 	}
 	valid := false
 	if errors.Is(err, sql.ErrNoRows) {
+		// Outside the UUID account ID namespace; never creates an account row.
+		a.AccountID = "unknown"
 		// Same KDF cost for unknown users; no persistent dummy secret is needed.
 		dummy := argon2.IDKey([]byte(password), make([]byte, 16), argonTime, argonMemory, argonThreads, 32)
 		_ = subtle.ConstantTimeCompare(dummy, make([]byte, 32))
@@ -163,11 +166,12 @@ func (s *Store) VerifyPassword(username, password, clientIP string, metadata ...
 	}
 	var disabled sql.NullString
 	var currentHash string
-	err = tx.QueryRow(`SELECT password_hash,disabled_at,COALESCE((SELECT totp_secret FROM hub_account_mfa WHERE account_id=hub_accounts.account_id AND enabled_at IS NOT NULL),'') FROM hub_accounts WHERE account_id=?`, a.AccountID).Scan(&currentHash, &disabled, &a.mfaSecret)
+	var currentGeneration int64
+	err = tx.QueryRow(`SELECT password_hash,disabled_at,auth_generation,COALESCE((SELECT totp_secret FROM hub_account_mfa WHERE account_id=hub_accounts.account_id AND enabled_at IS NOT NULL),'') FROM hub_accounts WHERE account_id=?`, a.AccountID).Scan(&currentHash, &disabled, &currentGeneration, &a.mfaSecret)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return HubAccount{}, err
 	}
-	blocked := disabled.Valid || err != nil || currentHash != a.passwordHash
+	blocked := disabled.Valid || err != nil || currentHash != a.passwordHash || currentGeneration != a.authGeneration
 	failed := 0
 	var locked sql.NullString
 	// Unknown identifiers run the same lookup (no rows) to keep the read path uniform.
@@ -206,14 +210,8 @@ func (s *Store) VerifyPassword(username, password, clientIP string, metadata ...
 			return HubAccount{}, err
 		}
 	}
-	if a.AccountID != "" && (!valid || blocked) {
+	if !valid || blocked {
 		if err = s.auditHubGuessingTx(tx, a, metadata...); err != nil {
-			return HubAccount{}, err
-		}
-	} else if a.AccountID == "" {
-		// Same bounded count as auditHubGuessingTx for a subject that never exists.
-		var n int
-		if err = tx.QueryRow(`SELECT count(*) FROM audit_log WHERE auth_subject=? AND action IN (?,?) AND at>?`, "local-user:", AuditHubLoginFailed, AuditMFAFailed, fmtTime(now.Add(-time.Hour))).Scan(&n); err != nil {
 			return HubAccount{}, err
 		}
 	}
@@ -237,7 +235,7 @@ func (s *Store) CreateSession(a HubAccount, sourceAddr, userAgent string) (strin
 		return "", err
 	}
 	now := s.nowFn()
-	res, err := s.execWrite(context.Background(), "create_hub_session", `INSERT INTO hub_sessions(session_hash,account_id,created_at,last_seen_at,idle_expires_at,absolute_expires_at,source_addr,user_agent) SELECT ?,account_id,?,?,?,?,?,? FROM hub_accounts WHERE account_id=? AND password_hash=? AND disabled_at IS NULL AND COALESCE((SELECT totp_secret FROM hub_account_mfa WHERE account_id=hub_accounts.account_id AND enabled_at IS NOT NULL),'')=?`, sessionHash(token), fmtTime(now), fmtTime(now), fmtTime(now.Add(12*time.Hour)), fmtTime(now.Add(7*24*time.Hour)), sourceAddr, truncAudit(userAgent, 200), a.AccountID, a.passwordHash, a.mfaSecret)
+	res, err := s.execWrite(context.Background(), "create_hub_session", `INSERT INTO hub_sessions(session_hash,account_id,created_at,last_seen_at,idle_expires_at,absolute_expires_at,source_addr,user_agent) SELECT ?,account_id,?,?,?,?,?,? FROM hub_accounts WHERE account_id=? AND password_hash=? AND auth_generation=? AND disabled_at IS NULL AND COALESCE((SELECT totp_secret FROM hub_account_mfa WHERE account_id=hub_accounts.account_id AND enabled_at IS NOT NULL),'')=?`, sessionHash(token), fmtTime(now), fmtTime(now), fmtTime(now.Add(12*time.Hour)), fmtTime(now.Add(7*24*time.Hour)), sourceAddr, truncAudit(userAgent, 200), a.AccountID, a.passwordHash, a.authGeneration, a.mfaSecret)
 	if err != nil {
 		return "", err
 	}
@@ -318,7 +316,7 @@ func (s *Store) ChangePassword(accountID, password, keepToken string) error {
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE hub_accounts SET password_hash=? WHERE account_id=?`, hash, accountID)
+	res, err := tx.Exec(`UPDATE hub_accounts SET password_hash=?,auth_generation=auth_generation+1 WHERE account_id=?`, hash, accountID)
 	if err != nil {
 		return err
 	}

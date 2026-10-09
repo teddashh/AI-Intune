@@ -15,7 +15,13 @@ import (
 var ErrUserUpdate = errors.New("unable to update user")
 
 func NormalizeEmail(email string) (string, error) {
-	email = strings.ToLower(strings.TrimSpace(email))
+	email = strings.TrimSpace(email)
+	for i := range email {
+		if email[i] >= 0x80 {
+			return "", errors.New("email must be ASCII; use the punycode A-label form for IDN domains")
+		}
+	}
+	email = strings.ToLower(email)
 	if email == "" {
 		return "", nil
 	}
@@ -133,12 +139,12 @@ func (s *Store) MutateHubUser(action, username, value, password, actorID string,
 		if n == 0 {
 			return abort(ErrUserUpdate)
 		}
-		res, err = tx.Exec(`UPDATE hub_accounts SET disabled_at=? WHERE account_id=?`, fmtTime(s.nowFn()), target)
+		res, err = tx.Exec(`UPDATE hub_accounts SET disabled_at=?,auth_generation=auth_generation+1 WHERE account_id=?`, fmtTime(s.nowFn()), target)
 		if err == nil {
 			_, err = tx.Exec(`UPDATE hub_sessions SET revoked_at=? WHERE account_id=? AND revoked_at IS NULL`, fmtTime(s.nowFn()), target)
 		}
 	case "enabled":
-		res, err = tx.Exec(`UPDATE hub_accounts SET disabled_at=NULL WHERE account_id=?`, target)
+		res, err = tx.Exec(`UPDATE hub_accounts SET disabled_at=NULL,auth_generation=auth_generation+1 WHERE account_id=?`, target)
 	case "email-changed":
 		res, err = tx.Exec(`UPDATE hub_accounts SET email=? WHERE account_id=?`, nullableEmail(email), target)
 	case "renamed":
