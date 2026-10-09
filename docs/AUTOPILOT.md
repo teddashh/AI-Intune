@@ -241,3 +241,11 @@ clawctl-hub reset-admin-password --db PATH --username alice < password-file
 works with existing accounts. `reset-admin-password` selects the normalized
 username; optional `--disable-mfa` forces enrollment again. Host disable also
 protects the last active admin. User mutations are audit logged without passwords.
+
+## Linux agent proxy settings
+
+The Linux installer detects `HTTPS_PROXY`, `HTTP_PROXY`, and `NO_PROXY` (upper and lower case) in `/etc/environment` and the invoking environment. Invoking values override the same variable name; a missing case is copied from the other case. `NO_PROXY` supports CIDRs, for example `hub.example.com,10.0.0.0/8`. System services do not read `/etc/environment` themselves.
+
+Detected settings are saved in `/etc/systemd/system/clawctl-agent.service.d/10-proxy.conf` before the agent starts. The file is mode 0644, or 0600 when values contain possible URL credentials. Unsafe values (control characters, double quotes, backslashes, or `%`) are skipped with a warning that names only the variable. The file is parsed as data, without shell expansion.
+
+Use `--no-proxy-dropin` to skip detection and writing. With no detected settings, an existing drop-in is preserved. To change settings, edit the drop-in with `sudoedit`, then run `sudo systemctl daemon-reload` and `sudo systemctl restart clawctl-agent.service`. Reenrollment rollback keeps the drop-in, including when it removes a newly installed unit; agent upgrades also preserve it. Review `NO_PROXY` when moving to a different Hub.
