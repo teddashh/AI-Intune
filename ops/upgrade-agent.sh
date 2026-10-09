@@ -148,6 +148,24 @@ sed -e "s|@@CLAWCTL_AGENT_USER@@|$agent_user|g" \
     -e "s|@@CLAWCTL_AGENT_BIN@@|$system_bin|g" \
     "$raw_unit" >"$rendered_unit"
 ! grep -Fq 'CLAWCTL_AGENT_' "$rendered_unit" || { echo "Agent systemd unit rendering is incomplete" >&2; exit 1; }
+# systemd 252 cannot bind a ReadWritePaths entry reached through a symlinked home
+# ancestor (226/NAMESPACE "Permission denied" under unit-root), but the resolved
+# path works. Rewrite each existing entry to its canonical path.
+resolve_unit_rw_paths() {
+  local unit=$1 line path resolved out=""
+  line="$(grep '^ReadWritePaths=' "$unit")" || return 0
+  [[ "$(grep -c '^ReadWritePaths=' "$unit")" == 1 ]] || { echo "Agent unit must have one ReadWritePaths line" >&2; return 1; }
+  for path in ${line#ReadWritePaths=}; do
+    resolved=$path
+    if [[ -e "$path" ]]; then
+      resolved="$(readlink -f -- "$path")" || return 1
+      [[ "$resolved" =~ ^/[a-zA-Z0-9._/-]+$ ]] || { echo "Unsafe resolved ReadWritePaths entry: $path -> $resolved" >&2; return 1; }
+    fi
+    out+="${out:+ }$resolved"
+  done
+  sed -i "s|^ReadWritePaths=.*|ReadWritePaths=$out|" "$unit"
+}
+resolve_unit_rw_paths "$rendered_unit" || { echo "Agent systemd unit ReadWritePaths could not be resolved" >&2; exit 1; }
 
 got="$(timeout 5 "$bin.new" version 2>&1)" || {
   echo "Agent binary did not start: $got" >&2

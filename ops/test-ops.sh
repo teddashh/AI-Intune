@@ -1543,6 +1543,13 @@ home_ancestor_symlink_fixture() {
 		ln -s /usr/share "$fixture/home/.foreign"
 		! probe "$fixture/home/.foreign" 2>/dev/null || return 18
 	fi
+	# ReadWritePaths entries reached through the symlink are rendered canonically.
+	sed -n '/^resolve_unit_rw_paths() {/,/^}/p' "$INSTALL_AGENT" >"$fixture/rw.sh"
+	mkdir -p "$fixture/data/cache/clawctl" "$fixture/home/.config/clawctl"
+	printf '[Service]\nReadWritePaths=%s %s %s\n' "$fixture/home/.config/clawctl" "$fixture/home/.cache/clawctl" "$fixture/home/.absent" >"$fixture/unit"
+	bash -c 'set -euo pipefail; source "$1"; resolve_unit_rw_paths "$2"' _ "$fixture/rw.sh" "$fixture/unit" || return 19
+	grep -Fxq "ReadWritePaths=$(readlink -f "$fixture/home/.config/clawctl") $(readlink -f "$fixture/data/cache/clawctl") $fixture/home/.absent" "$fixture/unit" || return 20
+	grep -Fq 'resolve_unit_rw_paths "$rendered_unit"' "$ROOT/ops/upgrade-agent.sh" || return 21
 	return 0
 }
 run home_ancestor_symlink_fixture
