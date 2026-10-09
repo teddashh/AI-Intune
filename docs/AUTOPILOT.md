@@ -205,3 +205,7 @@ While enforcement is on, disabling MFA in Account security is refused: only the 
 Account security can regenerate ten recovery codes with the current password and an unused authenticator code; recovery codes are not accepted. All previous codes are invalidated. Failures count toward the shared account/client lockout. New codes are shown once, and the regeneration audit contains no codes. Alternatively, stop the Hub and run `clawctl-hub regenerate-recovery-codes --db PATH --username U`, then restart it; the host command requires MFA enabled and prints one code per line.
 
 The server must retain the TOTP secret to verify codes. It is stored as-is: **database read access means MFA bypass**, as with any TOTP server. Database backups are sensitive and must receive the same protection as the live database. Audit rows record MFA enable/disable/failure and recovery-code use/regeneration without secrets or codes.
+
+Linux agents use the root-owned `/usr/local/bin/clawctl-agent` in the system unit. Installation replaces the binary atomically and restores its SELinux label when SELinux is enabled. Any existing `~/.local/bin/clawctl-agent` stays available for legacy units and rollback.
+
+For observation and check-in only, pass `--no-container-runtime` to skip podman installation, subordinate ID setup, and the rootless readiness probe. Hub-pushed Hermes container jobs need podman; the default still sets it up.

@@ -16,6 +16,15 @@ NO_TAILSCALE=0
 EMBEDDED_TOKEN=0
 REENROLL=0
 BACKUP_CONFIG=""
+REENROLL_PHASE=0
+NO_CONTAINER_RUNTIME=0
+OLD_SYSTEM_ACTIVE=0
+OLD_SYSTEM_ENABLED=0
+OLD_LEGACY_ACTIVE=0
+OLD_LEGACY_ENABLED=0
+OLD_SYSTEM_UNIT=0
+BACKUP_UNIT=""
+BACKUP_BINARY=""
 
 usage() {
   cat <<'EOF'
@@ -34,12 +43,14 @@ Options:
   --tailscale-auth-key-file FILE   0600 file containing a Tailscale auth key
   --binary FILE                    clawctl-agent binary for this machine
   --no-tailscale                   skip Tailscale install and connection
+  --no-container-runtime           skip podman setup (Hermes container jobs need it)
   --reenroll                       reenroll this machine to a new Hub (Linux only)
 EOF
 }
 
 fail() {
   echo "$1" >&2
+  if [[ "$REENROLL_PHASE" == 1 ]]; then rollback_reenroll; fi
   if [[ -n "$BACKUP_CONFIG" && -f "$BACKUP_CONFIG" ]]; then
     echo "Previous configuration backed up at: $BACKUP_CONFIG (see docs/MOVE-AGENTS.md, Rollback)" >&2
   fi
@@ -48,11 +59,122 @@ fail() {
 
 on_error() {
   local rc=$?
+  # Let the parent assignment report substitution failures and roll back once.
+  if (( BASH_SUBSHELL > 0 )); then return "$rc"; fi
   echo "Install failed: $STEP" >&2
+  if [[ "$REENROLL_PHASE" == 1 ]]; then rollback_reenroll; fi
   if [[ -n "$BACKUP_CONFIG" && -f "$BACKUP_CONFIG" ]]; then
     echo "Previous configuration backed up at: $BACKUP_CONFIG (see docs/MOVE-AGENTS.md, Rollback)" >&2
   fi
   exit "$rc"
+}
+
+# Rollback deliberately checks each command: ERR traps are disabled here to avoid recursion.
+rollback_reenroll() {
+  REENROLL_PHASE=0
+  trap - ERR
+  set +e
+  local failed=0
+  if [[ -e "$SYSTEM_UNIT_FILE" ]]; then
+    sudo systemctl stop clawctl-agent.service || failed=1
+  fi
+  if [[ "$OLD_SYSTEM_UNIT" == 1 ]]; then
+    sudo install -m 0644 "$BACKUP_UNIT" "$SYSTEM_UNIT_FILE" || failed=1
+  else
+    if [[ -e "$SYSTEM_UNIT_FILE" ]]; then
+      sudo systemctl disable clawctl-agent.service || failed=1
+    fi
+    sudo rm -f -- "$SYSTEM_UNIT_FILE" || failed=1
+  fi
+  if [[ -n "$BACKUP_BINARY" ]]; then
+    sudo install -m 0755 -o root -g root "$BACKUP_BINARY" "$BIN_FILE.new" &&
+      sudo mv -f "$BIN_FILE.new" "$BIN_FILE" || failed=1
+    restore_binary_label || failed=1
+  fi
+  sudo systemctl daemon-reload || failed=1
+  if [[ -f "$STAGING_CONFIG" ]]; then
+    mv -f "$STAGING_CONFIG" "$CONFIG_DIR/agent.json.failed-reenroll-$REENROLL_STAMP" || failed=1
+    chmod 0600 "$CONFIG_DIR/agent.json.failed-reenroll-$REENROLL_STAMP" || failed=1
+  elif [[ -f "$CONFIG_FILE" ]]; then
+    mv -f "$CONFIG_FILE" "$CONFIG_DIR/agent.json.failed-reenroll-$REENROLL_STAMP" || failed=1
+    chmod 0600 "$CONFIG_DIR/agent.json.failed-reenroll-$REENROLL_STAMP" || failed=1
+  fi
+  install -m 0600 "$BACKUP_CONFIG" "$CONFIG_FILE.rollback" &&
+    mv -f "$CONFIG_FILE.rollback" "$CONFIG_FILE" || failed=1
+  if [[ "$OLD_SYSTEM_UNIT" == 1 ]]; then
+    if [[ "$OLD_SYSTEM_ENABLED" == 1 ]]; then
+      sudo systemctl enable clawctl-agent.service || failed=1
+    else
+      sudo systemctl disable clawctl-agent.service || failed=1
+    fi
+  fi
+  if [[ "$OLD_LEGACY_ENABLED" == 1 ]]; then
+    systemctl --user enable clawctl-agent.service || failed=1
+  fi
+  if [[ "$OLD_SYSTEM_ACTIVE" == 1 ]]; then
+    sudo systemctl start clawctl-agent.service &&
+      systemctl is-active --quiet clawctl-agent.service || failed=1
+  fi
+  if [[ "$OLD_LEGACY_ACTIVE" == 1 ]]; then
+    systemctl --user start clawctl-agent.service &&
+      systemctl --user is-active --quiet clawctl-agent.service || failed=1
+  fi
+  if [[ "$failed" == 0 ]]; then
+    if [[ "$OLD_SYSTEM_ACTIVE" == 1 || "$OLD_LEGACY_ACTIVE" == 1 ]]; then
+      echo "Rollback completed: previous configuration restored; old agent is running again. Retire the abandoned enrollment on the NEW Hub: $HUB" >&2
+    else
+      echo "Rollback completed: previous configuration restored; old units were previously inactive. Retire the abandoned enrollment on the NEW Hub: $HUB" >&2
+    fi
+  else
+    {
+      echo "Rollback failed. Manual recovery steps:"
+      echo "  sudo systemctl stop clawctl-agent.service"
+      printf '  install -m 0600 %q %q\n' "$BACKUP_CONFIG" "$CONFIG_FILE"
+      if [[ "$OLD_SYSTEM_UNIT" == 1 ]]; then
+        printf '  sudo install -m 0644 %q %q\n' "$BACKUP_UNIT" "$SYSTEM_UNIT_FILE"
+      else
+        echo "  sudo systemctl disable clawctl-agent.service"
+        printf '  sudo rm -f -- %q\n' "$SYSTEM_UNIT_FILE"
+      fi
+      if [[ -n "$BACKUP_BINARY" ]]; then
+        printf '  sudo install -m 0755 -o root -g root %q %q\n' "$BACKUP_BINARY" "$BIN_FILE"
+        printf '  # On SELinux hosts: sudo restorecon -F %q\n' "$BIN_FILE"
+      fi
+      echo "  sudo systemctl daemon-reload"
+      if [[ "$OLD_SYSTEM_UNIT" == 1 ]]; then
+        if [[ "$OLD_SYSTEM_ENABLED" == 1 ]]; then
+          echo "  sudo systemctl enable clawctl-agent.service"
+        else
+          echo "  sudo systemctl disable clawctl-agent.service"
+        fi
+      fi
+      if [[ "$OLD_SYSTEM_ACTIVE" == 1 ]]; then
+        echo "  sudo systemctl start clawctl-agent.service"
+        echo "  systemctl is-active clawctl-agent.service"
+      fi
+      if [[ "$OLD_LEGACY_ACTIVE" == 1 ]]; then
+        if [[ "$OLD_LEGACY_ENABLED" == 1 ]]; then echo "  systemctl --user enable clawctl-agent.service"; fi
+        echo "  systemctl --user start clawctl-agent.service"
+        echo "  systemctl --user is-active clawctl-agent.service"
+      fi
+      echo "Retire the abandoned enrollment on the NEW Hub: $HUB"
+    } >&2
+  fi
+  exit 1
+}
+
+restore_binary_label() {
+  if command -v restorecon >/dev/null &&
+     { { command -v selinuxenabled >/dev/null && selinuxenabled; } || [[ -e /sys/fs/selinux/enforce ]]; }; then
+    sudo restorecon -F "$BIN_FILE" || return $?
+  fi
+  return 0
+}
+
+install_agent_unit() {
+  sudo install -d -m 0755 "$SYSTEM_UNIT_DIR"
+  sudo install -m 0644 "$RENDERED_AGENT_UNIT" "$SYSTEM_UNIT_FILE.new"
+  sudo mv -f "$SYSTEM_UNIT_FILE.new" "$SYSTEM_UNIT_FILE"
 }
 
 cleanup() {
@@ -157,6 +279,7 @@ while [[ $# -gt 0 ]]; do
     --tailscale-auth-key-file) [[ $# -ge 2 ]] || fail "--tailscale-auth-key-file requires a value"; TAILSCALE_KEY_FILE="$2"; shift 2 ;;
     --binary) [[ $# -ge 2 ]] || fail "--binary requires a value"; BIN_SRC="$2"; shift 2 ;;
     --no-tailscale) NO_TAILSCALE=1; shift 1 ;;
+    --no-container-runtime) NO_CONTAINER_RUNTIME=1; shift ;;
     --reenroll) REENROLL=1; shift 1 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -247,6 +370,7 @@ render_agent_unit() {
       -e "s|@@CLAWCTL_AGENT_UID@@|$agent_uid|g" \
       -e "s|__CLAWCTL_AGENT_UID__|$agent_uid|g" \
       -e "s|@@CLAWCTL_AGENT_HOME@@|$escaped_home|g" \
+      -e "s|@@CLAWCTL_AGENT_BIN@@|$BIN_FILE|g" \
       "$source" >"$destination"
   ! grep -Fq 'CLAWCTL_AGENT_' "$destination" || fail "Agent systemd unit rendering is incomplete"
 }
@@ -358,11 +482,15 @@ tailscale_connected() {
 }
 
 STEP="privilege check"
-sudo -v
+sudo -n true 2>/dev/null || sudo -v
 
 STEP="container runtime"
-install_container_runtime
-ensure_subordinate_ids
+if [[ "$NO_CONTAINER_RUNTIME" == 0 ]]; then
+  install_container_runtime
+  ensure_subordinate_ids
+else
+  echo "Container runtime: skipped (--no-container-runtime); Hermes container jobs need podman"
+fi
 
 TAILSCALE_IP="skipped"
 if [[ "$HUB" == https://* ]]; then
@@ -424,7 +552,10 @@ LEGACY_UNIT_FILE="$UNIT_DIR/clawctl-agent.service"
 SYSTEM_UNIT_FILE="$SYSTEM_UNIT_DIR/clawctl-agent.service"
 HERMES_UNIT_FILE="$UNIT_DIR/clawctl-hermes.service"
 OPENCLAW_UNIT_FILE="$UNIT_DIR/openclaw-gateway.service"
-BIN_FILE="$BIN_DIR/clawctl-agent"
+# Ops test hook, like CLAWCTL_SYSTEM_UNIT_DIR; not an operator option.
+SYSTEM_BIN_DIR="${CLAWCTL_SYSTEM_BIN_DIR:-/usr/local/bin}"
+[[ "$SYSTEM_BIN_DIR" =~ ^/[a-zA-Z0-9._/-]+$ && "$SYSTEM_BIN_DIR" != *"/../"* && "$SYSTEM_BIN_DIR" != */.. ]] || fail "Unsafe system binary directory"
+BIN_FILE="$SYSTEM_BIN_DIR/clawctl-agent"
 
 [[ ! -L "$OPENCLAW_UNIT_FILE" ]] || fail "OpenClaw unit path is a symlink: $OPENCLAW_UNIT_FILE"
 [[ ! -e "$OPENCLAW_UNIT_FILE" || -f "$OPENCLAW_UNIT_FILE" ]] || fail "OpenClaw unit path is not a regular file: $OPENCLAW_UNIT_FILE"
@@ -449,16 +580,23 @@ ensure_owned_directory "$OPENCLAW_DROPIN_DIR" 0700
 ensure_owned_directory "$OPENCLAW_STATE_DIR" 0700
 
 STEP="agent install"
-AGENT_VERSION="$("$BIN_SRC" version)"
+if [[ "$REENROLL" == 1 && -f "$CONFIG_FILE" && -f "$BIN_FILE" ]]; then
+  BACKUP_BINARY="$(mktemp)"
+  SECRET_FILES+=("$BACKUP_BINARY")
+  cp "$BIN_FILE" "$BACKUP_BINARY"
+fi
+sudo install -d -m 0755 "$SYSTEM_BIN_DIR"
+sudo install -m 0755 -o root -g root "$BIN_SRC" "$BIN_FILE.new"
+sudo mv -f "$BIN_FILE.new" "$BIN_FILE"
+restore_binary_label
+AGENT_VERSION="$("$BIN_FILE" version)"
 [[ -n "$AGENT_VERSION" ]] || fail "clawctl-agent version is empty"
-install -m 0755 "$BIN_SRC" "$BIN_FILE.new"
-mv -f "$BIN_FILE.new" "$BIN_FILE"
+if [[ -f "$BIN_DIR/clawctl-agent" ]]; then
+  echo "Legacy binary $BIN_DIR/clawctl-agent retained; no longer used by the system unit."
+fi
 RENDERED_AGENT_UNIT="$(mktemp)"
 SECRET_FILES+=("$RENDERED_AGENT_UNIT")
 render_agent_unit "$SCRIPT_DIR/clawctl-agent.service" "$RENDERED_AGENT_UNIT"
-sudo install -d -m 0755 "$SYSTEM_UNIT_DIR"
-sudo install -m 0644 "$RENDERED_AGENT_UNIT" "$SYSTEM_UNIT_FILE.new"
-sudo mv -f "$SYSTEM_UNIT_FILE.new" "$SYSTEM_UNIT_FILE"
 install -m 0644 "$SCRIPT_DIR/clawctl-hermes.service" "$HERMES_UNIT_FILE.new"
 mv -f "$HERMES_UNIT_FILE.new" "$HERMES_UNIT_FILE"
 if [[ ! -e "$OPENCLAW_UNIT_FILE" && ! -L "$OPENCLAW_UNIT_FILE" ]] ||
@@ -478,9 +616,11 @@ sudo systemctl start "user@$EUID.service"
 export XDG_RUNTIME_DIR="/run/user/$EUID"
 
 STEP="container runtime readiness"
-PODMAN_ROOTLESS="$(systemd-run --user --wait --pipe --quiet --collect --service-type=exec \
+if [[ "$NO_CONTAINER_RUNTIME" == 0 ]]; then
+  PODMAN_ROOTLESS="$(systemd-run --user --wait --pipe --quiet --collect --service-type=exec \
   --unit=clawctl-podman-readiness -- /usr/bin/podman info --format '{{.Host.Security.Rootless}}')"
-[[ "$PODMAN_ROOTLESS" == "true" ]] || fail "rootless podman is not ready"
+  [[ "$PODMAN_ROOTLESS" == "true" ]] || fail "rootless podman is not ready"
+fi
 
 STEP="agent enrollment"
 CURRENT_HUB=""
@@ -510,26 +650,48 @@ elif [[ ! -f "$CONFIG_FILE" || "$REENROLL" == "1" ]]; then
     fail "Enrollment token is required; use --token-file FILE"
   fi
 
-  WAS_ACTIVE=0
-
-  if [[ -f "$CONFIG_FILE" && "$REENROLL" == "1" ]]; then
-    if systemctl is-active --quiet clawctl-agent.service 2>/dev/null; then
-      WAS_ACTIVE=1
-      sudo systemctl stop clawctl-agent.service || true
-    fi
-    BACKUP_CONFIG="$CONFIG_DIR/agent.json.pre-reenroll-$(date -u +%Y%m%dT%H%M%SZ)"
-    mv "$CONFIG_FILE" "$BACKUP_CONFIG"
-    chmod 0600 "$BACKUP_CONFIG"
-  fi
-
-  if ! "$BIN_FILE" enroll --hub "$HUB" --token-file "$TOKEN_FILE"; then
-    if [[ -n "$BACKUP_CONFIG" && -f "$BACKUP_CONFIG" ]]; then
-      mv "$BACKUP_CONFIG" "$CONFIG_FILE"
-      if [[ "$WAS_ACTIVE" == "1" ]]; then
-        sudo systemctl start clawctl-agent.service || true
+  if [[ -f "$CONFIG_FILE" && "$REENROLL" == 1 ]]; then
+    STAGING_CONFIG="$CONFIG_DIR/agent.json.reenroll-new"
+    [[ ! -e "$STAGING_CONFIG" && ! -L "$STAGING_CONFIG" ]] || fail "Staging config already exists: $STAGING_CONFIG"
+    if ! CLAWCTL_CONFIG="$STAGING_CONFIG" "$BIN_FILE" enroll --hub "$HUB" --token-file "$TOKEN_FILE"; then
+      rm -f -- "$STAGING_CONFIG"
+      if [[ -n "$BACKUP_BINARY" ]]; then
+        sudo install -m 0755 -o root -g root "$BACKUP_BINARY" "$BIN_FILE.new"
+        sudo mv -f "$BIN_FILE.new" "$BIN_FILE"
+        restore_binary_label
       fi
-      fail "Enrollment failed: previous configuration restored; the agent binary is now the new Hub's version, so rerun the old Hub's install-agent.sh (without --reenroll) to put back its matching binary."
+      fail "Enrollment failed: old agent and configuration left untouched"
     fi
+    [[ -f "$STAGING_CONFIG" && ! -L "$STAGING_CONFIG" ]] || fail "Enrollment did not create staging config"
+    chmod 0600 "$STAGING_CONFIG"
+    REENROLL_STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    BACKUP_CONFIG="$CONFIG_DIR/agent.json.pre-reenroll-$REENROLL_STAMP"
+    if [[ -n "$BACKUP_BINARY" ]]; then
+      DURABLE_BINARY_BACKUP="$CONFIG_DIR/clawctl-agent.binary.pre-reenroll-$REENROLL_STAMP"
+      install -m 0600 "$BACKUP_BINARY" "$DURABLE_BINARY_BACKUP"
+      BACKUP_BINARY="$DURABLE_BINARY_BACKUP"
+    fi
+    cp "$CONFIG_FILE" "$BACKUP_CONFIG"
+    chmod 0600 "$BACKUP_CONFIG"
+    if [[ -e "$SYSTEM_UNIT_FILE" ]]; then
+      [[ -f "$SYSTEM_UNIT_FILE" && ! -L "$SYSTEM_UNIT_FILE" ]] || fail "Unsafe existing system unit"
+      OLD_SYSTEM_UNIT=1
+      BACKUP_UNIT="$CONFIG_DIR/clawctl-agent.service.pre-reenroll-$REENROLL_STAMP"
+      cp "$SYSTEM_UNIT_FILE" "$BACKUP_UNIT"
+      chmod 0600 "$BACKUP_UNIT"
+      systemctl is-active --quiet clawctl-agent.service && OLD_SYSTEM_ACTIVE=1
+      systemctl is-enabled --quiet clawctl-agent.service && OLD_SYSTEM_ENABLED=1
+    fi
+    if [[ -e "$LEGACY_UNIT_FILE" || -L "$LEGACY_UNIT_FILE" ]]; then
+      [[ -f "$LEGACY_UNIT_FILE" && ! -L "$LEGACY_UNIT_FILE" ]] || fail "Unsafe legacy unit"
+      systemctl --user is-active --quiet clawctl-agent.service && OLD_LEGACY_ACTIVE=1
+      systemctl --user is-enabled --quiet clawctl-agent.service && OLD_LEGACY_ENABLED=1
+    fi
+    REENROLL_PHASE=1
+    if [[ "$OLD_SYSTEM_UNIT" == 1 ]]; then sudo systemctl stop clawctl-agent.service; fi
+    if [[ -f "$LEGACY_UNIT_FILE" ]]; then systemctl --user stop clawctl-agent.service; fi
+    mv -f "$STAGING_CONFIG" "$CONFIG_FILE"
+  elif ! "$BIN_FILE" enroll --hub "$HUB" --token-file "$TOKEN_FILE"; then
     fail "Enrollment failed"
   fi
   if [[ "$EMBEDDED_TOKEN" == "1" || "$TOKEN_FILE" == "$SCRIPT_DIR/enroll-token" ]]; then
@@ -541,6 +703,7 @@ fi
 [[ "$(stat -c '%a' "$CONFIG_FILE")" == "600" ]] || fail "Agent config mode is not 0600"
 
 STEP="agent service"
+install_agent_unit
 sudo systemctl daemon-reload
 [[ "$(systemctl show clawctl-agent.service --property=LoadState --value)" == "loaded" ]] || fail "clawctl-agent system unit did not load"
 [[ "$(systemctl show clawctl-agent.service --property=FragmentPath --value)" == "$SYSTEM_UNIT_FILE" ]] || fail "clawctl-agent system unit path mismatch before migration"
@@ -548,11 +711,13 @@ sudo systemctl daemon-reload
 [[ "$(systemctl show clawctl-agent.service --property=ProtectSystem --value)" == "strict" ]] || fail "clawctl-agent ProtectSystem sandbox is not loaded before migration"
 [[ "$(systemctl show clawctl-agent.service --property=ProtectHome --value)" == "read-only" ]] || fail "clawctl-agent ProtectHome sandbox is not loaded before migration"
 sudo systemctl enable clawctl-agent.service
-if [[ -e "$LEGACY_UNIT_FILE" || -L "$LEGACY_UNIT_FILE" ]]; then
-  [[ -f "$LEGACY_UNIT_FILE" && ! -L "$LEGACY_UNIT_FILE" ]] || fail "Legacy agent unit path is not safe: $LEGACY_UNIT_FILE"
-  systemctl --user disable --now clawctl-agent.service
-  rm -f -- "$LEGACY_UNIT_FILE"
-  systemctl --user daemon-reload
+if [[ "$REENROLL_PHASE" == 0 ]]; then
+  if [[ -e "$LEGACY_UNIT_FILE" || -L "$LEGACY_UNIT_FILE" ]]; then
+    [[ -f "$LEGACY_UNIT_FILE" && ! -L "$LEGACY_UNIT_FILE" ]] || fail "Legacy agent unit path is not safe: $LEGACY_UNIT_FILE"
+    systemctl --user disable --now clawctl-agent.service
+    rm -f -- "$LEGACY_UNIT_FILE"
+    systemctl --user daemon-reload
+  fi
 fi
 sudo systemctl reset-failed clawctl-agent.service 2>/dev/null || true
 SERVICE_STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -574,6 +739,13 @@ MAIN_PID="$(systemctl show clawctl-agent.service --property=MainPID --value)"
 AGENT_COUNT="$(ps -eo comm= | awk '$1=="clawctl-agent" { n++ } END { print n+0 }')"
 [[ "$AGENT_COUNT" == "1" ]] || fail "Expected one clawctl-agent process; found $AGENT_COUNT"
 
+REENROLL_PHASE=0
+if [[ -e "$LEGACY_UNIT_FILE" || -L "$LEGACY_UNIT_FILE" ]]; then
+  [[ -f "$LEGACY_UNIT_FILE" && ! -L "$LEGACY_UNIT_FILE" ]] || fail "Legacy agent unit path is not safe: $LEGACY_UNIT_FILE"
+  systemctl --user disable --now clawctl-agent.service
+  rm -f -- "$LEGACY_UNIT_FILE"
+  systemctl --user daemon-reload
+fi
 echo "Managed: agent=$AGENT_VERSION tailscale=$TAILSCALE_IP service=active jobs=enabled"
 if [[ -n "${BACKUP_CONFIG:-}" ]]; then
   echo ""

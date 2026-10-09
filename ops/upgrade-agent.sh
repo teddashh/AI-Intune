@@ -75,11 +75,12 @@ current_agent_contract() {
   cat <<'EOS'
 set -Eeuo pipefail
 config="$HOME/.config/clawctl/agent.json"
-bin="$HOME/.local/bin/clawctl-agent"
-system_unit="/etc/systemd/system/clawctl-agent.service"
+bin="${CLAWCTL_SYSTEM_BIN_DIR:-/usr/local/bin}/clawctl-agent"
+legacy_bin="$HOME/.local/bin/clawctl-agent"
+system_unit="${CLAWCTL_SYSTEM_UNIT_DIR:-/etc/systemd/system}/clawctl-agent.service"
 legacy_unit="$HOME/.config/systemd/user/clawctl-agent.service"
 [[ -f "$config" && ! -L "$config" && "$(stat -c '%a' "$config")" == "600" ]] || { echo "Enrolled agent config is missing" >&2; exit 1; }
-[[ -f "$bin" && ! -L "$bin" ]] || { echo "Managed agent binary is missing" >&2; exit 1; }
+[[ ( -f "$bin" && ! -L "$bin" ) || ( -f "$legacy_bin" && ! -L "$legacy_bin" ) ]] || { echo "Managed agent binary is missing" >&2; exit 1; }
 command -v sudo >/dev/null || { echo "sudo is required" >&2; exit 1; }
 sudo -n true || { echo "Passwordless or pre-authorized sudo is required" >&2; exit 1; }
 if [[ -f "$system_unit" && ! -L "$system_unit" ]]; then
@@ -108,8 +109,11 @@ remote_script() {
 set -Eeuo pipefail
 want=$1
 bin="$HOME/.local/bin/clawctl-agent"
+system_bin_dir="${CLAWCTL_SYSTEM_BIN_DIR:-/usr/local/bin}"
+system_bin="$system_bin_dir/clawctl-agent"
+[[ "$system_bin_dir" =~ ^/[a-zA-Z0-9._/-]+$ && "$system_bin_dir" != *"/../"* && "$system_bin_dir" != */.. ]] || { echo "Unsafe system binary directory" >&2; exit 1; }
 raw_unit="$HOME/.local/share/clawctl/clawctl-agent.service.new"
-system_unit="/etc/systemd/system/clawctl-agent.service"
+system_unit="${CLAWCTL_SYSTEM_UNIT_DIR:-/etc/systemd/system}/clawctl-agent.service"
 legacy_unit="$HOME/.config/systemd/user/clawctl-agent.service"
 runtime="$HOME/.local/share/clawctl"
 config="$HOME/.config/clawctl/agent.json"
@@ -141,6 +145,7 @@ sed -e "s|@@CLAWCTL_AGENT_USER@@|$agent_user|g" \
     -e "s|@@CLAWCTL_AGENT_UID@@|$agent_uid|g" \
     -e "s|__CLAWCTL_AGENT_UID__|$agent_uid|g" \
     -e "s|@@CLAWCTL_AGENT_HOME@@|$escaped_home|g" \
+    -e "s|@@CLAWCTL_AGENT_BIN@@|$system_bin|g" \
     "$raw_unit" >"$rendered_unit"
 ! grep -Fq 'CLAWCTL_AGENT_' "$rendered_unit" || { echo "Agent systemd unit rendering is incomplete" >&2; exit 1; }
 
@@ -155,6 +160,15 @@ if [[ "$got" != "$want" ]]; then
   exit 1
 fi
 
+sudo install -d -m 0755 "$system_bin_dir" "$(dirname "$system_unit")"
+sudo install -m 0755 -o root -g root "$bin.new" "$system_bin.new"
+sudo mv -f "$system_bin.new" "$system_bin"
+if command -v restorecon >/dev/null &&
+   { { command -v selinuxenabled >/dev/null && selinuxenabled; } || [[ -e /sys/fs/selinux/enforce ]]; }; then
+  sudo restorecon -F "$system_bin"
+fi
+rm -f -- "$bin.new"
+if [[ -f "$bin" ]]; then echo "Legacy binary $bin retained; no longer used by the system unit."; fi
 chmod 0644 "$hermes_unit.new" "$openclaw_unit.new"
 sudo install -m 0644 "$rendered_unit" "$system_unit.new"
 sudo mv -f "$system_unit.new" "$system_unit"
@@ -173,7 +187,6 @@ sudo systemctl daemon-reload
 [[ "$(systemctl show clawctl-agent.service -p ProtectSystem --value)" == "strict" ]] || { echo "ProtectSystem sandbox is not loaded before migration" >&2; exit 1; }
 [[ "$(systemctl show clawctl-agent.service -p ProtectHome --value)" == "read-only" ]] || { echo "ProtectHome sandbox is not loaded before migration" >&2; exit 1; }
 sudo systemctl enable clawctl-agent.service
-mv -f "$bin.new" "$bin"
 if [[ -e "$legacy_unit" || -L "$legacy_unit" ]]; then
   [[ -f "$legacy_unit" && ! -L "$legacy_unit" ]] || { echo "Legacy agent unit path is not safe" >&2; exit 1; }
   systemctl --user disable --now clawctl-agent.service
@@ -184,11 +197,11 @@ sudo systemctl reset-failed clawctl-agent.service 2>/dev/null || true
 started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 sudo systemctl restart clawctl-agent.service
 systemctl is-active --quiet clawctl-agent.service
-"$bin" verify --since "$started_at" --timeout 2m
+"$system_bin" verify --since "$started_at" --timeout 2m
 
 process_count="$(ps -eo comm= | awk '$1=="clawctl-agent" { n++ } END { print n+0 }')"
 restarts="$(systemctl show clawctl-agent.service -p NRestarts --value)"
-running_version="$(timeout 5 "$bin" version)"
+running_version="$(timeout 5 "$system_bin" version)"
 service_user="$(systemctl show clawctl-agent.service -p User --value)"
 protect_system="$(systemctl show clawctl-agent.service -p ProtectSystem --value)"
 protect_home="$(systemctl show clawctl-agent.service -p ProtectHome --value)"
@@ -219,7 +232,7 @@ upgrade_local() {
   arch="$(uname -m)"
   source="$(arch_binary "$arch")" || { echo "Unsupported architecture: $arch" >&2; return 1; }
   echo "Upgrading local agent: $arch"
-  sudo -v || return
+  sudo -n true 2>/dev/null || sudo -v || return
   bash -s <<<"$(current_agent_contract)" || return
   install -d -m 0755 "$HOME/.local/bin" "$HOME/.config/systemd/user"
   install -d -m 0700 "$HOME/.local/share/clawctl"
@@ -242,6 +255,7 @@ upgrade_remote() {
     echo "Managed agent preflight failed: $target" >&2
     return 1
   }
+  # shellcheck disable=SC2016
   timeout 20 ssh -o BatchMode=yes "$target" \
     'install -d -m 0755 "$HOME/.local/bin" "$HOME/.config/systemd/user" && install -d -m 0700 "$HOME/.local/share/clawctl"' || {
     echo "Agent directories failed: $target" >&2

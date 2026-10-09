@@ -449,3 +449,5 @@ binary 會在開 DB 前拒絕 loopback、hostname、`0.0.0.0`、LAN/public IP。
 > ⚠ 直接跑 `clawctl-hub`（不透過 unit）時 `--listen` 的預設是 `127.0.0.1:8770`，
 > 跟 unit 的 8787 不同；兩者現在都會被 operator auth 的 tailnet-IP validation 擋掉，
 > 不再能安靜啟動第二個 writer。正式啟動必須明示 tailnet listener 與 capability prefix。
+
+Linux agent installation and push upgrades use the root-owned `/usr/local/bin/clawctl-agent`; legacy binaries under `~/.local/bin` are retained.

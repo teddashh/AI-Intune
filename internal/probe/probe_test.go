@@ -2473,3 +2473,23 @@ func TestTheLoginShellIsAskedOnlyOncePerProcess(t *testing.T) {
 			"每一輪觀測都跑一次別人的 login profile，就是用觀測去改變被觀測的機器", n)
 	}
 }
+
+func TestOpenClawEmptyPlaceholderDirIsNotAnInstall(t *testing.T) {
+	home := t.TempDir()
+	if err := os.Mkdir(filepath.Join(home, ".openclaw"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oc := openClaw(context.Background(), home, nil)
+	if oc.Present {
+		t.Fatal("an empty ~/.openclaw placeholder must not count as an OpenClaw install")
+	}
+	if !strings.Contains(oc.Reason, "empty ~/.openclaw") {
+		t.Fatalf("reason = %q", oc.Reason)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".openclaw", "openclaw.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if oc := openClaw(context.Background(), home, nil); !oc.Present {
+		t.Fatalf("non-empty ~/.openclaw must count as present; reason=%q", oc.Reason)
+	}
+}

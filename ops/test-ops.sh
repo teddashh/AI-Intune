@@ -826,13 +826,18 @@ agent_installer_complete_fixture() {
 	chmod 0600 "$token" "$tailscale_key"
 
 	printf '%s\n' '#!/usr/bin/env bash' \
+		'printf "sudo %s\n" "$*" >>"$AGENT_TEST_LOG"' \
+		'if [[ "$1" == "-n" && "$2" == true ]]; then exit "${FAIL_SUDO_NONINTERACTIVE:-0}"; fi' \
 		'if [[ "$1" == "-v" ]]; then exit 0; fi' \
+		'if [[ "$1" == install ]]; then shift; args=(); while [[ $# -gt 0 ]]; do case "$1" in -o|-g) shift 2 ;; *) args+=("$1"); shift ;; esac; done; exec install "${args[@]}"; fi'  \
 		'if [[ "$1" == "env" && "$2" == TARGET_USER=* ]]; then exit 0; fi' \
 		'exec "$@"' >"$mock/sudo"
 	printf '%s\n' '#!/usr/bin/env bash' \
 		'printf "systemctl %s\n" "$*" >>"$AGENT_TEST_LOG"' \
+		'if [[ "$*" == "--user start clawctl-agent.service" && "${FAIL_ROLLBACK_START:-0}" == 1 ]]; then exit 1; fi' \
+		'if [[ "$*" == "restart clawctl-agent.service" && "${FAIL_START:-0}" == 1 ]]; then exit 1; fi' \
 		'case "$*" in' \
-		'  *property=NRestarts*) echo 0 ;;' \
+		'  *property=NRestarts*) echo "${TEST_RESTARTS:-0}" ;;' \
 		'  *property=MainPID*) echo 4242 ;;' \
 		'  *property=LoadState*) echo loaded ;;' \
 		'  *property=FragmentPath*) echo "$AGENT_TEST_SYSTEM_UNIT/clawctl-agent.service" ;;' \
@@ -858,7 +863,7 @@ agent_installer_complete_fixture() {
 		'fi' >"$mock/tailscale"
 	printf '%s\n' '#!/usr/bin/env bash' \
 		'if [[ "$1" == "-o" && "$2" == "uid=" ]]; then echo "$AGENT_TEST_UID"; else echo clawctl-agent; fi' >"$mock/ps"
-	printf '%s\n' '#!/usr/bin/env bash' 'echo true' >"$mock/systemd-run"
+	printf '%s\n' '#!/usr/bin/env bash' 'echo podman-readiness >>"$AGENT_TEST_LOG"; echo true' >"$mock/systemd-run"
 	printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$mock/podman"
 	printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$mock/newuidmap"
 	printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$mock/newgidmap"
@@ -868,9 +873,9 @@ agent_installer_complete_fixture() {
 		'  version) echo test-version ;;' \
 		'  enroll) ' \
 		'    for ((i=1;i<=$#;i++)); do if [[ "${!i}" == "--token-file" ]]; then j=$((i+1)); [[ "$(cat -- "${!j}")" == "${EXPECTED_ENROLL_TOKEN:-one-time-token}" ]] || exit 4; fi; done ' \
-		'    if [[ "$FAIL_ENROLL" == "1" ]]; then exit 1; fi ' \
+		'    if [[ "${FAIL_ENROLL:-0}" == "1" ]]; then [[ -z "${CLAWCTL_CONFIG:-}" ]] || { printf "partial\n" >"$CLAWCTL_CONFIG"; chmod 0600 "$CLAWCTL_CONFIG"; }; exit 1; fi ' \
 		'    hub=""; for ((i=1;i<=$#;i++)); do if [[ "${!i}" == "--hub" ]]; then j=$((i+1)); hub="${!j}"; break; fi; done ' \
-		'    mkdir -p "$HOME/.config/clawctl"; printf "{\"hub_url\":\"%s\"}\\n" "$hub" >"$HOME/.config/clawctl/agent.json"; chmod 0600 "$HOME/.config/clawctl/agent.json" ;;' \
+		'    config=${CLAWCTL_CONFIG:-$HOME/.config/clawctl/agent.json}; mkdir -p "$(dirname "$config")"; printf "{\"hub_url\":\"%s\"}\\n" "$hub" >"$config"; chmod 0600 "$config" ;;' \
 		'  verify) ' \
 		'    if [[ "${FAIL_VERIFY:-}" == "1" ]]; then exit 1; fi ' \
 		'    echo "Hub ready: machine_id=test checkin=2026-09-10T18:00:00Z jobs=enabled agent=test-version" ;;' \
@@ -879,26 +884,35 @@ agent_installer_complete_fixture() {
 	chmod 0755 "$mock/sudo" "$mock/systemctl" "$mock/loginctl" "$mock/tailscale" "$mock/ps" \
 		"$mock/systemd-run" "$mock/podman" "$mock/newuidmap" "$mock/newgidmap" \
 		"$fixture/clawctl-agent"
+	printf '%s\n' '#!/usr/bin/env bash' '[[ "${TEST_SELINUX:-0}" == 1 ]]' >"$mock/selinuxenabled"
+	printf '%s\n' '#!/usr/bin/env bash' 'echo "restorecon $*" >>"$AGENT_TEST_LOG"' >"$mock/restorecon"
+	chmod 0755 "$mock/selinuxenabled" "$mock/restorecon"
+	mkdir -p "$home/.local/bin"
+	printf 'legacy-binary\n' >"$home/.local/bin/clawctl-agent"
 	cp "$AGENT_UNIT" "$fixture/clawctl-agent.service"
 	cp "$ROOT/ops/clawctl-hermes.service" "$fixture/clawctl-hermes.service"
 	cp "$ROOT/ops/openclaw-gateway.service" "$fixture/openclaw-gateway.service"
 	install_agent="$fixture/install-agent.sh"
-	sed "s#/usr/bin/podman#$mock/podman#g" "$INSTALL_AGENT" >"$install_agent"
+	sed -e "s#/usr/bin/podman#$mock/podman#g" -e "s#/sys/fs/selinux/enforce#$fixture/selinux-enforce#g" "$INSTALL_AGENT" >"$install_agent"
 	chmod 0755 "$install_agent"
 
 	HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
 		TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
-		CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+		CLAWCTL_SYSTEM_BIN_DIR="$fixture/system-bin" CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
 		AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
 		"$install_agent" --hub http://100.64.0.1:8787 --token-file "$token" \
 		--tailscale-auth-key-file "$tailscale_key" --binary "$fixture/clawctl-agent" || return
 	[[ -f "$system_unit_dir/clawctl-agent.service" ]] || return 91
+	grep -Fxq "ExecStart=$fixture/system-bin/clawctl-agent" "$system_unit_dir/clawctl-agent.service" || return 91
+	grep -Fxq 'sudo -n true' "$log" || return 91
+	! grep -q restorecon "$log" || return 91
+	[[ "$(cat "$home/.local/bin/clawctl-agent")" == legacy-binary ]] || return 91
 	[[ ! -e "$home/.config/systemd/user/clawctl-agent.service" ]] || return 98
 	grep -Fq "User=$(id -un)" "$system_unit_dir/clawctl-agent.service" || return 99
 	! grep -Fq 'CLAWCTL_AGENT_' "$system_unit_dir/clawctl-agent.service" || return 100
 	[[ -f "$home/.config/systemd/user/clawctl-hermes.service" ]] || return 96
 	[[ -f "$home/.config/systemd/user/openclaw-gateway.service" ]] || return 97
-	[[ -x "$home/.local/bin/clawctl-agent" ]] || return 92
+	[[ -x "$fixture/system-bin/clawctl-agent" ]] || return 92
 	[[ -d "$home/.local/share/clawctl/hermes/data" && -d "$home/.local/share/containers" ]] || return 97
 	grep -Fq 'enroll --hub http://100.64.0.1:8787 --token-file' "$log" || return 93
 	grep -Fq 'verify --hub http://100.64.0.1:8787 --since ' "$log" || return 94
@@ -908,7 +922,7 @@ agent_installer_complete_fixture() {
 	rm -f "$log"
 	HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
 		TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
-		CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+		CLAWCTL_SYSTEM_BIN_DIR="$fixture/system-bin" CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
 		AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
 		"$install_agent" --hub http://100.64.0.1:8787 --binary "$fixture/clawctl-agent" || return 101
 	grep -q 'enroll --hub' "$log" && return 102
@@ -917,7 +931,7 @@ agent_installer_complete_fixture() {
 	rm -f "$log"
 	if HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
 		TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
-		CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+		CLAWCTL_SYSTEM_BIN_DIR="$fixture/system-bin" CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
 		AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
 		"$install_agent" --hub http://100.64.0.2:8787 --binary "$fixture/clawctl-agent" >"$fixture/out2" 2>&1; then
 		return 103
@@ -925,13 +939,17 @@ agent_installer_complete_fixture() {
 	grep -q 'enrolled to a different Hub' "$fixture/out2" || return 104
 
 	# Re-enrollment Case 3: --reenroll success
+	rm -f "$system_unit_dir/clawctl-agent.service"
+	printf 'legacy-unit\n' >"$home/.config/systemd/user/clawctl-agent.service"
 	rm -f "$log"
 	HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
 		TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
-		CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+		CLAWCTL_SYSTEM_BIN_DIR="$fixture/system-bin" CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
 		AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
 		"$install_agent" --hub http://100.64.0.2:8787 --reenroll --token-file "$token" --binary "$fixture/clawctl-agent" || return 105
-	grep -q 'systemctl stop clawctl-agent.service' "$log" || return 106
+	appears_in_order3 'enroll --hub' 'systemctl --user stop clawctl-agent.service' 'verify --hub' "$log" || return 106
+	appears_before 'verify --hub' 'systemctl --user disable --now' "$log" || return 106
+	[[ ! -e "$home/.config/systemd/user/clawctl-agent.service" ]] || return 106
 	local backups=("$home"/.config/clawctl/agent.json.pre-reenroll-*)
 	[[ ${#backups[@]} -eq 1 ]] || return 107
 	[[ "$(stat -c '%a' "${backups[0]}")" == "600" ]] || return 108
@@ -944,13 +962,14 @@ agent_installer_complete_fixture() {
 	cp "$home/.config/clawctl/agent.json" "$fixture/agent.before"
 	if FAIL_ENROLL=1 HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
 		TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
-		CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+		CLAWCTL_SYSTEM_BIN_DIR="$fixture/system-bin" CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
 		AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
 		"$install_agent" --hub http://100.64.0.3:8787 --reenroll --token-file "$token" --binary "$fixture/clawctl-agent" >"$fixture/out4" 2>&1; then
 		return 111
 	fi
-	grep -qi 'previous configuration restored' "$fixture/out4" || return 112
-	grep -q "old Hub's install-agent.sh" "$fixture/out4" || return 123
+	grep -qi 'left untouched' "$fixture/out4" || return 112
+	! grep -q "systemctl .*stop" "$log" || return 123
+	[[ ! -e "$home/.config/clawctl/agent.json.reenroll-new" ]] || return 123
 	grep -q '100.64.0.2' "$home/.config/clawctl/agent.json" || return 113
 	cmp -s "$home/.config/clawctl/agent.json" "$fixture/agent.before" || return 114
 	local restored_backups=("$home"/.config/clawctl/agent.json.pre-reenroll-*)
@@ -961,7 +980,7 @@ agent_installer_complete_fixture() {
 	rm -f "$home"/.config/clawctl/agent.json.pre-reenroll-*
 	HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
 		TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
-		CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+		CLAWCTL_SYSTEM_BIN_DIR="$fixture/system-bin" CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
 		AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
 		"$install_agent" --hub http://100.64.0.2:8787 --reenroll --token-file "$token" --binary "$fixture/clawctl-agent" || return 116
 	grep -q 'systemctl stop clawctl-agent.service' "$log" || return 117
@@ -972,12 +991,15 @@ agent_installer_complete_fixture() {
 	grep -q '100.64.0.2' "${same_hub_backups[0]}" || return 121
 	grep -q '100.64.0.2' "$home/.config/clawctl/agent.json" || return 122
 
-	# Re-enrollment Case 6: --reenroll failure after successful re-enrollment prints backup path
+	# Re-enrollment Case 6: failed verify restores previous config and system unit
 	rm -f "$log"
 	rm -f "$home"/.config/clawctl/agent.json.pre-reenroll-*
+	cp "$home/.config/clawctl/agent.json" "$fixture/agent.before"
+	printf "# previous system unit\n" >>"$system_unit_dir/clawctl-agent.service"
+	cp "$system_unit_dir/clawctl-agent.service" "$fixture/unit.before"
 	if FAIL_VERIFY=1 HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
 		TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
-		CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+		CLAWCTL_SYSTEM_BIN_DIR="$fixture/system-bin" CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
 		AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
 		"$install_agent" --hub http://100.64.0.3:8787 --reenroll --token-file "$token" --binary "$fixture/clawctl-agent" >"$fixture/out6" 2>&1; then
 		return 124
@@ -985,16 +1007,60 @@ agent_installer_complete_fixture() {
 	local verify_fail_backups=("$home"/.config/clawctl/agent.json.pre-reenroll-*)
 	[[ ${#verify_fail_backups[@]} -eq 1 ]] || return 125
 	[[ -f "${verify_fail_backups[0]}" ]] || return 126
-	grep -Fq "Previous configuration backed up at: ${verify_fail_backups[0]} (see docs/MOVE-AGENTS.md, Rollback)" "$fixture/out6" || return 127
+	grep -Fq 'Rollback completed' "$fixture/out6" || return 127
+	grep -Fq 'NEW Hub' "$fixture/out6" || return 127
+	cmp -s "$fixture/agent.before" "$home/.config/clawctl/agent.json" || return 127
+	cmp -s "$fixture/unit.before" "$system_unit_dir/clawctl-agent.service" || return 127
+	local failed_configs=("$home"/.config/clawctl/agent.json.failed-reenroll-*)
+	[[ "$(stat -c '%a' "${failed_configs[0]}")" == 600 ]] || return 127
 
 	# Keyed package cases use the same full installer stubs and re-enroll path.
 	keyed_fixture_run() {
 		HOME="$home" USER="fixture-user" AGENT_TEST_LOG="$log" TAILSCALE_TEST_LOG="$log" \
 			TAILSCALE_TEST_STATE="$fixture/tailscale-state" PATH="$mock:$PATH" \
-			CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
+			CLAWCTL_SYSTEM_BIN_DIR="$fixture/system-bin" CLAWCTL_SYSTEM_UNIT_DIR="$system_unit_dir" AGENT_TEST_SYSTEM_UNIT="$system_unit_dir" \
 			AGENT_TEST_USER="$(id -un)" AGENT_TEST_UID="$EUID" \
 			"$install_agent" "$@" >"$fixture/keyed-output" 2>&1
 	}
+	# Legacy-only rollback keeps the user unit and binary and removes the new system unit.
+	rm -f "$system_unit_dir/clawctl-agent.service" "$log"
+	printf 'legacy-unit\n' >"$home/.config/systemd/user/clawctl-agent.service"
+	cp "$home/.config/clawctl/agent.json" "$fixture/legacy.before"
+	if FAIL_VERIFY=1 keyed_fixture_run --reenroll --hub https://new.example.com --token-file "$token"; then return 160; fi
+	cmp -s "$fixture/legacy.before" "$home/.config/clawctl/agent.json" || return 161
+	[[ -f "$home/.config/systemd/user/clawctl-agent.service" && ! -e "$system_unit_dir/clawctl-agent.service" ]] || return 162
+	grep -Fxq 'systemctl --user start clawctl-agent.service' "$log" || return 163
+	grep -Fxq 'systemctl --user enable clawctl-agent.service' "$log" || return 164
+	[[ "$(cat "$home/.local/bin/clawctl-agent")" == legacy-binary ]] || return 165
+
+	# Both a top-level start failure (ERR trap) and a post-start gate (fail path) roll back.
+	local failure_case
+	for failure_case in start checks; do
+		rm -f "$log"
+		if [[ "$failure_case" == start ]]; then
+			if FAIL_START=1 keyed_fixture_run --reenroll --hub https://new.example.com --token-file "$token"; then return 171; fi
+		else
+			if TEST_RESTARTS=1 keyed_fixture_run --reenroll --hub https://new.example.com --token-file "$token"; then return 172; fi
+		fi
+		grep -Fq 'Rollback completed' "$fixture/keyed-output" || return 173
+		cmp -s "$fixture/legacy.before" "$home/.config/clawctl/agent.json" || return 174
+		[[ -f "$home/.config/systemd/user/clawctl-agent.service" && ! -e "$system_unit_dir/clawctl-agent.service" ]] || return 175
+		grep -Fxq 'systemctl --user start clawctl-agent.service' "$log" || return 176
+	done
+
+	# Failed recovery gives concrete manual commands without losing the config backup.
+	if FAIL_VERIFY=1 FAIL_ROLLBACK_START=1 keyed_fixture_run --reenroll --hub https://new.example.com --token-file "$token"; then return 177; fi
+	grep -Fq 'Rollback failed. Manual recovery steps:' "$fixture/keyed-output" || return 178
+	grep -Fq 'install -m 0600' "$fixture/keyed-output" || return 179
+	grep -Fq 'systemctl --user start clawctl-agent.service' "$fixture/keyed-output" || return 180
+
+	# Noninteractive sudo fallback, SELinux restorecon, and optional podman setup.
+	rm -f "$log"
+	TEST_SELINUX=1 FAIL_SUDO_NONINTERACTIVE=1 keyed_fixture_run --hub http://100.64.0.2:8787 --no-tailscale --no-container-runtime || return 166
+	appears_before 'sudo -n true' 'sudo -v' "$log" || return 167
+	grep -Fxq "restorecon -F $fixture/system-bin/clawctl-agent" "$log" || return 168
+	grep -Fq 'Container runtime: skipped (--no-container-runtime); Hermes container jobs need podman' "$fixture/keyed-output" || return 169
+	! grep -E 'podman|TARGET_USER=' "$log" || return 170
 	printf '%s\r\n' 'https://hub.example.com' >"$fixture/hub-url"
 	printf '%s\n' 'one-time-token' >"$fixture/enroll-token"
 	chmod 0644 "$fixture/enroll-token"
@@ -1437,7 +1503,7 @@ expect 'agent install enables persistence before service start' 0 is_silent
 run appears_in_order3 'sudo systemctl reset-failed clawctl-agent.service' 'sudo systemctl restart clawctl-agent.service' '"$BIN_FILE" verify --hub "$HUB" --since "$SERVICE_STARTED_AT" --timeout 2m' "$INSTALL_AGENT"
 expect 'agent install resets the restart gate before start and requires a fresh Hub receipt' 0 is_silent
 
-run appears_in_order3 'sudo systemctl daemon-reload' 'systemctl --user disable --now clawctl-agent.service' 'sudo systemctl restart clawctl-agent.service' "$INSTALL_AGENT"
+run appears_before '"$BIN_FILE" verify --hub' 'echo "Managed:' "$INSTALL_AGENT"
 expect 'agent install loads the system unit before retiring the legacy user service' 0 is_silent
 
 run appears_before '[[ "$AGENT_COUNT" == "1" ]]' 'echo "Managed: agent=$AGENT_VERSION tailscale=$TAILSCALE_IP service=active jobs=enabled"' "$INSTALL_AGENT"
@@ -1467,7 +1533,7 @@ expect 'agent upgrade validates the enrolled service account before transfer' 0 
 run grep -Fq 'writable_roots="$(systemctl show clawctl-agent.service -p ReadWritePaths --value)"' "$UPGRADE_AGENT"
 expect 'agent upgrade verifies the live writable-root contract' 0 is_silent
 
-run appears_in_order3 'sudo systemctl reset-failed clawctl-agent.service' 'sudo systemctl restart clawctl-agent.service' '"$bin" verify --since "$started_at" --timeout 2m' "$UPGRADE_AGENT"
+run appears_in_order3 'sudo systemctl reset-failed clawctl-agent.service' 'sudo systemctl restart clawctl-agent.service' '"$system_bin" verify --since "$started_at" --timeout 2m' "$UPGRADE_AGENT"
 expect 'agent upgrade requires a fresh Hub readiness receipt' 0 is_silent
 
 run appears_in_order3 'sudo systemctl daemon-reload' 'systemctl --user disable --now clawctl-agent.service' 'sudo systemctl restart clawctl-agent.service' "$UPGRADE_AGENT"
