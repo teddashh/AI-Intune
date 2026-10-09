@@ -28,7 +28,9 @@ jobs:
       - name: Tools
         run: |
           command -v make >/dev/null || { sudo apt-get update && sudo apt-get install -y make; }
+          command -v shellcheck >/dev/null || { sudo apt-get update && sudo apt-get install -y shellcheck; }
           make --version | head -1
+          shellcheck --version | head -1
           go version
 
       - name: gofmt
