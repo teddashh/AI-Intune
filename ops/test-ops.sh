@@ -1512,6 +1512,48 @@ expect 'agent install publishes success only after exact process validation' 0 i
 run grep -E '⚠|temporary|暫時|disclaimer|可能缺少|可能需要' "$INSTALL_AGENT"
 expect 'agent installer contains no defensive or temporary interface copy' 1 is_silent
 
+# Home ancestors such as ~/.cache may be symlinks to another disk. The target
+# must be a user-owned directory that is not group- or world-writable.
+home_ancestor_symlink_fixture() {
+	local fixture
+	fixture=$(mktemp -d "$TMP/home-ancestor.XXXXXX")
+	sed -n '/^ensure_home_ancestor() {/,/^}/p' "$INSTALL_AGENT" >"$fixture/fn.sh"
+	grep -q 'readlink -f' "$fixture/fn.sh" || return 10
+	mkdir -p "$fixture/home" "$fixture/data/cache" "$fixture/data/open" "$fixture/data/group"
+	chmod 0755 "$fixture/data/cache"
+	chmod 0777 "$fixture/data/open"
+	chmod 0775 "$fixture/data/group"
+	ln -s "$fixture/data/cache" "$fixture/home/.cache"
+	ln -s "$fixture/data/open" "$fixture/home/.open"
+	ln -s "$fixture/data/group" "$fixture/home/.group"
+	ln -s "$fixture/data/missing" "$fixture/home/.dangling"
+	: >"$fixture/data/file"
+	ln -s "$fixture/data/file" "$fixture/home/.file"
+	probe() {
+		bash -c 'set -euo pipefail; fail() { echo "$1" >&2; exit 1; }; source "$1"; ensure_home_ancestor "$2"' _ "$fixture/fn.sh" "$1"
+	}
+	probe "$fixture/home/.cache" || return 11
+	! probe "$fixture/home/.open" 2>/dev/null || return 12
+	! probe "$fixture/home/.group" 2>/dev/null || return 13
+	! probe "$fixture/home/.dangling" 2>/dev/null || return 14
+	! probe "$fixture/home/.file" 2>/dev/null || return 15
+	probe "$fixture/home/.new" && [[ -d "$fixture/home/.new" ]] || return 16
+	probe "$fixture/home/.new" || return 17
+	if [[ "$EUID" != 0 ]] && [[ -d /usr/share ]]; then
+		ln -s /usr/share "$fixture/home/.foreign"
+		! probe "$fixture/home/.foreign" 2>/dev/null || return 18
+	fi
+	# ReadWritePaths entries reached through the symlink are rendered canonically.
+	sed -n '/^resolve_unit_rw_paths() {/,/^}/p' "$INSTALL_AGENT" >"$fixture/rw.sh"
+	mkdir -p "$fixture/data/cache/clawctl" "$fixture/home/.config/clawctl"
+	printf '[Service]\nReadWritePaths=%s %s %s\n' "$fixture/home/.config/clawctl" "$fixture/home/.cache/clawctl" "$fixture/home/.absent" >"$fixture/unit"
+	bash -c 'set -euo pipefail; source "$1"; resolve_unit_rw_paths "$2"' _ "$fixture/rw.sh" "$fixture/unit" || return 19
+	grep -Fxq "ReadWritePaths=$(readlink -f "$fixture/home/.config/clawctl") $(readlink -f "$fixture/data/cache/clawctl") $fixture/home/.absent" "$fixture/unit" || return 20
+	grep -Fq 'resolve_unit_rw_paths "$rendered_unit"' "$ROOT/ops/upgrade-agent.sh" || return 21
+	return 0
+}
+run home_ancestor_symlink_fixture
+expect "install-agent accepts a symlinked home ancestor only when its target is a private user-owned directory" 0 true
 run agent_installer_complete_fixture
 expect 'agent installer completes Tailscale, enrollment, service and Hub receipt in one run' 0 has 'Managed: agent=test-version tailscale=100.64.0.77 service=active jobs=enabled'
 

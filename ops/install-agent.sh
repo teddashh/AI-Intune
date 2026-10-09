@@ -356,6 +356,24 @@ new_secret_file() {
   printf -v "$output_name" '%s' "$path"
 }
 
+# systemd 252 cannot bind a ReadWritePaths entry reached through a symlinked home
+# ancestor (226/NAMESPACE "Permission denied" under unit-root), but the resolved
+# path works. Rewrite each existing entry to its canonical path.
+resolve_unit_rw_paths() {
+  local unit=$1 line path resolved out=""
+  line="$(grep '^ReadWritePaths=' "$unit")" || return 0
+  [[ "$(grep -c '^ReadWritePaths=' "$unit")" == 1 ]] || { echo "Agent unit must have one ReadWritePaths line" >&2; return 1; }
+  for path in ${line#ReadWritePaths=}; do
+    resolved=$path
+    if [[ -e "$path" ]]; then
+      resolved="$(readlink -f -- "$path")" || return 1
+      [[ "$resolved" =~ ^/[a-zA-Z0-9._/-]+$ ]] || { echo "Unsafe resolved ReadWritePaths entry: $path -> $resolved" >&2; return 1; }
+    fi
+    out+="${out:+ }$resolved"
+  done
+  sed -i "s|^ReadWritePaths=.*|ReadWritePaths=$out|" "$unit"
+}
+
 render_agent_unit() {
   local source=$1 destination=$2 agent_user agent_uid escaped_home
   agent_user="$AGENT_USER"
@@ -373,6 +391,7 @@ render_agent_unit() {
       -e "s|@@CLAWCTL_AGENT_BIN@@|$BIN_FILE|g" \
       "$source" >"$destination"
   ! grep -Fq 'CLAWCTL_AGENT_' "$destination" || fail "Agent systemd unit rendering is incomplete"
+  resolve_unit_rw_paths "$destination" || fail "Agent systemd unit ReadWritePaths could not be resolved"
 }
 
 ensure_owned_directory() {
@@ -386,10 +405,20 @@ ensure_owned_directory() {
   chmod "$mode" "$path"
 }
 
+# A home ancestor such as ~/.cache may be a symlink to another disk (for example
+# /data/home-user/cache). Accept it only when the resolved target is a directory
+# owned by this user and not group- or world-writable; anything else could let
+# another account redirect the agent's private state.
 ensure_home_ancestor() {
-  local path=$1
-  if [[ -e "$path" || -L "$path" ]]; then
-    [[ -d "$path" && ! -L "$path" ]] || fail "Home path is not safe: $path"
+  local path=$1 target mode
+  if [[ -L "$path" ]]; then
+    target="$(readlink -f -- "$path")" || fail "Home path is not safe: $path"
+    [[ -n "$target" && -d "$target" && ! -L "$target" ]] || fail "Home path is not safe: $path"
+    [[ "$(stat -c '%u' "$target")" == "$EUID" ]] || fail "Home path owner is not $USER: $path -> $target"
+    mode="$(stat -c '%a' "$target")"
+    (( (8#$mode & 8#022) == 0 )) || fail "Home path target is group- or world-writable: $path -> $target"
+  elif [[ -e "$path" ]]; then
+    [[ -d "$path" ]] || fail "Home path is not safe: $path"
     [[ "$(stat -c '%u' "$path")" == "$EUID" ]] || fail "Home path owner is not $USER: $path"
   else
     mkdir "$path"
