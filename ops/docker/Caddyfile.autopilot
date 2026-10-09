@@ -4,3 +4,9 @@
 {$CLAWCTL_PUBLIC_HOST} {
     reverse_proxy hub:8787
 }
+
+# Any other Host on this listener (valid SNI, foreign Host header) gets 421
+# instead of Caddy's default empty 200. Hub enforces the same pin.
+https:// {
+    respond "Misdirected Request" 421
+}

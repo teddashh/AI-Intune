@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Static packaging contract; no Docker daemon or Compose plugin required.
+# Match literal variable placeholders in the packaging files.
+# shellcheck disable=SC2016
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 compose="$HERE/docker-compose.autopilot.yml"
@@ -21,6 +23,8 @@ for required in '"80:80"' '"443:443"' './Caddyfile.autopilot:/etc/caddy/Caddyfil
 done
 grep -Fq '{$CLAWCTL_PUBLIC_HOST}' "$HERE/Caddyfile.autopilot" || fail 'Caddy hostname missing'
 grep -q 'reverse_proxy hub:8787' "$HERE/Caddyfile.autopilot" || fail 'Caddy upstream missing'
+grep -Eq '^https:// \{$' "$HERE/Caddyfile.autopilot" || fail 'Caddy catch-all site missing'
+grep -Eq '^[[:space:]]+respond "Misdirected Request" 421$' "$HERE/Caddyfile.autopilot" || fail 'Caddy catch-all 421 missing'
 ! grep -Eiq 'header_up|X-Forwarded|X-Real-IP' <(sed '/^[[:space:]]*#/d' "$HERE/Caddyfile.autopilot") || fail 'unexpected identity header configuration'
 echo 'ok - Autopilot standalone Docker+Caddy contract'
 

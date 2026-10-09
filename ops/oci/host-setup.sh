@@ -295,7 +295,10 @@ case "$status" in
       echo "No generated setup code found; use your configured code."
     fi
     ;;
-  404) echo "Setup is already closed; use /login." ;;
+  404)
+    rm -f /var/lib/clawctl/setup-code
+    echo "Setup is already closed; use /login."
+    ;;
   *) fail "unexpected setup HTTP status" ;;
 esac
 echo "Next: open https://$host/setup or run ops/oci/install-hub.sh with --admin-user so it can call ops/fly/setup-admin.sh."

@@ -526,7 +526,7 @@ PY
     # shellcheck disable=SC1091
     source ops/oci/host-setup.sh
     export PATH="$tmp:$PATH" IPT_RULES="$tmp/rules"
-    # The stub is named iptables via PATH directory... 
+    # The stub is named iptables via PATH directory...
     ln -sf "$tmp/iptables" "$tmp/bin-ipt" 2>/dev/null || true
   )
   mkdir -p "$tmp/path"
@@ -577,6 +577,7 @@ if [[ " $* " == *" -G "* ]]; then
   exit 0
 fi
 if [[ "${SSH_FAIL:-0}" == 1 ]]; then exit 1; fi
+if [[ "$*" == *"sudo -n rm -f /var/lib/clawctl/setup-code"* && "${SSH_CLEANUP_FAIL:-0}" == 1 ]]; then exit 1; fi
 if [[ "$*" == *"bash -s"* && "$*" == *"--dry-run"* ]]; then
   bash -s -- --dry-run --public-host 203-0-113-10.sslip.io
   exit $?
@@ -616,6 +617,7 @@ fi
 umask 077
 printf '%s\n' '{"stored":true}' > "$out"
 chmod 600 "$out"
+printf '%s\n' 'admin enrolled' >> "$SSH_LOG"
 echo "MFA enrolled. Credentials saved to $out"
 SH
   chmod 755 "$tmp/bin/ssh" "$tmp/bin/curl" "$tmp/bin/setup-admin"
@@ -653,6 +655,7 @@ SH
     >"$tmp/out" 2>"$tmp/err"
   [[ "$(grep -c '^Setup code: stub-setup-code-do-not-print$' "$tmp/out")" == 1 ]]
   : > "$tmp/out"
+  : > "$SSH_LOG"
   CURL_SETUP_STATUS=404 bash ops/oci/install-hub.sh --host 203.0.113.10 \
     --public-host 203-0-113-10.sslip.io >"$tmp/closed" 2>"$tmp/closed.err"
   if grep -q 'stub-setup-code-do-not-print' "$tmp/closed" "$tmp/closed.err"; then
@@ -660,6 +663,8 @@ SH
     exit 1
   fi
   grep -q 'already closed' "$tmp/closed"
+  grep -q '203.0.113.10 sudo -n rm -f /var/lib/clawctl/setup-code$' "$SSH_LOG"
+  : > "$SSH_LOG"
   CURL_SETUP_STATUS=200 bash ops/oci/install-hub.sh --host 203.0.113.10 \
     --public-host 203-0-113-10.sslip.io --admin-user admin --admin-out "$tmp/admin.json" \
     >"$tmp/admin.out" 2>"$tmp/admin.err"
@@ -668,11 +673,22 @@ SH
     exit 1
   fi
   grep -q 'MFA enrolled' "$tmp/admin.out"
+  [[ "$(tail -n 2 "$SSH_LOG" | head -n 1)" == 'admin enrolled' ]]
+  tail -n 1 "$SSH_LOG" | grep -q '203.0.113.10 sudo -n rm -f /var/lib/clawctl/setup-code$'
   [[ "$(stat -c '%a' "$tmp/admin.json")" == 600 ]]
-  # Idempotent: a second run with setup still open does not require the output file.
+  # Idempotent: closed setup does not write the requested admin output file.
+  : > "$SSH_LOG"
   CURL_SETUP_STATUS=404 bash ops/oci/install-hub.sh --host 203.0.113.10 \
-    --public-host 203-0-113-10.sslip.io >"$tmp/second" 2>"$tmp/second.err"
+    --public-host 203-0-113-10.sslip.io --admin-user admin --admin-out "$tmp/second-admin.json" >"$tmp/second" 2>"$tmp/second.err"
   grep -q 'already closed' "$tmp/second"
+  grep -q 'no admin was created and --admin-out was not written' "$tmp/second.err"
+  [[ ! -e "$tmp/second-admin.json" ]]
+  grep -q '203.0.113.10 sudo -n rm -f /var/lib/clawctl/setup-code$' "$SSH_LOG"
+  if grep -q "$STUB_CODE" "$tmp/second" "$tmp/second.err"; then exit 1; fi
+  SSH_CLEANUP_FAIL=1 CURL_SETUP_STATUS=404 bash ops/oci/install-hub.sh --host 203.0.113.10 \
+    --public-host hub.example.com >"$tmp/cleanup" 2>"$tmp/cleanup.err"
+  grep -q 'warning: could not remove remote setup-code file' "$tmp/cleanup.err"
+  if grep -q "$STUB_CODE" "$tmp/cleanup" "$tmp/cleanup.err"; then exit 1; fi
 )
 
 test_persist_port_rules() (

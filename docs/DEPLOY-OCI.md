@@ -75,7 +75,7 @@ Type the name when asked. Destroy terminates that instance and deletes only its 
 ## Checks
 
 - `https://<host>/healthz` returns 200 with a valid certificate. Do not pass `-k`.
-- Wrong Host on `/login` returns 421 when the request reaches Hub. `/healthz` is not that check. Caddy only serves the configured site, and the Hub image has no shell, so from the VM run `docker run --rm --network clawctl-autopilot_default curlimages/curl:8.11.1 -sS -o /dev/null -w '%{http_code}\n' -H 'Host: wrong.example' http://hub:8787/login` and expect 421.
+- Through Caddy, a foreign Host on any path returns 421 at the edge: `curl -H 'Host: wrong.example' https://<host>/login`. As an optional deeper check of Hub itself, from the VM run `docker run --rm --network clawctl-autopilot_default curlimages/curl:8.11.1 -sS -o /dev/null -w '%{http_code}\n' -H 'Host: wrong.example' http://hub:8787/login` and expect 421. `/healthz` on Hub directly is still exempt.
 - After enrollment, a password alone does not open a session. Finish the authenticator prompt privately.
 - The audit client IP is the caller's address, not a Docker bridge address. The pack trusts only its own bridge and Caddy does not treat the client as a trusted proxy, so a caller-supplied `X-Forwarded-For` is ignored.
 - Enroll one disposable agent from an isolated `HOME`, confirm a new check-in, then retire it. Keep the token out of chat.

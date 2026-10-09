@@ -160,6 +160,11 @@ while :; do
 done
 echo "$url"
 
+cleanup_setup_code() {
+  "${ssh_base[@]}" "$target" "sudo -n rm -f /var/lib/clawctl/setup-code" ||
+    echo "install-hub: warning: could not remove remote setup-code file" >&2
+}
+
 status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$url/setup") || status=000
 case "$status" in
   200)
@@ -168,6 +173,7 @@ case "$status" in
       printf '%s\n' "$code" > "$work/setup-code"
       chmod 600 "$work/setup-code"
       "$setup_admin" --url "$url" --username "$admin_user" --setup-code-file "$work/setup-code" --out "$admin_out"
+      cleanup_setup_code
     elif [[ -n "$code" ]]; then
       printf 'Setup code: %s\n' "$code"
       echo "Next: ops/fly/setup-admin.sh --url $url --username <admin> --setup-code-file <private-file> --out <new-0600-file>"
@@ -176,6 +182,10 @@ case "$status" in
     fi
     ;;
   404)
+    cleanup_setup_code
+    if [[ -n "$admin_user" ]]; then
+      echo "Setup is already closed; no admin was created and --admin-out was not written." >&2
+    fi
     echo "Setup is already closed; use /login."
     ;;
   *) fail "unexpected setup HTTP status" ;;

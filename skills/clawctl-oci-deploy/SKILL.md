@@ -45,7 +45,7 @@ ops/oci/provision.sh --name clawctl-hub --destroy
 ## Verification
 
 - HTTPS `/healthz` returns 200 with valid TLS. Never disable certificate verification.
-- Wrong Host on `/login` returns 421 when the request reaches Hub. `/healthz` intentionally stays open for probes and is not the Host test. Caddy only routes the configured site, so a foreign Host may never reach Hub; check Hub with the wrong Host from the compose network if the edge does not.
+- Through Caddy, a foreign Host on any path returns 421 at the edge: `curl -H 'Host: wrong.example' https://<host>/login`. The in-network `docker run` check of Hub in `docs/DEPLOY-OCI.md` is an optional deeper check. `/healthz` on Hub directly is still exempt.
 - MFA is required: after enrollment, password-only login does not create a session. Complete authenticator verification privately.
 - Audit client IP is the real client, not an address in the Docker bridge (`CLAWCTL_DOCKER_SUBNET`, default `172.31.87.0/24`). Caddy's `trusted_proxies` stays unset so client-supplied forwarded headers are ignored. Hub trusts only that bridge.
 - Perform an enroll/retire drill with a disposable agent in an isolated HOME. Use a keyed Linux installer (amd64 and arm64) or `clawctl-agent enroll` with private token input. Verify identity and a fresh HTTPS check-in, then retire. Keep the token out of chat.
