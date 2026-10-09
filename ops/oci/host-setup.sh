@@ -54,15 +54,62 @@ open_port() {
   fi
 }
 
+# Update only our unrestricted INPUT accepts; leave other saved tables/rules intact.
+# A missing file is seeded from filter only, excluding daemon-owned chains.
+persist_port_rules() {
+  local file=$1 save_bin=iptables-save tmp input port line in_filter=0 inserted=0
+  shift
+  local -a ports=("$@")
+  [[ "$file" != *.v6 ]] || save_bin=ip6tables-save
+  tmp=$(mktemp "${file}.tmp.XXXXXX") || return 1
+  if [[ -f "$file" ]]; then
+    [[ -e "$file.clawctl-bak" ]] || cp -p "$file" "$file.clawctl-bak"
+    input=$file
+  else
+    input="${tmp}.input"
+    if ! "$save_bin" -t filter > "$input"; then
+      rm -f "$tmp" "$input"
+      return 1
+    fi
+    # Remove declarations, rules in daemon chains, and jumps/gotos to them.
+    sed -E '/^:(ts-[^ ]*|DOCKER[^ ]*) /d; /(^|[[:space:]])(ts-[^[:space:]]*|DOCKER[^[:space:]]*)([[:space:]]|$)/d' "$input" > "$tmp"
+    mv "$tmp" "$input"
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" != '*filter' ]] || { in_filter=1; inserted=0; }
+    if [[ "$in_filter" == 1 ]]; then
+      for port in "${ports[@]}"; do
+        if [[ "$line" == "-A INPUT -p tcp -m tcp --dport $port -j ACCEPT" ||
+              "$line" == "-A INPUT -p tcp -m state --state NEW -m tcp --dport $port -j ACCEPT" ]]; then
+          continue 2
+        fi
+      done
+      if [[ "$inserted" == 0 && ( "$line" == COMMIT ||
+            "$line" =~ ^-A\ INPUT\ .*\ -j\ (REJECT|DROP)(\ |$) ||
+            "$line" =~ ^-A\ INPUT\ -j\ (REJECT|DROP)(\ |$) ) ]]; then
+        for port in "${ports[@]}"; do
+          printf '%s\n' "-A INPUT -p tcp -m tcp --dport $port -j ACCEPT"
+        done
+        inserted=1
+      fi
+      [[ "$line" != COMMIT ]] || in_filter=0
+    fi
+    printf '%s\n' "$line"
+  done < "$input" > "$tmp"
+  [[ "$input" == "$file" ]] || rm -f "$input"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$file"
+}
+
 persist_firewall() {
   install -d -m 755 /etc/iptables
-  iptables-save > /etc/iptables/rules.v4
-  if command -v ip6tables-save >/dev/null 2>&1; then
-    ip6tables-save > /etc/iptables/rules.v6 || true
+  persist_port_rules /etc/iptables/rules.v4 80 443
+  if [[ -f /etc/iptables/rules.v6 ]] &&
+      grep -q '^\*filter$' /etc/iptables/rules.v6 && grep -q '^-A INPUT ' /etc/iptables/rules.v6; then
+    persist_port_rules /etc/iptables/rules.v6 80 443
   fi
-  if command -v netfilter-persistent >/dev/null 2>&1; then
-    # Also load on boot via the persistent service. rules.v4 is already written.
-    netfilter-persistent save || echo "host-setup: warning: netfilter-persistent save failed; /etc/iptables/rules.v4 was still written" >&2
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl enable netfilter-persistent || echo "host-setup: warning: could not enable netfilter-persistent" >&2
   fi
 }
 
@@ -83,7 +130,7 @@ resolve_public_host() {
   fail "could not read the instance public IPv4 from OCI metadata"
 }
 
-if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+if [[ "${BASH_SOURCE[0]:-$0}" != "$0" ]]; then
   return 0
 fi
 
@@ -119,7 +166,7 @@ done
 
 if [[ "$dry_run" == 1 && "$public_host" == auto ]]; then
   echo "Plan: install Docker Engine and the compose plugin if missing."
-  echo "Plan: accept TCP 80 and 443 on INPUT before any REJECT/DROP, then persist with iptables-save and netfilter-persistent."
+  echo "Plan: accept TCP 80 and 443 on INPUT before any REJECT/DROP, then update saved port rules for netfilter-persistent."
   echo "Plan: clone $repo ref $git_ref into $src."
   echo "Plan: read the public IPv4 from instance metadata and use <ipv4-dashed>.sslip.io."
   echo "Plan: set CLAWCTL_AUTH_MODE=local and CLAWCTL_PUBLIC_URL=https://<ipv4-dashed>.sslip.io via the Autopilot compose pack."
@@ -137,7 +184,7 @@ esac
 
 if [[ "$dry_run" == 1 ]]; then
   echo "Plan: install Docker Engine and the compose plugin if missing."
-  echo "Plan: accept TCP 80 and 443 on INPUT before any REJECT/DROP, then persist with iptables-save and netfilter-persistent."
+  echo "Plan: accept TCP 80 and 443 on INPUT before any REJECT/DROP, then update saved port rules for netfilter-persistent."
   echo "Plan: clone $repo ref $git_ref into $src."
   echo "Plan: set CLAWCTL_AUTH_MODE=local and CLAWCTL_PUBLIC_URL=https://$host via the Autopilot compose pack."
   echo "clawctl-oci-url=https://$host"
@@ -155,8 +202,8 @@ if ! command -v netfilter-persistent >/dev/null 2>&1; then
   apt-get update
   apt-get install -y debconf-utils
   debconf-set-selections <<'EOF'
-iptables-persistent iptables-persistent/autosave_v4 boolean true
-iptables-persistent iptables-persistent/autosave_v6 boolean true
+iptables-persistent iptables-persistent/autosave_v4 boolean false
+iptables-persistent iptables-persistent/autosave_v6 boolean false
 EOF
   apt-get install -y iptables-persistent
 fi

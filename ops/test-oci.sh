@@ -1,5 +1,7 @@
 #!/bin/bash
 # Stubbed tests for the OCI Autopilot route. No cloud calls.
+# Tests intentionally isolate PATH and sourced globals in subshells.
+# shellcheck disable=SC2030,SC2031
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -422,7 +424,7 @@ PY
 )
 
 test_destroy_confirmation() (
-  local tmp pub before
+  local tmp pub
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   prep "$tmp"
@@ -534,7 +536,7 @@ PY
     # shellcheck disable=SC1091
     source ops/oci/host-setup.sh
     export PATH="$tmp/path:/usr/bin:/bin" IPT_RULES="$tmp/rules"
-    [[ "$(sslip_from_ip 150.136.50.3)" == "150-136-50-3.sslip.io" ]]
+    [[ "$(sslip_from_ip 203.0.113.10)" == "203-0-113-10.sslip.io" ]]
     open_port iptables 80
     open_port iptables 443
     open_port iptables 80
@@ -552,9 +554,9 @@ for port in ("80", "443"):
     if rules.index(hits[0]) > rules.index(rules[-1]):
         raise SystemExit("port inserted after REJECT")
 PY
-  bash ops/oci/host-setup.sh --dry-run --public-host 150-136-50-3.sslip.io >"$tmp/dry" 2>"$tmp/dry.err"
+  bash ops/oci/host-setup.sh --dry-run --public-host 203-0-113-10.sslip.io >"$tmp/dry" 2>"$tmp/dry.err"
   grep -q 'CLAWCTL_AUTH_MODE=local' "$tmp/dry"
-  grep -q 'CLAWCTL_PUBLIC_URL=https://150-136-50-3.sslip.io' "$tmp/dry"
+  grep -q 'CLAWCTL_PUBLIC_URL=https://203-0-113-10.sslip.io' "$tmp/dry"
   grep -q 'sslip.io' "$tmp/dry.err"
   if bash ops/oci/host-setup.sh --dry-run --public-host auto --repo 'http://example.invalid/repo' >"$tmp/bad" 2>"$tmp/bad.err"; then
     echo "fail: non-https repo accepted"
@@ -570,6 +572,15 @@ test_install_hub_ssh() (
   cat > "$tmp/bin/ssh" <<'SH'
 #!/bin/bash
 printf '%s\n' "$*" >> "$SSH_LOG"
+if [[ " $* " == *" -G "* ]]; then
+  printf 'hostname %s\nuser configured-user\n' "${SSH_HOSTNAME:-203.0.113.10}"
+  exit 0
+fi
+if [[ "${SSH_FAIL:-0}" == 1 ]]; then exit 1; fi
+if [[ "$*" == *"bash -s"* && "$*" == *"--dry-run"* ]]; then
+  bash -s -- --dry-run --public-host 203-0-113-10.sslip.io
+  exit $?
+fi
 if [[ "$*" == *"bash -s"* ]]; then
   printf '%s\n' "remote ready" "clawctl-oci-url=https://203-0-113-10.sslip.io" "clawctl-setup-code=${STUB_CODE}"
 fi
@@ -612,7 +623,32 @@ SH
   : > "$SSH_LOG"
   bash ops/oci/install-hub.sh --dry-run --host 203.0.113.10 >"$tmp/dry" 2>"$tmp/dry.err"
   grep -q '203-0-113-10.sslip.io' "$tmp/dry.err"
-  [[ ! -s "$SSH_LOG" ]]
+  grep -q ' true$' "$SSH_LOG"
+  grep -q 'bash -s -- --dry-run' "$SSH_LOG"
+  [[ "$(grep -c 'bash -s' "$SSH_LOG")" == 1 ]]
+  grep -q 'SSH reachable' "$tmp/dry"
+  grep -q '^Plan: install Docker' "$tmp/dry"
+  grep -q 'No changes were made.' "$tmp/dry"
+  : > "$SSH_LOG"
+  : > "$tmp/config"
+  bash ops/oci/install-hub.sh --dry-run --host my_vm --ssh-config "$tmp/config" \
+    --public-host 203-0-113-10.sslip.io >"$tmp/alias" 2>"$tmp/alias.err"
+  grep -q -- "-F $tmp/config" "$SSH_LOG"
+  grep -q ' my_vm true$' "$SSH_LOG"
+  if grep -q 'ubuntu@' "$SSH_LOG"; then exit 1; fi
+  : > "$SSH_LOG"
+  bash ops/oci/install-hub.sh --dry-run --host myvm --user operator \
+    --public-host 203-0-113-10.sslip.io >"$tmp/user" 2>"$tmp/user.err"
+  grep -q ' operator@myvm true$' "$SSH_LOG"
+  if SSH_HOSTNAME=100.64.0.10 bash ops/oci/install-hub.sh --dry-run --host myvm >"$tmp/private" 2>"$tmp/private.err"; then
+    echo 'fail: CGNAT alias accepted without --public-host'; exit 1
+  fi
+  grep -q -- '--public-host' "$tmp/private.err"
+  if SSH_FAIL=1 bash ops/oci/install-hub.sh --dry-run --host myvm \
+    --public-host hub.example.com >"$tmp/unreachable" 2>"$tmp/unreachable.err"; then
+    echo 'fail: unreachable SSH accepted'; exit 1
+  fi
+  grep -q 'reachability probe failed' "$tmp/unreachable.err"
   bash ops/oci/install-hub.sh --host 203.0.113.10 --public-host 203-0-113-10.sslip.io \
     >"$tmp/out" 2>"$tmp/err"
   [[ "$(grep -c '^Setup code: stub-setup-code-do-not-print$' "$tmp/out")" == 1 ]]
@@ -639,9 +675,77 @@ SH
   grep -q 'already closed' "$tmp/second"
 )
 
+test_persist_port_rules() (
+  local tmp port
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  # shellcheck disable=SC1091
+  source ops/oci/host-setup.sh
+  cat > "$tmp/rules.v4" <<'EOF'
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+-A INPUT -p tcp -m state --state NEW -m tcp --dport 22 -j ACCEPT
+-A INPUT -p tcp -m state --state NEW -m tcp --dport 80 -j ACCEPT
+-A INPUT -j REJECT --reject-with icmp-host-prohibited
+-A INPUT -p tcp -m tcp --dport 80 -j ACCEPT
+COMMIT
+*nat
+:PREROUTING ACCEPT [0:0]
+COMMIT
+EOF
+  cp "$tmp/rules.v4" "$tmp/original"
+  persist_port_rules "$tmp/rules.v4" 80 443
+  cmp "$tmp/original" "$tmp/rules.v4.clawctl-bak"
+  for port in 80 443; do
+    [[ "$(grep -c -- "--dport $port " "$tmp/rules.v4")" == 1 ]]
+    [[ "$(grep -n -- "--dport $port " "$tmp/rules.v4" | cut -d: -f1)" -lt \
+       "$(grep -n -- '-j REJECT' "$tmp/rules.v4" | cut -d: -f1)" ]]
+  done
+  if grep -Eq 'ts-|DOCKER' "$tmp/rules.v4"; then exit 1; fi
+  cp "$tmp/rules.v4" "$tmp/first"
+  persist_port_rules "$tmp/rules.v4" 80 443
+  cmp "$tmp/first" "$tmp/rules.v4"
+  cmp "$tmp/original" "$tmp/rules.v4.clawctl-bak"
+  [[ "$(stat -c '%a' "$tmp/rules.v4")" == 644 ]]
+  cp "$tmp/original" "$tmp/rules.v6"
+  persist_port_rules "$tmp/rules.v6" 80 443
+  cmp "$tmp/first" "$tmp/rules.v6"
+  mkdir "$tmp/bin"
+  cat > "$tmp/bin/iptables-save" <<'SH'
+#!/bin/bash
+[[ "$*" == '-t filter' ]] || exit 1
+cat <<'EOF'
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:ts-input - [0:0]
+:ts-forward - [0:0]
+:DOCKER - [0:0]
+:DOCKER-USER - [0:0]
+-A INPUT -j ts-input
+-A ts-input -j ACCEPT
+-A FORWARD -j DOCKER-USER
+-A DOCKER -j ACCEPT
+-A INPUT -p tcp -m tcp --dport 22 -j ACCEPT
+COMMIT
+EOF
+SH
+  chmod 755 "$tmp/bin/iptables-save"
+  export PATH="$tmp/bin:$PATH"
+  persist_port_rules "$tmp/new.v4" 80 443
+  if grep -Eq 'ts-|DOCKER' "$tmp/new.v4"; then exit 1; fi
+  grep -q -- '--dport 22' "$tmp/new.v4"
+  for port in 80 443; do
+    [[ "$(grep -c -- "--dport $port " "$tmp/new.v4")" == 1 ]]
+  done
+  [[ "$(tail -n 1 "$tmp/new.v4")" == COMMIT ]]
+)
+
 test_shellcheck() {
   if command -v shellcheck >/dev/null 2>&1; then
-    shellcheck ops/oci/provision.sh ops/oci/install-hub.sh ops/oci/host-setup.sh
+    shellcheck ops/oci/*.sh ops/test-oci.sh
   else
     echo "shellcheck not installed; skipping automation lint"
   fi
@@ -655,4 +759,5 @@ run_test test_destroy_confirmation test_destroy_confirmation
 run_test test_cidr_overlap_refuses test_cidr_overlap_refuses
 run_test test_host_setup_firewall_and_dry_run test_host_setup_firewall_and_dry_run
 run_test test_install_hub_ssh test_install_hub_ssh
+run_test test_persist_port_rules test_persist_port_rules
 run_test test_shellcheck test_shellcheck

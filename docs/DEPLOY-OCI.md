@@ -37,7 +37,7 @@ Defaults:
 
 Ashburn often returns "out of host capacity". The script tries availability domains AD-1, then AD-3, then AD-2, then sleeps (`--capacity-interval`, default 60 seconds) until `--capacity-max-wait` (default 30 minutes).
 
-Cloud-init installs Docker and the Compose plugin, writes `CLAWCTL_AUTH_MODE=local` and `CLAWCTL_PUBLIC_URL`, and starts the Autopilot pack. It also opens host ports 80 and 443. Oracle's Ubuntu images ship an iptables `INPUT` chain that **rejects everything except SSH**. Opening those ports only in the security list is not enough. The script inserts the accepts **before** the REJECT rule and saves them to `/etc/iptables/rules.v4` (`netfilter-persistent` when it is installed).
+Cloud-init installs Docker and the Compose plugin, writes `CLAWCTL_AUTH_MODE=local` and `CLAWCTL_PUBLIC_URL`, and starts the Autopilot pack. It also opens host ports 80 and 443. Oracle's Ubuntu images ship an iptables `INPUT` chain that **rejects everything except SSH**. Opening those ports only in the security list is not enough. The script inserts the accepts **before** the REJECT rule and updates them in `/etc/iptables/rules.v4`, loaded at boot by `netfilter-persistent`, without saving live Tailscale or Docker chains.
 
 When the instance is running, the script prints the public IP and the HTTPS URL. It then waits for `/healthz`. If you only want the VM back immediately, pass `--no-wait`; cloud-init still installs the Hub.
 
@@ -61,7 +61,7 @@ ops/oci/install-hub.sh --host <ip-or-name> --dry-run
 ops/oci/install-hub.sh --host <ip-or-name>
 ```
 
-An IPv4 `--host` with no `--public-host` becomes `<dashed-ip>.sslip.io`. The same firewall fix runs here. The compose pack is the one in [Autopilot](AUTOPILOT.md): Caddy owns 80/443, Hub listens only on the Docker bridge, and `CLAWCTL_TRUSTED_PROXIES` is that bridge so the audit log shows the real client IP.
+An effective public IPv4 from SSH config with no `--public-host` becomes `<dashed-ip>.sslip.io`. The same firewall fix runs here. The compose pack is the one in [Autopilot](AUTOPILOT.md): Caddy owns 80/443, Hub listens only on the Docker bridge, and `CLAWCTL_TRUSTED_PROXIES` is that bridge so the audit log shows the real client IP.
 
 ## Remove the stack
 
@@ -86,3 +86,11 @@ Type the name when asked. Destroy terminates that instance and deletes only its 
 - **Ports 80/443 time out, security list is open.** The host iptables REJECT is still in front. Re-run `install-hub.sh`.
 - **Certificate errors.** The name must resolve to this VM. sslip.io does. A custom name needs an A record before Caddy can finish ACME. Do not enroll agents until HTTPS for the final name works.
 - **Setup already closed.** Use `/login`. Do not try to recover an old setup code from logs.
+
+To reach the VM over an SSH alias (for example Tailscale with public port 22 closed):
+
+```sh
+ops/oci/install-hub.sh --host myvm --public-host 203-0-113-10.sslip.io --dry-run
+```
+
+The alias uses SSH config's User, HostName, and ProxyCommand; `--user` overrides User and `--ssh-config FILE` selects a config file. Supply `--public-host` for private addresses or aliases resolving to DNS names. Otherwise an effective public IPv4 becomes a sslip.io name. Dry-run probes SSH and prints the remote setup plan without changing the VM.

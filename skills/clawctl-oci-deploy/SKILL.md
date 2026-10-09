@@ -65,3 +65,11 @@ ops/oci/provision.sh --name clawctl-hub --destroy
 - **80/443 blocked though the security list is open:** Oracle Ubuntu images REJECT every host port except 22. `install-hub.sh` inserts accepts before that REJECT and writes `/etc/iptables/rules.v4`. Re-run it; do not only change the security list.
 - **ACME / TLS errors:** the public name must point at the VM. sslip.io does. A custom domain needs DNS first. Do not enroll real machines until that URL is the one in `CLAWCTL_PUBLIC_URL`.
 - **Setup already closed (`/setup` 404):** use `/login`. Do not mine old codes out of logs.
+
+To reach the VM over an SSH alias (for example Tailscale with public port 22 closed):
+
+```sh
+ops/oci/install-hub.sh --host myvm --public-host 203-0-113-10.sslip.io --dry-run
+```
+
+The alias uses SSH config's User, HostName, and ProxyCommand; `--user` overrides User and `--ssh-config FILE` selects a config file. Supply `--public-host` for private addresses or aliases resolving to DNS names. Otherwise an effective public IPv4 becomes a sslip.io name. Dry-run probes SSH and prints the remote setup plan without changing the VM.
