@@ -485,6 +485,14 @@ func openClaw(ctx context.Context, home string, tools []model.CLITool) model.Ope
 		oc.Reason = "no ~/.openclaw"
 		return oc
 	}
+	// install-agent.sh pre-creates an empty ~/.openclaw so the agent sandbox can
+	// write there later (ReadWritePaths must exist at unit start). An empty
+	// directory is that placeholder, not an OpenClaw install: counting it as
+	// present turns every host without OpenClaw into a Degraded workload.
+	if entries, err := os.ReadDir(root); err == nil && len(entries) == 0 {
+		oc.Reason = "empty ~/.openclaw (installer placeholder; OpenClaw not installed)"
+		return oc
+	}
 	oc.Present = true
 
 	// CLI 版號沿用 cliTools 的結果 —— `openclaw --version` 很慢，跑一次就好。

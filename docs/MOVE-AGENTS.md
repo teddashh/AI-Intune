@@ -31,23 +31,13 @@ For each machine you want to move, follow these steps:
 5. Check the machine page on the new Hub's UI. A recent check-in timestamp serves as proof of a successful move.
 6. Retire the machine on the old Hub only AFTER the new Hub shows a check-in.
 
-## Rollback steps
+## Rollback
 
-If the move fails or you need to revert, use the automatic backup created during re-enrollment:
-1. Locate the backup file in `~/.config/clawctl/` (named `agent.json.pre-reenroll-<UTC timestamp>`).
-2. Restore the backup over `agent.json`:
-   ```bash
-   cp ~/.config/clawctl/agent.json.pre-reenroll-<timestamp> ~/.config/clawctl/agent.json
-   ```
-3. Rerun the OLD Hub's bootstrap installer without `--reenroll`:
-   ```bash
-   ./install-agent.sh --hub http://OLD:PORT
-   ```
-   This ensures the binary matches the old Hub's version again (same `hub_url` → it skips enrollment), which also restarts the service.
-4. Retire the machine on the new Hub, since it now holds an enrollment you are abandoning.
+Linux `--reenroll` first enrolls the new identity into a private staging config while the old agent keeps running. It copies the old config to `agent.json.pre-reenroll-<UTC timestamp>` (0600), records active/enabled units, and backs up the previous system unit and binary before switching. The system unit uses the root-owned `/usr/local/bin/clawctl-agent`; the legacy `~/.local/bin/clawctl-agent` is retained.
 
-> [!IMPORTANT]
-> The backup file still contains the old machine credential: keep it `0600` and delete it once the old Hub is retired.
+If enrollment fails, the old service and config remain in place. If service startup, Hub verification, or post-start checks fail, the installer automatically restores the old config, system unit and binary, and restarts previously active services. It preserves the failed config as `agent.json.failed-reenroll-<UTC timestamp>` (0600). Retire the abandoned identity on the **new Hub** after a rollback. If automatic recovery fails, follow the manual recovery steps printed by the installer.
+
+After a successful move, the legacy user unit is disabled and removed, and the backup path is printed. Retire the previous identity on the **old Hub**. Keep the private config backup until the move is confirmed; it contains the old credential. For a later manual rollback, stop the current agent, restore the backup to `~/.config/clawctl/agent.json` with mode 0600, and rerun the old Hub installer without `--reenroll` to reinstall its matching binary and unit.
 
 ## Canary order advice
 

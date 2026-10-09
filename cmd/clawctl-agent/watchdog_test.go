@@ -29,6 +29,7 @@ func TestAgentUnitIsRenderedAsAnUnprivilegedSystemService(t *testing.T) {
 	}
 	for _, want := range [][]byte{
 		[]byte("User=@@CLAWCTL_AGENT_USER@@"),
+		[]byte("ExecStart=@@CLAWCTL_AGENT_BIN@@"),
 		[]byte("Environment=HOME=@@CLAWCTL_AGENT_HOME@@"),
 		[]byte("Environment=XDG_RUNTIME_DIR=/run/user/@@CLAWCTL_AGENT_UID@@"),
 		[]byte("ProtectSystem=strict"),

@@ -1,7 +1,7 @@
 # clawctl-agent —— systemd system unit template
 #
 # install-agent.sh / upgrade-agent.sh 會在放進 /etc/systemd/system 前渲染
-# @@CLAWCTL_AGENT_USER@@、@@CLAWCTL_AGENT_UID@@ 與 @@CLAWCTL_AGENT_HOME@@。
+# @@CLAWCTL_AGENT_USER@@、@@CLAWCTL_AGENT_UID@@、@@CLAWCTL_AGENT_HOME@@ 與 @@CLAWCTL_AGENT_BIN@@。
 #
 # Agent 仍以這個普通使用者執行，所以只能讀該使用者的 0600 憑證；
 # 差別是 unit 由 system manager 建立 mount namespace。這讓
@@ -22,7 +22,7 @@ User=@@CLAWCTL_AGENT_USER@@
 Environment=HOME=@@CLAWCTL_AGENT_HOME@@
 Environment=XDG_RUNTIME_DIR=/run/user/@@CLAWCTL_AGENT_UID@@
 Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/@@CLAWCTL_AGENT_UID@@/bus
-ExecStart=@@CLAWCTL_AGENT_HOME@@/.local/bin/clawctl-agent
+ExecStart=@@CLAWCTL_AGENT_BIN@@
 Restart=always
 RestartSec=5
 
