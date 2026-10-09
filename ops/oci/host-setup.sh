@@ -35,7 +35,7 @@ for nic in data:
 # so Oracle Ubuntu images, which REJECT everything except SSH, cannot shadow it.
 open_port() {
   local bin=$1 port=$2
-  if "$bin" -C INPUT -p tcp -m tcp --dport "$port" -j ACCEPT 2>/dev/null; then
+  if "$bin" -C INPUT -p tcp -m tcp --dport "$port" -j ACCEPT >/dev/null 2>&1; then
     return 0
   fi
   local n=1 line inserted=0
