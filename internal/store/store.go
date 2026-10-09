@@ -603,6 +603,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("store: migrate: %w", err)
 	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS hub_accounts_email ON hub_accounts(email) WHERE email IS NOT NULL`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("store: migrate account email index: %w", err)
+	}
 	// auth_subject may be absent until addMissingColumns on legacy databases.
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_audit_auth_action_at ON audit_log(auth_subject, action, at)`); err != nil {
 		db.Close()
@@ -831,6 +835,7 @@ func addMissingColumns(db *sql.DB) error {
 	}
 	defer tx.Rollback()
 	want := map[string]map[string]string{
+		"hub_accounts": {"auth_generation": "INTEGER NOT NULL DEFAULT 0", "email": "TEXT", "role": "TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin'))"},
 		// ⚠ agent_started_at 是 2026-09-03 事故後補的。舊 DB 沒有這欄，
 		// 而那些機器正是最需要被抓出來的那批。
 		"machine_checkins": {

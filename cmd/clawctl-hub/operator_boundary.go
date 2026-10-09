@@ -142,6 +142,12 @@ var nonOperatorRoutePolicies = map[string]nonOperatorRoutePolicy{
 // A newly registered control route therefore fails closed until somebody
 // classifies that exact ServeMux pattern in review.
 var operatorRoutePolicies = map[string]operatorRoutePolicy{
+	"GET /account/users":                               {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/users/create":                       {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/users/disable":                      {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/users/enable":                       {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/users/email":                        {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/users/rename":                       {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"GET /account/security":                            {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /account/security/totp/begin":                {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /account/security/totp/confirm":              {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
@@ -399,6 +405,7 @@ func newOperatorBoundary(next *http.ServeMux, authorizer operatorRequestAuthoriz
 		// policy here so this handler cannot attach the terminal profile to
 		// some other route, even if the matched policy claimed it.
 		b.writeSecurityHeaders(w, r, operatorSecurityLocked)
+		recordUserBoundaryFailure(st, r, "cross-origin request rejected")
 		b.observeBoundaryDenial(r, pattern, policy, csrfDecisionCode,
 			"cross_origin_mutation")
 		writeOperatorBoundaryError(w, policy.Representation, http.StatusForbidden, csrfDecisionCode,
@@ -656,6 +663,7 @@ func (b *operatorBoundary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !enabled {
+			recordUserBoundaryFailure(b.store, authed, "MFA enrollment required")
 			if policy.Representation == operatorHTML {
 				http.Redirect(w, r, "/account/security", 303)
 			} else {

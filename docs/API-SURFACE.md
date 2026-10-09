@@ -3,13 +3,13 @@
 > 這是控制面 parity 的帳本，不是行銷功能表。只要正常操作仍只有 CLI，
 > 就留在「缺口」欄；高風險不是把入口藏起來，而是補 RBAC、preview、確認、
 > 冪等與 audit。共同成功語意見 [CONTROL-PLANE-CONTRACT.md](CONTROL-PLANE-CONTRACT.md)。
-> 逐一對照 234 個 HTTP operations（24 non-operator＋210 operator；107 條 operator JSON）、
+> 逐一對照 240 個 HTTP operations（24 non-operator＋216 operator；107 條 operator JSON）、
 > native Store、UI／CLI 與 Intune-style submenu 的完整清單，
 > 見 [FEATURE-INVENTORY.md](FEATURE-INVENTORY.md)。
 
 ## Public local-account routes (Autopilot)
 
-These six operations are included in the 234-operation tally above (24 non-operator + 210 operator). The inventory/contract excludes these six public account operations and totals 228. Account routes return 404 in `tailscale` mode. In `local` / `both`, they pin Host to `CLAWCTL_PUBLIC_URL`, use locked security headers and Go CrossOriginProtection, and do not require an existing operator session.
+These six operations are included in the 240-operation tally above (24 non-operator + 216 operator). The inventory/contract excludes these six public account operations and totals 234. Account routes return 404 in `tailscale` mode. In `local` / `both`, they pin Host to `CLAWCTL_PUBLIC_URL`, use locked security headers and Go CrossOriginProtection, and do not require an existing operator session.
 
 | Method | Route | Authority / behavior |
 |---|---|---|
@@ -20,7 +20,7 @@ These six operations are included in the 234-operation tally above (24 non-opera
 
 | Method | Operator download route | Authority / behavior |
 |---|---|---|
-| `POST` | `/machines/{id}/keyed-installer` | Admin, locked browser security profile and CSRF checks; form `token` + Linux `arch` (`amd64` / `arm64`); returns no-store archive embedding Hub URL and pending one-time token without redeeming it. Already included in the 210 operator tally. |
+| `POST` | `/machines/{id}/keyed-installer` | Admin, locked browser security profile and CSRF checks; form `token` + Linux `arch` (`amd64` / `arm64`); returns no-store archive embedding Hub URL and pending one-time token without redeeming it. Already included in the 216 operator tally. |
 
 In local mode operator routes use a local admin session, including `/metrics`; in `both`, sessions precede eligible WhoIs fallback. Forwarded identity headers and machine/verifier bearers never authorize operators. The Tailscale-specific explanations below describe the advanced mode. See [Autopilot](AUTOPILOT.md) for setup, expiry, lockout and recovery.
 
@@ -530,3 +530,12 @@ All six routes require a local session principal; Tailscale principals receive 4
 | POST | `/account/security/recovery-codes/regenerate` | Requires current password and unused authenticator code; replaces all ten codes and shows them once with `Cache-Control: no-store`. Recovery codes are not accepted; failures count toward lockout; audit excludes codes. Host alternative: `regenerate-recovery-codes --db PATH --username U` (stop Hub first). |
 
 MFA enforcement defaults on in `local` / `both`; local sessions without MFA redirect from operator HTML routes to `/account/security`, and other operator routes return 403 `MFA_ENROLLMENT_REQUIRED`. Enrollment and logout remain accessible. Explicit `CLAWCTL_REQUIRE_MFA=0` / `false` / `off` opts out with startup and UI warnings; invalid values refuse startup. Tailscale principals are unaffected.
+
+## Admin users
+
+`GET /account/users` lists username, email, role, disabled state, MFA enrollment
+and creation time. `POST /account/users/create`, `/disable`, `/enable`, `/email`,
+and `/rename` require active local admin sessions and password/TOTP re-auth.
+These six operator HTML routes use CSRF protection, bounded bodies, IP limiting,
+no-store responses and the standard forced MFA boundary. Tailscale principals
+receive 404. See [operator authentication](OPERATOR-AUTH.md#multiple-admin-accounts).

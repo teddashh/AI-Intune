@@ -109,7 +109,7 @@ Use [Oracle Cloud](DEPLOY-OCI.md) when you want the same Docker + Caddy pack on 
 
 ## Headless admin and lost-password recovery
 
-Both commands require an **existing initialized Hub database**, explicit `--db` and `--username`, and read the password from **stdin**, not a password flag. Run as the database owner. Stop the Hub for this maintenance workflow, then restart it. `bootstrap-admin` creates only the first account; `reset-admin-password` changes the existing admin password, clears lockout, and revokes that account's sessions.
+Both commands require an **existing initialized Hub database**, explicit `--db` and `--username`, and read the password from **stdin**, not a password flag. Run as the database owner. Stop the Hub for this maintenance workflow, then restart it. `bootstrap-admin` creates only the first account; `reset-admin-password` changes the selected admin password, clears lockout, and revokes that account's sessions.
 
 `regenerate-recovery-codes --db PATH --username U` is also available for an MFA-enabled admin; it prints ten new recovery codes and takes no password on stdin. Stop the Hub before running it.
 
@@ -184,7 +184,7 @@ On Fly the rightmost `X-Forwarded-For` entry is the app's own edge address. Fly 
 - Passwords use **Argon2id** and a **12-character minimum** (enforced as 12 bytes). **5 consecutive failures** lock only that **(account, client key)** pair for **15 minutes**. IPv4 keys use the address; IPv6 keys use its /64 prefix (IPv4-mapped IPv6 uses IPv4). An attacker can lock out their own key; an admin on another key is unaffected. Audit/session sources retain the full address. Completing login resets only its pair; with MFA enabled, password verification alone does not clear failures; password reset clears all pairs. Rows older than 24 hours are pruned opportunistically. At least 50 failures across IPs in one rolling hour produce one audit signal per hour, without blocking the account. Password and second-factor failures both feed this signal. Distributed guessing is slowed by Argon2id, per-IP buckets, the password minimum, and required MFA.
 - Login/setup POSTs share a per-client-key token bucket: **10/minute**, burst **5**. Enrollment uses **30/minute**, burst **30**. Behind a proxy, configure trusted proxies or every client shares the proxy IP, bucket and lockout pair. Each limiter holds at most 4096 buckets, pruning idle entries and evicting the least recently updated bucket when full so new admin sources remain eligible. An evicted attacker regains only a fresh burst.
 - Sessions expire after **12 hours idle** or **7 days absolute**. Cookies are HttpOnly and SameSite=Lax; HTTPS uses a Secure `__Host-` cookie. HTTPS mode emits HSTS. Go `CrossOriginProtection` checks browser writes; Host is pinned to `PUBLIC_URL`. `/metrics` requires an operator session in local mode; `/healthz` remains a content-free public probe and is exempt from the Host check on Hub directly. Through the Docker pack's Caddy, a foreign Host on any path returns 421 at the edge: `curl -H 'Host: wrong.example' https://<host>/login`. The in-network `docker run` check in [OCI verification](DEPLOY-OCI.md#checks) is an optional deeper check of Hub itself.
-- **TOTP MFA is required by default in local and both modes** and currently there is **one admin account** (multi-user/roles planned). Local admin authorizes all three operator capabilities. Operator **CLI/MCP transport remains Tailscale-mode only**; operator API tokens are a follow-up. The local maintenance commands above are separate from that HTTP transport.
+- **TOTP MFA is required by default in local and both modes** and currently supports **multiple admin accounts**. Local admin authorizes all three operator capabilities. Operator **CLI/MCP transport remains Tailscale-mode only**; operator API tokens are a follow-up. The local maintenance commands above are separate from that HTTP transport.
 
 ## Advanced: private mesh + WhoIs
 
@@ -209,6 +209,38 @@ The server must retain the TOTP secret to verify codes. It is stored as-is: **da
 Linux agents use the root-owned `/usr/local/bin/clawctl-agent` in the system unit. Installation replaces the binary atomically and restores its SELinux label when SELinux is enabled. Any existing `~/.local/bin/clawctl-agent` stays available for legacy units and rollback.
 
 For observation and check-in only, pass `--no-container-runtime` to skip podman installation, subordinate ID setup, and the rootless readiness probe. Hub-pushed Hermes container jobs need podman; the default still sets it up.
+
+## Multiple admin accounts
+
+Sign in using a username or optional email; both are trimmed and case-insensitive.
+Emails must be plain ASCII addresses (no display name).
+All local accounts currently have the admin role. Open `/account/users` from
+Account security to create, enable, disable, rename users, or change/clear email.
+Email and username must be unique. Every mutation requires your current password
+and an unused current authenticator code (recovery codes are not accepted). When
+MFA enforcement is explicitly disabled and you have no enrolled factor, password
+alone is accepted. You cannot disable yourself or the last active admin.
+Disabling a user revokes all their sessions. Renaming preserves sessions.
+New users have no MFA and, with enforcement enabled (default), their first login
+opens `/account/security` for forced enrollment; other routes stay blocked until
+confirmation. Recovery codes appear once after confirmation.
+
+With the Hub stopped, host maintenance commands require an existing database:
+
+```sh
+clawctl-hub add-admin --db PATH --username alice --email alice@example.com < password-file
+clawctl-hub set-email --db PATH --username alice --email alice@example.com
+clawctl-hub set-email --db PATH --username alice --email ""
+clawctl-hub rename-user --db PATH --username alice --new-username carol
+clawctl-hub disable-user --db PATH --username bob
+clawctl-hub enable-user --db PATH --username bob
+clawctl-hub reset-admin-password --db PATH --username alice < password-file
+```
+
+`add-admin` reads a 12–256 byte password from stdin, like `bootstrap-admin`, and
+works with existing accounts. `reset-admin-password` selects the normalized
+username; optional `--disable-mfa` forces enrollment again. Host disable also
+protects the last active admin. User mutations are audit logged without passwords.
 
 ## Linux agent proxy settings
 
