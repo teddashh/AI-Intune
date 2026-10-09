@@ -435,7 +435,7 @@ test_autopilot() (
   trap 'rm -rf "$tmpdir"' EXIT
   mkdir "$tmpdir/bin"
   export PATH="$tmpdir/bin:$PATH" STUB_DIR="$tmpdir" FLY_API_TOKEN=stub-auth
-  unset FLY_APP FLY_ORG FLY_REGION FLY_SECRETS_FILE
+  unset FLY_APP FLY_ORG FLY_REGION FLY_SECRETS_FILE FLY_PUBLIC_URL
   cat > "$tmpdir/bin/fly" <<'STUB'
 #!/bin/bash
 set -euo pipefail
@@ -450,7 +450,9 @@ case "$1 $2" in
     if [[ "${STUB_MISSING:-0}" == 1 ]]; then echo '[]'
     else echo '[{"id":"vol_test","name":"clawctl_data"},{"id":"vol_other","name":"other"}]'; fi ;;
   'machines list') echo '[{"id":"machine_test"}]' ;;
-  'logs -a') echo 'first-run setup: open https://test-hub.fly.dev/setup and enter setup code stub-first-run-code' ;;
+  'logs -a')
+    echo 'unrelated log content that must stay private'
+    echo "first-run setup: open ${STUB_LOG_URL:-https://test-hub.fly.dev}/setup and enter setup code stub-first-run-code" ;;
   'deploy .')
     if [[ "${STUB_FAIL:-}" == other ]]; then echo 'unrelated failure'; exit 1; fi
     if [[ "${STUB_FAIL:-}" == depot ]]; then
@@ -491,6 +493,47 @@ STUB
   grep -q '^apps create test-hub --org test-org$' "$tmpdir/calls"
   grep -q '^volumes create clawctl_data --region iad --size 3 -a test-hub --yes$' "$tmpdir/calls"
   [[ $(grep -c '^Setup code: stub-first-run-code$' "$tmpdir/output") == 1 ]]
+
+  reset_stub
+  STUB_SETUP_STATUS=421 deploy
+  grep -q '421.*custom domain' "$tmpdir/output"
+  grep -q 'https://test-hub.fly.dev/healthz$' "$tmpdir/curl-calls"
+  grep -q 'https://test-hub.fly.dev/setup$' "$tmpdir/curl-calls"
+  ! grep -q '^logs ' "$tmpdir/calls"
+
+  reset_stub
+  deploy --public-url https://hub.example.com
+  grep -q 'https://hub.example.com/healthz$' "$tmpdir/curl-calls"
+  grep -q 'https://hub.example.com/setup$' "$tmpdir/curl-calls"
+  ! grep -q 'fly.dev' "$tmpdir/curl-calls"
+  grep -q 'already closed' "$tmpdir/output"
+  grep -q 'Next: open https://hub.example.com/setup' "$tmpdir/output"
+
+  reset_stub
+  if STUB_SETUP_STATUS=421 deploy --public-url https://hub.example.com; then
+    echo 'fail: explicit URL mismatch accepted'; exit 1
+  fi
+  grep -q '421.*CLAWCTL_PUBLIC_URL' "$tmpdir/output"
+
+  for invalid in http://hub.example.com https://hub.example.com/path https://hub.example.com/?q=x https://hub.example.com/#fragment https://user@hub.example.com https://-hub.example.com ''; do
+    reset_stub
+    if deploy --public-url "$invalid"; then echo 'fail: invalid public URL accepted'; exit 1; fi
+    [[ ! -s "$tmpdir/calls" && ! -s "$tmpdir/curl-calls" ]]
+  done
+
+  reset_stub
+  STUB_SETUP_STATUS=200 STUB_LOG_URL=https://hub.example.com deploy
+  [[ $(grep -c '^Setup code: stub-first-run-code$' "$tmpdir/output") == 1 ]]
+  ! grep -q 'unrelated log content' "$tmpdir/output"
+
+  reset_stub
+  FLY_PUBLIC_URL=https://hub.example.com:8443/ deploy
+  grep -q 'https://hub.example.com:8443/healthz$' "$tmpdir/curl-calls"
+  grep -q 'https://hub.example.com:8443/setup$' "$tmpdir/curl-calls"
+  reset_stub
+  FLY_PUBLIC_URL=https://hub.example.com deploy --dry-run
+  grep -q 'Wait for https://hub.example.com/healthz' "$tmpdir/output"
+  [[ ! -s "$tmpdir/calls" && ! -s "$tmpdir/curl-calls" ]]
 
   reset_stub
   STUB_FAIL=depot deploy
