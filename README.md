@@ -183,7 +183,7 @@ read current state → preview exact impact → confirm typed target
 
 ### Autopilot quick start (recommended)
 
-Follow [docs/AUTOPILOT.md](docs/AUTOPILOT.md) for Docker+Caddy, bare Linux, or [Fly.io Autopilot](docs/DEPLOY-FLY.md#autopilot-on-fly-recommended). For Docker+Caddy:
+Follow [docs/AUTOPILOT.md](docs/AUTOPILOT.md) for Docker+Caddy, bare Linux, [Fly.io Autopilot](docs/DEPLOY-FLY.md#autopilot-on-fly-recommended), or an [Oracle Cloud VM](docs/DEPLOY-OCI.md). For Docker+Caddy:
 
 1. Point DNS at your Linux host and open ports 80/443.
 2. Start the standalone Docker+Caddy Autopilot pack.
@@ -624,7 +624,7 @@ Hub 是控制 ledger，不是 AI 資料路徑。端點不開放 inbound 控制 p
 
 ## 快速開始
 
-建議先走本機管理員＋公開 HTTPS 的 [Autopilot 快速開始（英文）](docs/AUTOPILOT.md)；以下保留進階 Tailscale 路徑。
+建議先走本機管理員＋公開 HTTPS 的 [Autopilot 快速開始（英文）](docs/AUTOPILOT.md)（Docker、Fly.io，或 [Oracle Cloud VM](docs/DEPLOY-OCI.md)）；以下保留進階 Tailscale 路徑。
 
 ### 1. 準備工作（Before you start）
 

@@ -103,6 +103,10 @@ Do not add forwarded identity semantics. Follow steps 3–5 above for setup and 
 
 Use [Autopilot on Fly (recommended)](DEPLOY-FLY.md#autopilot-on-fly-recommended) for a hosted Hub without Tailscale: create the app and volume, stage optional R2/Telegram secrets, deploy the `hub-fly` image with `ops/fly/fly.toml`, read the setup code from `fly logs`, and create your admin with TOTP and recovery codes. Fly provides HTTPS at `https://<app>.fly.dev`; choose any custom domain before enrolling machines with keyed installers. Backups are optional but recommended.
 
+## Quick start D: Oracle Cloud VM
+
+Use [Oracle Cloud](DEPLOY-OCI.md) when you want the same Docker + Caddy pack on an Always Free Ampere VM. `ops/oci/provision.sh` creates the VCN and the VM; cloud-init installs Docker and opens host ports 80 and 443 (Oracle's Ubuntu images reject those ports even when the security list allows them). `ops/oci/install-hub.sh` repeats that setup on a VM you already have and can enroll the first admin with TOTP. Without a domain you get a `sslip.io` URL; choose a real name before enrolling machines.
+
 ## Headless admin and lost-password recovery
 
 Both commands require an **existing initialized Hub database**, explicit `--db` and `--username`, and read the password from **stdin**, not a password flag. Run as the database owner. Stop the Hub for this maintenance workflow, then restart it. `bootstrap-admin` creates only the first account; `reset-admin-password` changes the existing admin password, clears lockout, and revokes that account's sessions.
