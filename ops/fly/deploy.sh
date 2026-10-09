@@ -4,16 +4,20 @@ set -euo pipefail
 org=${FLY_ORG:-}
 app=${FLY_APP:-}
 region=${FLY_REGION:-iad}
+url=${FLY_PUBLIC_URL:-}
+public_url_given=0
+[[ -z "$url" ]] || public_url_given=1
 secrets_file=${FLY_SECRETS_FILE:-}
 dry_run=0
 destroy=0
 fail() { echo "deploy: $*" >&2; exit 1; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --org|--app|--region|--secrets-file)
+    --org|--app|--region|--secrets-file|--public-url)
       [[ $# -ge 2 ]] || fail "missing flag value"
       case "$1" in
         --org) org=$2 ;; --app) app=$2 ;; --region) region=$2 ;; --secrets-file) secrets_file=$2 ;;
+        --public-url) url=$2; public_url_given=1 ;;
       esac
       shift 2 ;;
     --dry-run) dry_run=1; shift ;;
@@ -25,6 +29,13 @@ done
 [[ "$region" =~ ^[a-z0-9]+$ ]] || fail "invalid or empty region"
 if [[ "$destroy" == 0 ]]; then
   [[ "$org" =~ ^[a-z0-9-]+$ ]] || fail "invalid or empty org"
+fi
+if [[ "$public_url_given" == 1 ]]; then
+  url=${url%/}
+  dns_label='[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?'
+  [[ "$url" =~ ^https://$dns_label(\.$dns_label)*(:[0-9]{1,5})?$ ]] || fail "public URL must be https://<dns-host>[:port] with no path, query, fragment, or userinfo"
+else
+  url="https://$app.fly.dev"
 fi
 fly=$(command -v fly || command -v flyctl) || fail "fly or flyctl not found on PATH"
 command -v python3 >/dev/null || fail "python3 not found on PATH"
@@ -73,7 +84,7 @@ if [[ "$dry_run" == 1 ]]; then
     plan deploy . --config '<temporary-config>' --dockerfile ops/docker/Dockerfile --build-target hub-fly --build-arg 'CLAWCTL_VERSION=<git-short-HEAD>' --ha=false --yes
     echo "On Depot/handshake/list workers failure: retry once with --depot=false; remove only newly created fly-builder-* apps."
     plan scale count 1 -a "$app" --yes
-    echo "Wait for https://$app.fly.dev/healthz; check /setup before reading a first-run code."
+    echo "Wait for $url/healthz; check /setup before reading a first-run code."
   fi
   exit 0
 fi
@@ -171,7 +182,6 @@ if ! "$fly" "${args[@]}" > "$work/deploy" 2>&1; then
   [[ "$retry_failed" == 0 ]] || fail "classic builder deploy failed (output withheld to protect secrets)"
 fi
 "$fly" scale count 1 -a "$app" --yes >/dev/null 2>&1 || fail "scale failed"
-url="https://$app.fly.dev"
 deadline=$((SECONDS + 180))
 while :; do
   status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$url/healthz") || status=000
@@ -184,9 +194,15 @@ status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 
 case "$status" in
   200)
     "$fly" logs -a "$app" --no-tail > "$work/logs" 2>&1 || fail "cannot read setup logs"
-    code=$(sed -n "s/.*first-run setup: open https:\/\/$app\.fly\.dev\/setup and enter setup code \([^[:space:]]*\).*/\1/p" "$work/logs" | tail -n 1)
+    code=$(sed -n 's|.*first-run setup: open https://[^[:space:]]*/setup and enter setup code \([^[:space:]]*\).*|\1|p' "$work/logs" | tail -n 1)
     if [[ -n "$code" ]]; then printf 'Setup code: %s\n' "$code"; else echo "No generated setup code found; use your configured code."; fi ;;
   404) echo "Setup is already closed; use /login." ;;
+  421)
+    if [[ "$public_url_given" == 1 ]]; then
+      fail "setup HTTP 421: --public-url / FLY_PUBLIC_URL must match the configured CLAWCTL_PUBLIC_URL"
+    fi
+    echo "fly.dev refuses operator routes (HTTP 421): CLAWCTL_PUBLIC_URL is a custom domain. Check https://<your-domain>/setup or rerun the checks with --public-url."
+    exit 0 ;;
   *) fail "unexpected setup HTTP status" ;;
 esac
 echo "Next: open $url/setup or use ops/fly/setup-admin.sh for first-run setup."
