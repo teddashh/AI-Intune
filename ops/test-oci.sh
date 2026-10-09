@@ -759,6 +759,49 @@ SH
   [[ "$(tail -n 1 "$tmp/new.v4")" == COMMIT ]]
 )
 
+test_refresh_caddy_if_stale() (
+  local tmp mode
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' EXIT
+  # shellcheck disable=SC1091
+  source ops/oci/host-setup.sh
+  cat > "$tmp/docker" <<'SH'
+#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$DOCKER_LOG"
+case "$*" in
+  'compose -p test exec -T caddy cat /etc/caddy/Caddyfile')
+    [[ "$CADDY_MODE" != failed ]] || exit 1
+    cat "$CADDY_CONTENT"
+    ;;
+  'compose -p test up -d --force-recreate --no-deps caddy') ;;
+  *) exit 2 ;;
+esac
+SH
+  chmod 755 "$tmp/docker"
+  export PATH="$tmp:$PATH" DOCKER_LOG="$tmp/log" CADDY_CONTENT="$tmp/container"
+  printf 'new config\n' > "$tmp/Caddyfile"
+  for mode in matching changed failed; do
+    export CADDY_MODE=$mode
+    : > "$DOCKER_LOG"
+    if [[ "$mode" == matching ]]; then
+      cp "$tmp/Caddyfile" "$CADDY_CONTENT"
+    else
+      printf 'old config\n' > "$CADDY_CONTENT"
+    fi
+    refresh_caddy_if_stale "$tmp/Caddyfile" docker compose -p test > "$tmp/output"
+    grep -qx 'compose -p test exec -T caddy cat /etc/caddy/Caddyfile' "$DOCKER_LOG"
+    if [[ "$mode" == matching ]]; then
+      [[ "$(wc -l < "$DOCKER_LOG")" == 1 ]]
+      [[ ! -s "$tmp/output" ]]
+    else
+      [[ "$(wc -l < "$DOCKER_LOG")" == 2 ]]
+      grep -qx 'compose -p test up -d --force-recreate --no-deps caddy' "$DOCKER_LOG"
+      grep -qx 'Caddy config changed; recreated caddy.' "$tmp/output"
+    fi
+  done
+)
+
 test_shellcheck() {
   if command -v shellcheck >/dev/null 2>&1; then
     shellcheck ops/oci/*.sh ops/test-oci.sh
@@ -776,4 +819,5 @@ run_test test_cidr_overlap_refuses test_cidr_overlap_refuses
 run_test test_host_setup_firewall_and_dry_run test_host_setup_firewall_and_dry_run
 run_test test_install_hub_ssh test_install_hub_ssh
 run_test test_persist_port_rules test_persist_port_rules
+run_test test_refresh_caddy_if_stale test_refresh_caddy_if_stale
 run_test test_shellcheck test_shellcheck

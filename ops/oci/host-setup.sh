@@ -130,6 +130,18 @@ resolve_public_host() {
   fail "could not read the instance public IPv4 from OCI metadata"
 }
 
+# Git checkout can replace the inode behind Caddy's single-file bind mount.
+refresh_caddy_if_stale() {
+  local file=$1 expected actual
+  shift
+  expected=$(sha256sum < "$file")
+  if ! actual=$("$@" exec -T caddy cat /etc/caddy/Caddyfile | sha256sum) ||
+      [[ "$actual" != "$expected" ]]; then
+    "$@" up -d --force-recreate --no-deps caddy
+    echo "Caddy config changed; recreated caddy."
+  fi
+}
+
 if [[ "${BASH_SOURCE[0]:-$0}" != "$0" ]]; then
   return 0
 fi
@@ -265,6 +277,7 @@ printf '%s\n' "$config" | grep -q 'CLAWCTL_AUTH_MODE: local' || fail "compose di
 printf '%s\n' "$config" | grep -q "CLAWCTL_PUBLIC_URL: https://$host" || fail "compose did not set CLAWCTL_PUBLIC_URL"
 
 "${compose[@]}" up -d --build
+refresh_caddy_if_stale "$src/ops/docker/Caddyfile.autopilot" "${compose[@]}"
 
 install -d -m 700 /var/lib/clawctl
 umask 077
