@@ -30,6 +30,11 @@ var ErrAdminExists = errors.New("admin already exists")
 type HubAccount struct {
 	AccountID    string
 	Username     string
+	Email        string
+	Role         string
+	CreatedAt    string
+	Disabled     bool
+	MFAEnrolled  bool
 	passwordHash string // also guards session issuance against a concurrent password reset
 	mfaSecret    string // snapshots the factor at password verification; enrollment invalidates it
 }
@@ -85,7 +90,8 @@ func accountAudit(action AuditAction, a HubAccount, ok bool, metadata ...AuditEn
 }
 
 func (s *Store) CreateFirstAdmin(username, password string, metadata ...AuditEntry) (HubAccount, error) {
-	a := HubAccount{Username: username}
+	username = strings.ToLower(strings.TrimSpace(username))
+	a := HubAccount{Username: username, Role: "admin"}
 	if !usernamePattern.MatchString(username) {
 		return a, errors.New("username must be 3–64 lowercase letters, digits, dots, underscores or hyphens")
 	}
@@ -93,13 +99,10 @@ func (s *Store) CreateFirstAdmin(username, password string, metadata ...AuditEnt
 	if err != nil {
 		return a, err
 	}
-	id := make([]byte, 16)
-	if _, err = rand.Read(id); err != nil {
+	a.AccountID, err = newHubAccountID()
+	if err != nil {
 		return a, err
 	}
-	id[6] = (id[6] & 15) | 64
-	id[8] = (id[8] & 63) | 128
-	a.AccountID = fmt.Sprintf("%x-%x-%x-%x-%x", id[:4], id[4:6], id[6:8], id[8:10], id[10:])
 	a.passwordHash = hash
 	tx, err := s.beginWrite(context.Background(), "create_first_admin")
 	if err != nil {
@@ -127,7 +130,12 @@ func (s *Store) CreateFirstAdmin(username, password string, metadata ...AuditEnt
 func (s *Store) VerifyPassword(username, password, clientIP string, metadata ...AuditEntry) (HubAccount, error) {
 	clientIP = clientip.Key(clientIP)
 	var a HubAccount
-	err := s.rdb.QueryRow(`SELECT account_id,username,password_hash FROM hub_accounts WHERE username=?`, username).Scan(&a.AccountID, &a.Username, &a.passwordHash)
+	username = strings.ToLower(strings.TrimSpace(username))
+	column := "username"
+	if strings.Contains(username, "@") {
+		column = "email"
+	}
+	err := s.rdb.QueryRow(`SELECT account_id,username,password_hash,role FROM hub_accounts WHERE `+column+`=?`, username).Scan(&a.AccountID, &a.Username, &a.passwordHash, &a.Role)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return a, err
 	}
@@ -162,11 +170,9 @@ func (s *Store) VerifyPassword(username, password, clientIP string, metadata ...
 	blocked := disabled.Valid || err != nil || currentHash != a.passwordHash
 	failed := 0
 	var locked sql.NullString
-	if a.AccountID != "" {
-		e := tx.QueryRow(`SELECT failed_attempts,locked_until FROM hub_login_failures WHERE account_id=? AND client_ip=?`, a.AccountID, clientIP).Scan(&failed, &locked)
-		if e != nil && !errors.Is(e, sql.ErrNoRows) {
-			return HubAccount{}, e
-		}
+	// Unknown identifiers run the same lookup (no rows) to keep the read path uniform.
+	if e := tx.QueryRow(`SELECT failed_attempts,locked_until FROM hub_login_failures WHERE account_id=? AND client_ip=?`, a.AccountID, clientIP).Scan(&failed, &locked); e != nil && !errors.Is(e, sql.ErrNoRows) {
+		return HubAccount{}, e
 	}
 	until, _ := time.Parse(time.RFC3339, locked.String)
 	blocked = blocked || now.Before(until)
@@ -202,6 +208,12 @@ func (s *Store) VerifyPassword(username, password, clientIP string, metadata ...
 	}
 	if a.AccountID != "" && (!valid || blocked) {
 		if err = s.auditHubGuessingTx(tx, a, metadata...); err != nil {
+			return HubAccount{}, err
+		}
+	} else if a.AccountID == "" {
+		// Same bounded count as auditHubGuessingTx for a subject that never exists.
+		var n int
+		if err = tx.QueryRow(`SELECT count(*) FROM audit_log WHERE auth_subject=? AND action IN (?,?) AND at>?`, "local-user:", AuditHubLoginFailed, AuditMFAFailed, fmtTime(now.Add(-time.Hour))).Scan(&n); err != nil {
 			return HubAccount{}, err
 		}
 	}
@@ -243,7 +255,7 @@ func (s *Store) LookupSession(token string) (HubAccount, error) {
 	}
 	now := s.nowFn()
 	var seen, idle, absolute string
-	err := s.rdb.QueryRow(`SELECT a.account_id,a.username,s.last_seen_at,s.idle_expires_at,s.absolute_expires_at FROM hub_sessions s JOIN hub_accounts a ON a.account_id=s.account_id WHERE session_hash=? AND revoked_at IS NULL AND disabled_at IS NULL`, sessionHash(token)).Scan(&a.AccountID, &a.Username, &seen, &idle, &absolute)
+	err := s.rdb.QueryRow(`SELECT a.account_id,a.username,a.role,s.last_seen_at,s.idle_expires_at,s.absolute_expires_at FROM hub_sessions s JOIN hub_accounts a ON a.account_id=s.account_id WHERE session_hash=? AND revoked_at IS NULL AND disabled_at IS NULL`, sessionHash(token)).Scan(&a.AccountID, &a.Username, &a.Role, &seen, &idle, &absolute)
 	if errors.Is(err, sql.ErrNoRows) {
 		return a, ErrSessionAuth
 	}
@@ -324,9 +336,10 @@ func (s *Store) ChangePassword(accountID, password, keepToken string) error {
 }
 
 func (s *Store) ResetAdminPassword(username, password string) error {
+	username = strings.ToLower(strings.TrimSpace(username))
 	var id string
 	if err := s.rdb.QueryRow(`SELECT account_id FROM hub_accounts WHERE username=?`, username).Scan(&id); err != nil {
-		return err
+		return fmt.Errorf("account not found: %w", err)
 	}
 	return s.ChangePassword(id, password, "")
 }
@@ -359,4 +372,14 @@ func (s *Store) auditHubGuessingTx(tx *writeTx, a HubAccount, metadata ...AuditE
 	entry := accountAudit(AuditHubGuessing, a, false, metadata...)
 	entry.Detail = "hub login: distributed password or second-factor guessing suspected"
 	return s.recordAuditTx(tx, entry)
+}
+
+func newHubAccountID() (string, error) {
+	id := make([]byte, 16)
+	if _, err := rand.Read(id); err != nil {
+		return "", err
+	}
+	id[6] = (id[6] & 15) | 64
+	id[8] = (id[8] & 63) | 128
+	return fmt.Sprintf("%x-%x-%x-%x-%x", id[:4], id[4:6], id[6:8], id[8:10], id[10:]), nil
 }

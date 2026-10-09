@@ -1513,8 +1513,11 @@ CREATE TABLE IF NOT EXISTS hub_accounts (
  created_at TEXT NOT NULL,
  failed_attempts INTEGER NOT NULL DEFAULT 0,
  locked_until TEXT,
- disabled_at TEXT
+ disabled_at TEXT,
+ email TEXT,
+ role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('admin'))
 );
+-- hub_accounts_email is created by Open after additive email/role migration.
 CREATE TABLE IF NOT EXISTS hub_sessions (
  session_hash TEXT PRIMARY KEY,
  account_id TEXT NOT NULL REFERENCES hub_accounts(account_id),

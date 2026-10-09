@@ -337,6 +337,8 @@ var additiveLedgerColumns = []struct {
 	table  string
 	column ledgerColumnInvariant
 }{
+	{table: "hub_accounts", column: ledgerColumnInvariant{name: "email", declaredType: "TEXT"}},
+	{table: "hub_accounts", column: ledgerColumnInvariant{name: "role", declaredType: "TEXT", notNull: 1, hasDefault: true, defaultSQL: "'admin'"}},
 	{
 		table: "deployments",
 		column: ledgerColumnInvariant{

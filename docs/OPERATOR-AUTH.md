@@ -10,7 +10,7 @@ Local accounts are the default for the recommended [Autopilot quick start](AUTOP
 | `local` | Autopilot: local admin session cookie, public Host pinned to `CLAWCTL_PUBLIC_URL`; wildcard/loopback listeners allowed. |
 | `both` | Local session first; absent cookie may fall back to WhoIs only with a literal Tailscale listener and valid grants/LocalAPI. An invalid cookie never falls back. Wildcard/loopback listeners provide local auth only. |
 
-Forwarded headers never establish operator identity. Local mode includes setup-code bootstrap, one admin, login rate limits and lockout; see [Autopilot security and recovery](AUTOPILOT.md#security-model-and-current-limits). Operator CLI/MCP still uses the Tailscale path; local maintenance CLI commands are documented separately there.
+Forwarded headers never establish operator identity. Local mode includes setup-code bootstrap, multiple admin accounts, login rate limits and lockout; see [Autopilot security and recovery](AUTOPILOT.md#security-model-and-current-limits). Operator CLI/MCP still uses the Tailscale path; local maintenance CLI commands are documented separately there.
 
 Account security can regenerate ten recovery codes with the current password and an unused authenticator code; recovery codes are not accepted. All previous codes are invalidated. Failures count toward the shared account/client lockout. New codes are shown once, and the regeneration audit contains no codes. Alternatively, stop the Hub and run `clawctl-hub regenerate-recovery-codes --db PATH --username U`, then restart it; the host command requires MFA enabled and prints one code per line.
 
@@ -171,11 +171,11 @@ example.com/cap/clawctl-admin
 
 此 Tailscale surface 不含另列於 [API-SURFACE.md](API-SURFACE.md) 的 6 條公開 account operations；包含新的 Admin keyed-installer download。
 
-目前 code route manifest 固定為 228 operations：18 條 non-operator，加上 210 條 operator
-routes；operator manifest 的 exact capability tally 是 `view=83`、`operate=24`、`admin=103`，
-其中 `/v1/operator/*` JSON routes 共 107 條、HTML/BFF/CSV/download 共 103 條。這些數字由 route manifest 測試固定，不能靠
+目前 code route manifest 固定為 234 operations：18 條 non-operator，加上 216 條 operator
+routes；operator manifest 的 exact capability tally 是 `view=83`、`operate=24`、`admin=109`，
+其中 `/v1/operator/*` JSON routes 共 107 條、HTML/BFF/CSV/download 共 109 條。這些數字由 route manifest 測試固定，不能靠
 較高 capability 的隱含繼承湊數。
-228-operation boundary 包含 machine-bearer bootstrap readiness receipt、operator-only bundle download、Tailnet Settings、Retention Maintenance、資料揭露面、註冊報告、每日早報預覽、註冊上限、軟體清查、每機安裝狀態、發佈與指派對照、Hub 名冊重新命名／備註、verifier registry 與派工、disk-clean 摘要與發布；完整 route 與 ledger 證據的實機紀錄是私人工作筆記，不在這個公開倉庫。
+234-operation boundary 包含 machine-bearer bootstrap readiness receipt、operator-only bundle download、Tailnet Settings、Retention Maintenance、資料揭露面、註冊報告、每日早報預覽、註冊上限、軟體清查、每機安裝狀態、發佈與指派對照、Hub 名冊重新命名／備註、verifier registry 與派工、disk-clean 摘要與發布；完整 route 與 ledger 證據的實機紀錄是私人工作筆記，不在這個公開倉庫。
 
 operator route manifest 與實際註冊清單在 Hub 啟動時做雙向比對。繞過 operator
 boundary 的 18 條 route 也有另一份完整 manifest；兩份不能
@@ -599,3 +599,35 @@ rollback 已有獨立復原路徑，之後由 `bf39c04` 開始的 rollout 才同
 secret，create stderr／replay／audit 均無明文；同 key/body replay 非零結束且 stdout 空白，同 key 改 reason 回 409。
 撤票回 303，之後以原 token 兌換回 403 `ENROLL_TOKEN_INVALID`；測試 machine 再退役，active 分母回到
 5，永久 audit 含 fresh/replay/revoke/retire 且無明文。確認撤銷後已刪除 tmpfs secret。
+
+## Multiple admin accounts
+
+Sign in using a username or optional email; both are trimmed and case-insensitive.
+Emails must be plain ASCII addresses (no display name).
+All local accounts currently have the admin role. Open `/account/users` from
+Account security to create, enable, disable, rename users, or change/clear email.
+Email and username must be unique. Every mutation requires your current password
+and an unused current authenticator code (recovery codes are not accepted). When
+MFA enforcement is explicitly disabled and you have no enrolled factor, password
+alone is accepted. You cannot disable yourself or the last active admin.
+Disabling a user revokes all their sessions. Renaming preserves sessions.
+New users have no MFA and, with enforcement enabled (default), their first login
+opens `/account/security` for forced enrollment; other routes stay blocked until
+confirmation. Recovery codes appear once after confirmation.
+
+With the Hub stopped, host maintenance commands require an existing database:
+
+```sh
+clawctl-hub add-admin --db PATH --username alice --email alice@example.com < password-file
+clawctl-hub set-email --db PATH --username alice --email alice@example.com
+clawctl-hub set-email --db PATH --username alice --email ""
+clawctl-hub rename-user --db PATH --username alice --new-username carol
+clawctl-hub disable-user --db PATH --username bob
+clawctl-hub enable-user --db PATH --username bob
+clawctl-hub reset-admin-password --db PATH --username alice < password-file
+```
+
+`add-admin` reads a 12–256 byte password from stdin, like `bootstrap-admin`, and
+works with existing accounts. `reset-admin-password` selects the normalized
+username; optional `--disable-mfa` forces enrollment again. Host disable also
+protects the last active admin. User mutations are audit logged without passwords.

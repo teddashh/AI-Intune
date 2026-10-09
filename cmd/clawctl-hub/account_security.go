@@ -29,9 +29,39 @@ type pendingLogins struct {
 	now     func() time.Time
 }
 
+// Every pending-login table in this process, so disabling or re-enabling an
+// account can drop its password-verified MFA challenges.
+var pendingLoginTables struct {
+	mu     sync.Mutex
+	tables []*pendingLogins
+}
+
 // Pending logins bind to the full resolved client IP, including behind trusted proxies.
 func newPendingLogins() *pendingLogins {
-	return &pendingLogins{entries: make(map[[32]byte]pendingLogin), now: time.Now}
+	p := &pendingLogins{entries: make(map[[32]byte]pendingLogin), now: time.Now}
+	pendingLoginTables.mu.Lock()
+	pendingLoginTables.tables = append(pendingLoginTables.tables, p)
+	pendingLoginTables.mu.Unlock()
+	return p
+}
+
+// purgePendingLoginsForAccount removes every in-flight MFA challenge for the account.
+func purgePendingLoginsForAccount(accountID string) {
+	if accountID == "" {
+		return
+	}
+	pendingLoginTables.mu.Lock()
+	tables := append([]*pendingLogins(nil), pendingLoginTables.tables...)
+	pendingLoginTables.mu.Unlock()
+	for _, p := range tables {
+		p.mu.Lock()
+		for k, v := range p.entries {
+			if v.account.AccountID == accountID {
+				delete(p.entries, k)
+			}
+		}
+		p.mu.Unlock()
+	}
 }
 func (p *pendingLogins) add(a store.HubAccount, addr, next string) (string, error) {
 	b := make([]byte, 32)
@@ -81,7 +111,7 @@ func renderMFAForm(w http.ResponseWriter, message string) {
 	_ = mfaForm.Execute(w, struct{ Error string }{message})
 }
 
-var securityForm = template.Must(template.New("security").Parse(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Account security · clawctl</title><a href="/">Hub</a><h1>Account security</h1>{{if .Warning}}<p role="alert" style="padding:12px 16px;border:1px solid #d29200;background:#fff4ce;color:#8a3b00">WARNING: {{.Warning}}</p>{{end}}<p>MFA enabled: {{.Enabled}}</p>{{if .Secret}}<p>Add this secret to your authenticator: <code>{{.Secret}}</code></p><p><code>{{.URI}}</code></p><a href="{{.URI}}">Authenticator URI (copy link)</a><form method="post" action="/account/security/totp/confirm"><label>6-digit code <input name="code" required maxlength="6"></label><button>Enable MFA</button></form>{{else}}{{if .Enabled}}<form method="post" action="/account/security/recovery-codes/regenerate"><label>Current password <input type="password" name="password" required maxlength="256"></label><label>Authenticator code <input name="code" required maxlength="6" inputmode="numeric" autocomplete="one-time-code"></label><button>Regenerate recovery codes</button></form>{{if .Required}}<p>MFA is required. Only host recovery can remove it.</p>{{else}}<form method="post" action="/account/security/totp/disable"><label>Current password <input type="password" name="password" required maxlength="256"></label><label>Authenticator or recovery code <input name="code" required maxlength="32"></label><button>Disable MFA</button></form>{{end}}{{else}}<form method="post" action="/account/security/totp/begin"><button>Set up authenticator</button></form>{{end}}{{end}}{{if .Codes}}<h2>Recovery codes — save these now</h2><p>Previous recovery codes no longer work. Each code works once. These codes will only be shown once.</p><pre>{{range .Codes}}{{.}}
+var securityForm = template.Must(template.New("security").Parse(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Account security · clawctl</title><a href="/">Hub</a><a href="/account/users">Admin users</a><h1>Account security</h1>{{if .Warning}}<p role="alert" style="padding:12px 16px;border:1px solid #d29200;background:#fff4ce;color:#8a3b00">WARNING: {{.Warning}}</p>{{end}}<p>MFA enabled: {{.Enabled}}</p>{{if .Secret}}<p>Add this secret to your authenticator: <code>{{.Secret}}</code></p><p><code>{{.URI}}</code></p><a href="{{.URI}}">Authenticator URI (copy link)</a><form method="post" action="/account/security/totp/confirm"><label>6-digit code <input name="code" required maxlength="6"></label><button>Enable MFA</button></form>{{else}}{{if .Enabled}}<form method="post" action="/account/security/recovery-codes/regenerate"><label>Current password <input type="password" name="password" required maxlength="256"></label><label>Authenticator code <input name="code" required maxlength="6" inputmode="numeric" autocomplete="one-time-code"></label><button>Regenerate recovery codes</button></form>{{if .Required}}<p>MFA is required. Only host recovery can remove it.</p>{{else}}<form method="post" action="/account/security/totp/disable"><label>Current password <input type="password" name="password" required maxlength="256"></label><label>Authenticator or recovery code <input name="code" required maxlength="32"></label><button>Disable MFA</button></form>{{end}}{{else}}<form method="post" action="/account/security/totp/begin"><button>Set up authenticator</button></form>{{end}}{{end}}{{if .Codes}}<h2>Recovery codes — save these now</h2><p>Previous recovery codes no longer work. Each code works once. These codes will only be shown once.</p><pre>{{range .Codes}}{{.}}
 {{end}}</pre><a href="/">I saved my recovery codes — continue to Hub</a>{{end}}{{if or .Enabled (not .Required)}}<form method="post" action="/account/security/password"><label>Current password <input type="password" name="password" required maxlength="256"></label><label>New password <input type="password" name="new_password" required minlength="12" maxlength="256"></label><button>Change password and revoke other sessions</button></form>{{end}}<form method="post" action="/logout"><button>Sign out</button></form></html>`))
 var securityPatterns = []string{"GET /account/security", "POST /account/security/totp/begin", "POST /account/security/totp/confirm", "POST /account/security/totp/disable", "POST /account/security/password", "POST /account/security/recovery-codes/regenerate"}
 
@@ -196,5 +226,5 @@ func registerSecurityRoutes(mux *http.ServeMux, st *store.Store, authority strin
 	for _, pattern := range securityPatterns {
 		mux.HandleFunc(pattern, handler)
 	}
-	return securityPatterns
+	return append(append([]string(nil), securityPatterns...), registerUserRoutes(mux, st, resolver, cloud...)...)
 }

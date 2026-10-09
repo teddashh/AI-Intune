@@ -73,3 +73,7 @@ ops/oci/install-hub.sh --host myvm --public-host 203-0-113-10.sslip.io --dry-run
 ```
 
 The alias uses SSH config's User, HostName, and ProxyCommand; `--user` overrides User and `--ssh-config FILE` selects a config file. Supply `--public-host` for private addresses or aliases resolving to DNS names. Otherwise an effective public IPv4 becomes a sslip.io name. Dry-run probes SSH and prints the remote setup plan without changing the VM.
+
+After initial setup, add more admins through `/account/users`, or stop the Hub and
+run `clawctl-hub add-admin --db PATH --username alice [--email alice@example.com]`
+with the initial password on stdin. New admins must enroll MFA on first login.

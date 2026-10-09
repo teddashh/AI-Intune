@@ -355,8 +355,16 @@ func runBootstrapAdmin(args []string, in io.Reader) error {
 
 func runAdminPasswordCommand(command string, args []string, in io.Reader) error {
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: clawctl-hub %s --db PATH --username U [action flags] (Hub stopped)\n", command)
+		fs.PrintDefaults()
+	}
 	db := fs.String("db", "", "path to existing Hub database")
 	username := fs.String("username", "", "admin username")
+	var email string
+	if command == "add-admin" {
+		fs.StringVar(&email, "email", "", "optional email")
+	}
 	var disableMFA bool
 	if command == "reset-admin-password" {
 		fs.BoolVar(&disableMFA, "disable-mfa", false, "disable MFA during host password recovery")
@@ -380,6 +388,9 @@ func runAdminPasswordCommand(command string, args []string, in io.Reader) error 
 		return err
 	}
 	defer st.Close()
+	if command == "add-admin" {
+		return st.MutateHubUser("created", *username, email, password, "")
+	}
 	if command == "bootstrap-admin" {
 		_, err := st.CreateFirstAdmin(*username, password)
 		return err
@@ -388,7 +399,7 @@ func runAdminPasswordCommand(command string, args []string, in io.Reader) error 
 		return err
 	}
 	if disableMFA {
-		return st.DisableAdminMFA(*username)
+		return st.DisableAdminMFA(strings.ToLower(strings.TrimSpace(*username)))
 	}
 	return nil
 }
@@ -419,4 +430,39 @@ func runRegenerateRecoveryCodes(args []string, out io.Writer) error {
 		}
 	}
 	return nil
+}
+
+func runUserCommand(command string, args []string) error {
+	fs := flag.NewFlagSet(command, flag.ContinueOnError)
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: clawctl-hub %s --db PATH --username U [action flags] (Hub stopped)\n", command)
+		fs.PrintDefaults()
+	}
+	db := fs.String("db", "", "existing Hub database; stop Hub first")
+	username := fs.String("username", "", "username")
+	email := fs.String("email", "", "email; empty clears")
+	renamed := fs.String("new-username", "", "new username")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	hasEmail := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "email" {
+			hasEmail = true
+		}
+	})
+	if *db == "" || *username == "" || fs.NArg() != 0 || (command == "set-email" && !hasEmail) || (command == "rename-user" && *renamed == "") {
+		return fmt.Errorf("%s requires --db PATH --username U and action flags", command)
+	}
+	st, err := openExisting(*db)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	action := map[string]string{"set-email": "email-changed", "rename-user": "renamed", "disable-user": "disabled", "enable-user": "enabled"}[command]
+	value := *email
+	if command == "rename-user" {
+		value = *renamed
+	}
+	return st.MutateHubUser(action, *username, value, "", "")
 }
