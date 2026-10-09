@@ -12,7 +12,7 @@ ops/fly/deploy.sh --org <your-org> --app <your-app-name> --region iad
 # Optional: add --secrets-file ~/clawctl-fly/secrets.env (regular file, mode 0600).
 ```
 
-The flags also accept `FLY_ORG`, `FLY_APP`, `FLY_REGION` (default `iad`), and `FLY_SECRETS_FILE`. Dry-run prints the plan without calling Fly or making network requests. The script copies the config outside the repository, creates only missing resources, deploys with `--yes --ha=false`, scales to one 1024mb Machine, and waits up to about three minutes for HTTPS `/healthz`. It keeps the 3GB `clawctl_data` volume and never allocates a dedicated IPv4 or creates Postgres. R2 and Telegram are optional; unset `R2_*` / `LITESTREAM_*` is valid. The caller's secrets file is retained.
+The flags also accept `FLY_ORG`, `FLY_APP`, `FLY_REGION` (default `iad`), `FLY_SECRETS_FILE`, and `FLY_PUBLIC_URL` (`--public-url https://hub.example.com` for custom-domain checks). Dry-run prints the plan without calling Fly or making network requests. The script copies the config outside the repository, creates only missing resources, deploys with `--yes --ha=false`, scales to one 1024mb Machine, and waits up to about three minutes for HTTPS `/healthz`. It keeps the 3GB `clawctl_data` volume and never allocates a dedicated IPv4 or creates Postgres. R2 and Telegram are optional; unset `R2_*` / `LITESTREAM_*` is valid. The caller's secrets file is retained.
 
 flyctl 0.4.115 defaults to Depot. If deployment fails with Depot, handshake (such as `authentication handshake failed: EOF`), or `list workers` output, the script retries once with `--depot=false --yes`. Classic builds can create a running `fly-builder-*` app. The script compares app inventories before and after that retry and destroys only new builder apps, preserving pre-existing builders. Failed teardown warns with the builder name and exits non-zero; inspect and remove that specific builder after confirming its identity.
 
@@ -135,6 +135,8 @@ Configure your domain's DNS using the CNAME or A+AAAA records reported by `fly c
 ```sh
 fly secrets set CLAWCTL_PUBLIC_URL=https://hub.example.com -a <your-app-name>
 ```
+
+For a custom domain, pass `--public-url https://hub.example.com` (or set `FLY_PUBLIC_URL`) to check that origin and show its setup URL. The URL must be HTTPS with a DNS host, an optional port, and no path, query, fragment, or userinfo; a trailing slash is allowed. This selects the checks URL; configure `CLAWCTL_PUBLIC_URL` separately. Without an explicit URL, a fly.dev setup response of HTTP 421 reports the custom domain and leaves the successful deployment intact.
 
 Hub pins the operator Host to `CLAWCTL_PUBLIC_URL`. `/` and `/login` return 421 for a wrong Host. `/healthz` intentionally does not enforce Host so Fly's probe works; it is not a Host validation test. Never allocate a dedicated IPv4. After switching domains, the `fly.dev` URL stops serving the operator UI. Open `https://hub.example.com/login` (or `/setup` if no admin exists). Agents enrolled with the old `hub-url` must re-enroll against the new URL; choose the domain before enrolling machines. See [Moving agents](MOVE-AGENTS.md).
 
