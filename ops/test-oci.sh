@@ -298,8 +298,8 @@ test_name_guard_and_warnings() (
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   prep "$tmp"
-  if bash ops/oci/provision.sh --name Oracle4 --dry-run >"$tmp/out" 2>"$tmp/err"; then
-    echo "fail: Oracle4 name accepted"
+  if bash ops/oci/provision.sh --name other-a1 --dry-run >"$tmp/out" 2>"$tmp/err"; then
+    echo "fail: other-a1 name accepted"
     exit 1
   fi
   grep -q 'clawctl-' "$tmp/err"
@@ -339,7 +339,7 @@ import json, sys
 json.dump({
   "instances": [{
     "id": "ocid1.instance.stub.other",
-    "display-name": "Oracle4",
+    "display-name": "other-a1",
     "lifecycle-state": "RUNNING",
     "shape": "VM.Standard.A1.Flex",
     "shape-config": {"ocpus": 4, "memory-in-gbs": 24},
@@ -469,7 +469,7 @@ test_cidr_overlap_refuses() (
 import json, sys
 json.dump({"vcns": [{
   "id": "ocid1.vcn.stub.other",
-  "display-name": "oracle4-vcn",
+  "display-name": "other-vcn",
   "cidr-blocks": ["10.50.0.0/16"],
   "cidr-block": "10.50.0.0/16",
   "default-route-table-id": "ocid1.routetable.stub.other",
@@ -482,7 +482,7 @@ PY
     echo "fail: overlapping CIDR was accepted"
     exit 1
   fi
-  grep -q 'oracle4-vcn' "$tmp/err"
+  grep -q 'other-vcn' "$tmp/err"
   [[ -z "$(mutating "$tmp/calls.jsonl")" ]]
 )
 
