@@ -97,11 +97,20 @@ setup_admin=${CLAWCTL_SETUP_ADMIN:-$root/ops/fly/setup-admin.sh}
 [[ -f "$root/ops/oci/host-setup.sh" ]] || fail "missing host-setup.sh"
 [[ -f "$setup_admin" ]] || fail "missing setup-admin.sh"
 
+# Upload first, then execute a file so child commands cannot consume script input.
+remote_prefix="f=\$(mktemp) && trap 'rm -f \"\$f\"' EXIT && cat > \"\$f\" && sudo -n bash \"\$f\""
+umask 077
+work=$(mktemp -d)
+chmod 700 "$work"
+trap 'rm -rf "$work"' EXIT
+
 if [[ "$dry_run" == 1 ]]; then
   "${ssh_base[@]}" "$target" true || fail "SSH reachability probe failed for $target"
   echo "SSH reachable"
-  remote="sudo -n bash -s -- --dry-run --public-host ${public_host@Q} --git-ref ${git_ref@Q} --repo ${repo@Q}"
-  "${ssh_base[@]}" "$target" "$remote" < "$root/ops/oci/host-setup.sh" || fail "remote dry-run failed"
+  remote="$remote_prefix --dry-run --public-host ${public_host@Q} --git-ref ${git_ref@Q} --repo ${repo@Q} </dev/null"
+  "${ssh_base[@]}" "$target" "$remote" < "$root/ops/oci/host-setup.sh" >"$work/remote" || fail "remote dry-run failed"
+  grep -qx 'clawctl-oci-done' "$work/remote" || fail "remote setup did not finish (no completion marker)"
+  grep -v -e '^clawctl-setup-code=' -e '^clawctl-oci-done$' "$work/remote" || true
   echo "Plan: run ops/oci/host-setup.sh --public-host $public_host --git-ref $git_ref"
   echo "Plan: set CLAWCTL_AUTH_MODE=local and CLAWCTL_PUBLIC_URL=https://$public_host"
   echo "Plan: open TCP 80 and 443 before the INPUT REJECT rule and persist them."
@@ -115,15 +124,10 @@ fi
 
 command -v curl >/dev/null || fail "curl not found on PATH"
 command -v python3 >/dev/null || fail "python3 not found on PATH"
-umask 077
-work=$(mktemp -d)
-chmod 700 "$work"
-trap 'rm -rf "$work"' EXIT
-
 "${ssh_base[@]}" "$target" "if command -v cloud-init >/dev/null 2>&1; then sudo -n cloud-init status --wait || true; fi" \
   >"$work/cloud-init" 2>&1 || fail "ssh failed while waiting for cloud-init"
 
-remote="sudo -n bash -s -- --public-host ${public_host@Q} --git-ref ${git_ref@Q} --repo ${repo@Q}"
+remote="$remote_prefix --public-host ${public_host@Q} --git-ref ${git_ref@Q} --repo ${repo@Q} </dev/null"
 if ! "${ssh_base[@]}" "$target" "$remote" < "$root/ops/oci/host-setup.sh" >"$work/remote" 2>"$work/remote.err"; then
   python3 - "$work/remote.err" <<'PY' >&2
 import sys
@@ -139,7 +143,8 @@ for line in open(sys.argv[1], errors="replace"):
 PY
   fail "remote setup failed"
 fi
-grep -v '^clawctl-setup-code=' "$work/remote" || true
+grep -qx 'clawctl-oci-done' "$work/remote" || fail "remote setup did not finish (no completion marker)"
+grep -v -e '^clawctl-setup-code=' -e '^clawctl-oci-done$' "$work/remote" || true
 
 url=$(sed -n 's/^clawctl-oci-url=//p' "$work/remote" | tail -n 1)
 [[ -n "$url" ]] || url="https://$public_host"

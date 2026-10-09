@@ -135,9 +135,9 @@ refresh_caddy_if_stale() {
   local file=$1 expected actual
   shift
   expected=$(sha256sum < "$file")
-  if ! actual=$("$@" exec -T caddy cat /etc/caddy/Caddyfile | sha256sum) ||
+  if ! actual=$("$@" exec -T caddy cat /etc/caddy/Caddyfile </dev/null | sha256sum) ||
       [[ "$actual" != "$expected" ]]; then
-    "$@" up -d --force-recreate --no-deps caddy
+    "$@" up -d --force-recreate --no-deps caddy </dev/null
     echo "Caddy config changed; recreated caddy."
   fi
 }
@@ -184,6 +184,7 @@ if [[ "$dry_run" == 1 && "$public_host" == auto ]]; then
   echo "Plan: set CLAWCTL_AUTH_MODE=local and CLAWCTL_PUBLIC_URL=https://<ipv4-dashed>.sslip.io via the Autopilot compose pack."
   echo "WARNING: public URL will use sslip.io. Choose a real domain and update CLAWCTL_PUBLIC_HOST before enrolling machines." >&2
   echo "clawctl-oci-url=https://<ipv4-dashed>.sslip.io"
+  echo "clawctl-oci-done"
   exit 0
 fi
 
@@ -200,6 +201,7 @@ if [[ "$dry_run" == 1 ]]; then
   echo "Plan: clone $repo ref $git_ref into $src."
   echo "Plan: set CLAWCTL_AUTH_MODE=local and CLAWCTL_PUBLIC_URL=https://$host via the Autopilot compose pack."
   echo "clawctl-oci-url=https://$host"
+  echo "clawctl-oci-done"
   exit 0
 fi
 
@@ -272,11 +274,11 @@ EOF
 chmod 600 "$src/ops/docker/autopilot.env"
 
 compose=(docker compose -p clawctl-autopilot --env-file "$src/ops/docker/autopilot.env" -f "$src/ops/docker/docker-compose.autopilot.yml")
-config=$("${compose[@]}" config)
+config=$("${compose[@]}" config </dev/null)
 printf '%s\n' "$config" | grep -q 'CLAWCTL_AUTH_MODE: local' || fail "compose did not set CLAWCTL_AUTH_MODE=local"
 printf '%s\n' "$config" | grep -q "CLAWCTL_PUBLIC_URL: https://$host" || fail "compose did not set CLAWCTL_PUBLIC_URL"
 
-"${compose[@]}" up -d --build
+"${compose[@]}" up -d --build </dev/null
 refresh_caddy_if_stale "$src/ops/docker/Caddyfile.autopilot" "${compose[@]}"
 
 install -d -m 700 /var/lib/clawctl
@@ -298,7 +300,7 @@ echo "clawctl-oci-url=https://$host"
 status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "https://$host/setup") || status=000
 case "$status" in
   200)
-    logs=$("${compose[@]}" logs hub 2>/dev/null || true)
+    logs=$("${compose[@]}" logs hub </dev/null 2>/dev/null || true)
     code=$(printf '%s\n' "$logs" | sed -n 's/.*enter setup code \([^[:space:]]*\).*/\1/p' | tail -n 1)
     if [[ -n "$code" ]]; then
       printf '%s\n' "$code" > /var/lib/clawctl/setup-code
@@ -316,3 +318,4 @@ case "$status" in
 esac
 echo "Next: open https://$host/setup or run ops/oci/install-hub.sh with --admin-user so it can call ops/fly/setup-admin.sh."
 echo "Choose a real domain before enrolling machines if this URL is a sslip.io name."
+echo "clawctl-oci-done"

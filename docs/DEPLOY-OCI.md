@@ -48,7 +48,7 @@ ops/oci/install-hub.sh --host <public-ip> --public-host <hostname> \
   --admin-user admin --admin-out ~/clawctl-oci/admin.json
 ```
 
-`install-hub.sh` is safe to run again. It updates the code and recreates Caddy when its config changed, preserving certificates in the existing volumes. It waits until cloud-init has finished, then converges Docker, the firewall, and the compose stack. With `--admin-user` it calls `ops/fly/setup-admin.sh`, which enrolls TOTP and writes the password, TOTP secret, and recovery codes to a new mode-0600 file. It does not print those values.
+`install-hub.sh` is safe to run again. It updates the code and recreates Caddy when its config changed, preserving certificates in the existing volumes. It waits until cloud-init has finished, then converges Docker, the firewall, and the compose stack. Remote setup runs from a private temporary file with stdin disconnected and requires a completion marker before the installer continues. A missing marker fails the install even if SSH exited successfully; dry-run checks the marker too. With `--admin-user` it calls `ops/fly/setup-admin.sh`, which enrolls TOTP and writes the password, TOTP secret, and recovery codes to a new mode-0600 file. It does not print those values.
 
 Pick a DNS name you control and re-run with `--domain hub.example.com` (and a matching `--public-host`) **before** enrolling machines. A sslip.io name is fine for a first look and a bad Hub URL to bake into agents.
 

@@ -565,7 +565,8 @@ PY
 )
 
 test_install_hub_ssh() (
-  local tmp
+  local tmp mode
+  local -a args
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   mkdir -p "$tmp/bin"
@@ -578,12 +579,15 @@ if [[ " $* " == *" -G "* ]]; then
 fi
 if [[ "${SSH_FAIL:-0}" == 1 ]]; then exit 1; fi
 if [[ "$*" == *"sudo -n rm -f /var/lib/clawctl/setup-code"* && "${SSH_CLEANUP_FAIL:-0}" == 1 ]]; then exit 1; fi
-if [[ "$*" == *"bash -s"* && "$*" == *"--dry-run"* ]]; then
-  bash -s -- --dry-run --public-host 203-0-113-10.sslip.io
-  exit $?
-fi
-if [[ "$*" == *"bash -s"* ]]; then
-  printf '%s\n' "remote ready" "clawctl-oci-url=https://203-0-113-10.sslip.io" "clawctl-setup-code=${STUB_CODE}"
+if [[ "$*" == *'sudo -n bash "$f"'* ]]; then
+  cat >/dev/null
+  if [[ "$*" == *"--dry-run"* ]]; then
+    echo 'Plan: install Docker Engine and the compose plugin if missing.'
+    echo 'WARNING: public URL https://203-0-113-10.sslip.io uses sslip.io.' >&2
+  else
+    printf '%s\n' "remote ready" "clawctl-oci-url=https://203-0-113-10.sslip.io" "clawctl-setup-code=${STUB_CODE}"
+  fi
+  if [[ "${SSH_NO_MARKER:-0}" != 1 ]]; then echo 'clawctl-oci-done'; fi
 fi
 exit 0
 SH
@@ -626,8 +630,11 @@ SH
   bash ops/oci/install-hub.sh --dry-run --host 203.0.113.10 >"$tmp/dry" 2>"$tmp/dry.err"
   grep -q '203-0-113-10.sslip.io' "$tmp/dry.err"
   grep -q ' true$' "$SSH_LOG"
-  grep -q 'bash -s -- --dry-run' "$SSH_LOG"
-  [[ "$(grep -c 'bash -s' "$SSH_LOG")" == 1 ]]
+  # The remote shell expands $f, so match its literal reference.
+  # shellcheck disable=SC2016
+  grep -Fq 'sudo -n bash "$f" --dry-run' "$SSH_LOG"
+  # shellcheck disable=SC2016
+  [[ "$(grep -Fc 'sudo -n bash "$f"' "$SSH_LOG")" == 1 ]]
   grep -q 'SSH reachable' "$tmp/dry"
   grep -q '^Plan: install Docker' "$tmp/dry"
   grep -q 'No changes were made.' "$tmp/dry"
@@ -654,6 +661,16 @@ SH
   bash ops/oci/install-hub.sh --host 203.0.113.10 --public-host 203-0-113-10.sslip.io \
     >"$tmp/out" 2>"$tmp/err"
   [[ "$(grep -c '^Setup code: stub-setup-code-do-not-print$' "$tmp/out")" == 1 ]]
+  if grep -qx 'clawctl-oci-done' "$tmp/out" "$tmp/dry"; then exit 1; fi
+  for mode in real dry; do
+    args=()
+    [[ "$mode" != dry ]] || args+=(--dry-run)
+    if SSH_NO_MARKER=1 bash ops/oci/install-hub.sh --host 203.0.113.10 "${args[@]}" \
+      >"$tmp/incomplete" 2>"$tmp/incomplete.err"; then
+      echo 'fail: incomplete remote setup accepted'; exit 1
+    fi
+    grep -q 'remote setup did not finish (no completion marker)' "$tmp/incomplete.err"
+  done
   : > "$tmp/out"
   : > "$SSH_LOG"
   CURL_SETUP_STATUS=404 bash ops/oci/install-hub.sh --host 203.0.113.10 \
@@ -760,7 +777,7 @@ SH
 )
 
 test_refresh_caddy_if_stale() (
-  local tmp mode
+  local tmp mode line
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   # shellcheck disable=SC1091
@@ -771,10 +788,11 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$DOCKER_LOG"
 case "$*" in
   'compose -p test exec -T caddy cat /etc/caddy/Caddyfile')
+    cat >/dev/null
     [[ "$CADDY_MODE" != failed ]] || exit 1
     cat "$CADDY_CONTENT"
     ;;
-  'compose -p test up -d --force-recreate --no-deps caddy') ;;
+  'compose -p test up -d --force-recreate --no-deps caddy') cat >/dev/null ;;
   *) exit 2 ;;
 esac
 SH
@@ -789,7 +807,11 @@ SH
     else
       printf 'old config\n' > "$CADDY_CONTENT"
     fi
-    refresh_caddy_if_stale "$tmp/Caddyfile" docker compose -p test > "$tmp/output"
+    {
+      refresh_caddy_if_stale "$tmp/Caddyfile" docker compose -p test > "$tmp/output"
+      read -r line
+    } <<< "keep"
+    [[ "$line" == keep ]]
     grep -qx 'compose -p test exec -T caddy cat /etc/caddy/Caddyfile' "$DOCKER_LOG"
     if [[ "$mode" == matching ]]; then
       [[ "$(wc -l < "$DOCKER_LOG")" == 1 ]]
