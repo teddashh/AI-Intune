@@ -59,3 +59,7 @@ Once all machines have been successfully moved and verified on the new Hub:
 1. Take a final backup of the old Hub's database.
 2. Stop the old Hub service.
 3. Remove the old Hub's Tailscale grants and monitoring configurations.
+
+## Linux agent proxy settings
+
+Behind an HTTP proxy, the Linux installer copies `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` from `/etc/environment` and the invoking environment into `/etc/systemd/system/clawctl-agent.service.d/10-proxy.conf`; `--reenroll` rollback keeps it. Review `NO_PROXY` for the new Hub. Details: [AUTOPILOT.md](AUTOPILOT.md#linux-agent-proxy-settings).

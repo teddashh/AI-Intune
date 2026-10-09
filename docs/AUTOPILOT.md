@@ -209,3 +209,11 @@ The server must retain the TOTP secret to verify codes. It is stored as-is: **da
 Linux agents use the root-owned `/usr/local/bin/clawctl-agent` in the system unit. Installation replaces the binary atomically and restores its SELinux label when SELinux is enabled. Any existing `~/.local/bin/clawctl-agent` stays available for legacy units and rollback.
 
 For observation and check-in only, pass `--no-container-runtime` to skip podman installation, subordinate ID setup, and the rootless readiness probe. Hub-pushed Hermes container jobs need podman; the default still sets it up.
+
+## Linux agent proxy settings
+
+The Linux installer detects `HTTPS_PROXY`, `HTTP_PROXY`, and `NO_PROXY` (upper and lower case) in `/etc/environment` and the invoking environment. Invoking values override the same variable name; a missing case is copied from the other case. `NO_PROXY` supports CIDRs, for example `hub.example.com,10.0.0.0/8`. System services do not read `/etc/environment` themselves.
+
+Detected settings are saved in `/etc/systemd/system/clawctl-agent.service.d/10-proxy.conf` before the agent starts. The file is mode 0644, or 0600 when values contain possible URL credentials. Unsafe values (control characters, double quotes, backslashes, or `%`) are skipped with a warning that names only the variable. The file is parsed as data, without shell expansion.
+
+Use `--no-proxy-dropin` to skip detection and writing. With no detected settings, an existing drop-in is preserved. To change settings, edit the drop-in with `sudoedit`, then run `sudo systemctl daemon-reload` and `sudo systemctl restart clawctl-agent.service`. Reenrollment rollback keeps the drop-in, including when it removes a newly installed unit; agent upgrades also preserve it. Review `NO_PROXY` when moving to a different Hub.

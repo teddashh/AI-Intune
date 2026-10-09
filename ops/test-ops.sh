@@ -810,8 +810,11 @@ install_ancestor_symlink_fixture() {
 	return "$guard_rc"
 }
 
-agent_installer_complete_fixture() {
+agent_installer_complete_fixture() (
 	local fixture="$TMP/agent-installer-complete" mock home token tailscale_key log install_agent system_unit_dir
+	unset HTTPS_PROXY https_proxy HTTP_PROXY http_proxy NO_PROXY no_proxy
+	export CLAWCTL_ETC_ENVIRONMENT="$TMP/agent-installer-environment"
+	: >"$CLAWCTL_ETC_ENVIRONMENT"
 	mock="$fixture/mock"
 	home="$fixture/home"
 	token="$fixture/explicit-token"
@@ -1111,9 +1114,90 @@ agent_installer_complete_fixture() {
 	keyed_fixture_run || return 153
 	[[ ! -e "$fixture/enroll-token" ]] || return 154
 	grep -Fq 'enroll --hub https://hub.example.com --token-file' "$log" || return 155
+	# Proxy cases reuse the full installer mocks, including fresh install and rollback.
+	local dropin="$system_unit_dir/clawctl-agent.service.d/10-proxy.conf"
+	proxy_fixture_run() {
+		rm -f "$log"
+		keyed_fixture_run --hub https://hub.example.com --token-file "$token" "$@"
+	}
+	[[ ! -e "$dropin" ]] || return 180
+	cat >"$CLAWCTL_ETC_ENVIRONMENT" <<'EOF'
+# Data, not shell code
+export HTTPS_PROXY="http://proxy.example.com:8080"
+HTTP_PROXY='http://proxy.example.com:3128'
+no_proxy='hub.example.com,10.0.0.0/8'
+IGNORED=$(touch should-not-execute)
+EOF
+	# Fresh install also writes the drop-in before loading/starting the unit.
+	rm -f "$home/.config/clawctl/agent.json"
+	proxy_fixture_run || return 181
+	cat >"$fixture/proxy.expected" <<'EOF'
+# Managed by clawctl install-agent.sh: proxy settings detected at install time.
+[Service]
+Environment="HTTPS_PROXY=http://proxy.example.com:8080"
+Environment="https_proxy=http://proxy.example.com:8080"
+Environment="HTTP_PROXY=http://proxy.example.com:3128"
+Environment="http_proxy=http://proxy.example.com:3128"
+Environment="NO_PROXY=hub.example.com,10.0.0.0/8"
+Environment="no_proxy=hub.example.com,10.0.0.0/8"
+EOF
+	cmp -s "$fixture/proxy.expected" "$dropin" || return 182
+	[[ "$(stat -c '%a' "$dropin")" == 644 ]] || return 183
+	appears_before "sudo mv -f $dropin.new $dropin" 'sudo systemctl daemon-reload' "$log" || return 184
+	appears_before "sudo mv -f $dropin.new $dropin" 'sudo systemctl restart clawctl-agent.service' "$log" || return 185
+	HTTPS_PROXY=http://proxy.example.com:9090 proxy_fixture_run || return 186
+	grep -Fxq 'Environment="HTTPS_PROXY=http://proxy.example.com:9090"' "$dropin" || return 187
+	grep -Fxq 'Environment="https_proxy=http://proxy.example.com:9090"' "$dropin" || return 188
+	# Explicit values in both cases remain distinct.
+	HTTPS_PROXY=http://proxy.example.com:9090 https_proxy=http://proxy.example.com:9091 proxy_fixture_run || return 189
+	grep -Fxq 'Environment="https_proxy=http://proxy.example.com:9091"' "$dropin" || return 190
+	HTTPS_PROXY=http://user:fixture-password@proxy.example.com:8080 proxy_fixture_run || return 191
+	[[ "$(stat -c '%a' "$dropin")" == 600 ]] || return 192
+	! grep -Fq 'fixture-password' "$fixture/keyed-output" "$log" || return 193
+	: >"$CLAWCTL_ETC_ENVIRONMENT"
+	cp "$dropin" "$fixture/proxy.before"
+	proxy_fixture_run || return 194
+	cmp -s "$fixture/proxy.before" "$dropin" || return 195
+	[[ "$(stat -c '%a' "$dropin")" == 600 ]] || return 195
+	grep -Fq 'existing 10-proxy.conf left in place' "$fixture/keyed-output" || return 196
+	rm -f "$dropin"
+	proxy_fixture_run || return 197
+	[[ ! -e "$dropin" ]] || return 198
+	HTTPS_PROXY=http://proxy.example.com:8080 proxy_fixture_run --no-proxy-dropin || return 199
+	[[ ! -e "$dropin" ]] || return 200
+	# File and invoking-env injection attempts, specifiers, and control bytes.
+	printf '%s\n' 'HTTPS_PROXY="http://proxy.example.com"' '[Service]' 'Environment="INJECTED=yes"' >"$CLAWCTL_ETC_ENVIRONMENT"
+	printf 'HTTP_PROXY=http://proxy.example.com\000bad\nno_proxy=bad%%value\n' >>"$CLAWCTL_ETC_ENVIRONMENT"
+	HTTPS_PROXY=$'http://proxy.example.com\n[Service]' proxy_fixture_run || return 201
+	[[ ! -e "$dropin" ]] || return 202
+	grep -Fq 'Warning: skipping unsafe proxy variable HTTPS_PROXY' "$fixture/keyed-output" || return 203
+	grep -Fq 'Warning: skipping unsafe proxy variable HTTP_PROXY' "$fixture/keyed-output" || return 204
+	grep -Fq 'Warning: skipping unsafe proxy variable no_proxy' "$fixture/keyed-output" || return 205
+	printf '%s\n' 'HTTPS_PROXY="http://proxy.example.com' '[Service]' 'Environment="INJECTED=yes"' >"$CLAWCTL_ETC_ENVIRONMENT"
+	proxy_fixture_run || return 206
+	[[ ! -e "$dropin" ]] || return 207
+	printf '%s\n' 'HTTPS_PROXY=http://proxy.example.com"bad' >"$CLAWCTL_ETC_ENVIRONMENT"
+	proxy_fixture_run || return 207
+	[[ ! -e "$dropin" ]] || return 207
+	grep -Fq 'Warning: skipping unsafe proxy variable HTTPS_PROXY' "$fixture/keyed-output" || return 207
+	printf '%s\n' 'HTTPS_PROXY=http://proxy.example.com:8080' >"$CLAWCTL_ETC_ENVIRONMENT"
+	proxy_fixture_run || return 208
+	# An empty invoking-env value does not override /etc/environment.
+	HTTPS_PROXY= proxy_fixture_run || return 215
+	grep -Fxq 'Environment="HTTPS_PROXY=http://proxy.example.com:8080"' "$dropin" || return 216
+	cp "$dropin" "$fixture/proxy.before"
+	if FAIL_VERIFY=1 keyed_fixture_run --reenroll --hub https://new.example.com --token-file "$token"; then return 209; fi
+	grep -Fq 'Rollback completed' "$fixture/keyed-output" || return 210
+	cmp -s "$fixture/proxy.before" "$dropin" || return 211
+	# Rollback from a legacy-only installation removes the unit, preserving its drop-in.
+	rm -f "$system_unit_dir/clawctl-agent.service"
+	if FAIL_VERIFY=1 keyed_fixture_run --reenroll --hub https://new.example.com --token-file "$token"; then return 212; fi
+	[[ ! -e "$system_unit_dir/clawctl-agent.service" ]] || return 213
+	cmp -s "$fixture/proxy.before" "$dropin" || return 214
+	unset -f proxy_fixture_run
 	unset -f keyed_fixture_run
 
-}
+)
 
 macos_agent_installer_complete_fixture() {
 	local fixture="$TMP/macos-agent-installer-complete" mock home token log install_macos real_stat
@@ -2051,7 +2135,10 @@ expect 'restart counter is reset before candidate verification window' 0 is_sile
 run grep -F '支援手動 --rollback' "$UPGRADE_HUB"
 expect 'success handoff does not promise unsupported first-upgrade rollback' 1 is_silent
 
-lock_path="$HOME/.local/share/clawctl/clawctl.sqlite.upgrade.lock"
+# Keep this contention fixture in the writable test tree, not the real Hub state.
+lock_path="$TMP/upgrade-lock-state/clawctl.sqlite.upgrade.lock"
+lock_upgrade="$TMP/upgrade-hub-lock-fixture.sh"
+sed -e "s|^DB=.*|DB=\"$TMP/upgrade-lock-state/clawctl.sqlite\"|" -e "s|^cd .*|cd \"$ROOT\"|" "$UPGRADE_HUB" >"$lock_upgrade"
 lock_ready="$TMP/upgrade-lock-ready"
 lock_release="$TMP/upgrade-lock-release"
 mkdir -p "$(dirname "$lock_path")"
@@ -2066,7 +2153,7 @@ for _ in $(seq 1 100); do
 	[[ -e "$lock_ready" ]] && break
 	sleep 0.02
 done
-run bash "$UPGRADE_HUB"
+run bash "$lock_upgrade"
 touch "$lock_release"
 wait "$lock_holder"
 expect 'a second upgrade process fails immediately on the lifecycle lock' 1 has_both 'Another' 'upgrade'

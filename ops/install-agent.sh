@@ -18,6 +18,7 @@ REENROLL=0
 BACKUP_CONFIG=""
 REENROLL_PHASE=0
 NO_CONTAINER_RUNTIME=0
+NO_PROXY_DROPIN=0
 OLD_SYSTEM_ACTIVE=0
 OLD_SYSTEM_ENABLED=0
 OLD_LEGACY_ACTIVE=0
@@ -44,6 +45,7 @@ Options:
   --binary FILE                    clawctl-agent binary for this machine
   --no-tailscale                   skip Tailscale install and connection
   --no-container-runtime           skip podman setup (Hermes container jobs need it)
+  --no-proxy-dropin                skip proxy detection and system unit drop-in
   --reenroll                       reenroll this machine to a new Hub (Linux only)
 EOF
 }
@@ -84,6 +86,7 @@ rollback_reenroll() {
     if [[ -e "$SYSTEM_UNIT_FILE" ]]; then
       sudo systemctl disable clawctl-agent.service || failed=1
     fi
+    # Proxy settings belong to the host; retain service.d even without a unit.
     sudo rm -f -- "$SYSTEM_UNIT_FILE" || failed=1
   fi
   if [[ -n "$BACKUP_BINARY" ]]; then
@@ -175,6 +178,74 @@ install_agent_unit() {
   sudo install -d -m 0755 "$SYSTEM_UNIT_DIR"
   sudo install -m 0644 "$RENDERED_AGENT_UNIT" "$SYSTEM_UNIT_FILE.new"
   sudo mv -f "$SYSTEM_UNIT_FILE.new" "$SYSTEM_UNIT_FILE"
+}
+
+# Treat /etc/environment as data. Never execute shell syntax or expand values.
+install_proxy_dropin() {
+  [[ "$NO_PROXY_DROPIN" == 0 ]] || return 0
+  local LC_ALL=C
+  local source="${CLAWCTL_ETC_ENVIRONMENT:-/etc/environment}"
+  local key value line other mode=0644 proxy_file
+  local dropin_dir="$SYSTEM_UNIT_DIR/clawctl-agent.service.d"
+  local -A proxies=()
+  if [[ -r "$source" ]]; then
+    # Bash discards NUL bytes on read; map them to a rejected control byte first.
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" =~ ^[[:blank:]]*(export[[:blank:]]+)?(HTTPS_PROXY|https_proxy|HTTP_PROXY|http_proxy|NO_PROXY|no_proxy)=(.*)$ ]]; then
+        key="${BASH_REMATCH[2]}"
+        value="${BASH_REMATCH[3]}"
+        if [[ "$value" == \"*\" && ${#value} -ge 2 ]] || [[ "$value" == \'*\' && ${#value} -ge 2 ]]; then
+          value="${value:1:${#value}-2}"
+        fi
+        proxies[$key]="$value"
+      fi
+    done < <(tr '\000' '\001' <"$source")
+  fi
+  for key in HTTPS_PROXY https_proxy HTTP_PROXY http_proxy NO_PROXY no_proxy; do
+    if [[ -v "$key" && -n "${!key}" ]]; then proxies[$key]="${!key}"; fi
+  done
+  for key in "${!proxies[@]}"; do
+    value="${proxies[$key]}"
+    if [[ -z "$value" ]]; then
+      unset 'proxies[$key]'
+      continue
+    fi
+    if [[ "$value" =~ [[:cntrl:]] || "$value" == *\"* || "$value" == *\\* || "$value" == *%* || "$value" == \'* ]]; then
+      printf 'Warning: skipping unsafe proxy variable %s\n' "$key" >&2
+      unset 'proxies[$key]'
+    fi
+  done
+  if [[ ${#proxies[@]} == 0 ]]; then
+    if [[ -e "$dropin_dir/10-proxy.conf" ]]; then
+      echo "No proxy variables detected; existing 10-proxy.conf left in place."
+    fi
+    return 0
+  fi
+  for key in HTTPS_PROXY HTTP_PROXY NO_PROXY; do
+    other="${key,,}"
+    if [[ -v "proxies[$key]" && ! -v "proxies[$other]" ]]; then
+      proxies[$other]="${proxies[$key]}"
+    elif [[ -v "proxies[$other]" && ! -v "proxies[$key]" ]]; then
+      proxies[$key]="${proxies[$other]}"
+    fi
+  done
+  proxy_file="$(mktemp)"
+  SECRET_FILES+=("$proxy_file")
+  {
+    echo '# Managed by clawctl install-agent.sh: proxy settings detected at install time.'
+    echo '[Service]'
+    for key in HTTPS_PROXY https_proxy HTTP_PROXY http_proxy NO_PROXY no_proxy; do
+      [[ -v "proxies[$key]" ]] || continue
+      value="${proxies[$key]}"
+      # Conservatively protect any value with a possible userinfo delimiter.
+      if [[ "$value" == *@* ]]; then mode=0600; fi
+      printf 'Environment="%s=%s"\n' "$key" "$value"
+    done
+  } >"$proxy_file"
+  sudo install -d -m 0755 "$dropin_dir"
+  sudo install -m "$mode" -o root -g root "$proxy_file" "$dropin_dir/10-proxy.conf.new"
+  sudo mv -f "$dropin_dir/10-proxy.conf.new" "$dropin_dir/10-proxy.conf"
+  echo "Installed system unit proxy drop-in: $dropin_dir/10-proxy.conf"
 }
 
 cleanup() {
@@ -280,6 +351,7 @@ while [[ $# -gt 0 ]]; do
     --binary) [[ $# -ge 2 ]] || fail "--binary requires a value"; BIN_SRC="$2"; shift 2 ;;
     --no-tailscale) NO_TAILSCALE=1; shift 1 ;;
     --no-container-runtime) NO_CONTAINER_RUNTIME=1; shift ;;
+    --no-proxy-dropin) NO_PROXY_DROPIN=1; shift ;;
     --reenroll) REENROLL=1; shift 1 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -733,6 +805,7 @@ fi
 
 STEP="agent service"
 install_agent_unit
+install_proxy_dropin
 sudo systemctl daemon-reload
 [[ "$(systemctl show clawctl-agent.service --property=LoadState --value)" == "loaded" ]] || fail "clawctl-agent system unit did not load"
 [[ "$(systemctl show clawctl-agent.service --property=FragmentPath --value)" == "$SYSTEM_UNIT_FILE" ]] || fail "clawctl-agent system unit path mismatch before migration"
