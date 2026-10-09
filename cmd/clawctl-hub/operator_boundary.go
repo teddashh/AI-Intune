@@ -142,11 +142,12 @@ var nonOperatorRoutePolicies = map[string]nonOperatorRoutePolicy{
 // A newly registered control route therefore fails closed until somebody
 // classifies that exact ServeMux pattern in review.
 var operatorRoutePolicies = map[string]operatorRoutePolicy{
-	"GET /account/security":               {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
-	"POST /account/security/totp/begin":   {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
-	"POST /account/security/totp/confirm": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
-	"POST /account/security/totp/disable": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
-	"POST /account/security/password":     {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"GET /account/security":                            {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/security/totp/begin":                {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/security/totp/confirm":              {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/security/totp/disable":              {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/security/password":                  {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/security/recovery-codes/regenerate": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 
 	"GET /metrics":             {operatorauth.View, operatorPlain, operator.SourceKindWeb, operatorSecurityLocked},
 	"GET /{$}":                 {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},

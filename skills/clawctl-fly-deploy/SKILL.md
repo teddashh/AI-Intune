@@ -39,6 +39,8 @@ ops/fly/setup-admin.sh --url https://hub.example.com --username <username> \
 
 The helper generates a password and writes username, password, TOTP secret, and ten recovery codes to a new mode-0600 JSON file. It never prints those values and refuses overwrites. Use secure storage for the file. It uses one keep-alive HTTPS connection for setup, enrollment, and confirmation.
 
+Account security can regenerate ten recovery codes with the current password and an unused authenticator code; recovery codes are not accepted. All previous codes are invalidated. Failures count toward the shared account/client lockout. New codes are shown once, and the regeneration audit contains no codes. Alternatively, stop the Hub and run `clawctl-hub regenerate-recovery-codes --db PATH --username U`, then restart it; the host command requires MFA enabled and prints one code per line. An authenticator step used to sign in cannot be reused: wait for the next 30-second step before regenerating, and use one keep-alive HTTPS connection for login and regeneration.
+
 To destroy a confirmed disposable app:
 
 ```sh

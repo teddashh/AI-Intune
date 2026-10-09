@@ -47,12 +47,12 @@ manifest 位於 `cmd/clawctl-hub/operator_boundary.go`，Web routes 位於
 
 Hub schema 已平台中立：`internal/store/schema.sql:30-31` `os/arch` TEXT 無 CHECK；`internal/catalog/catalog.go:67-71` `Platform{OS,Arch}` 無 enum；`:547` `validPlatform` 只做識別字規則，`"darwin"` 與 `"windows"` 字串都過得了。過得了字串 ≠ 有 adapter 或 installer。
 
-## 227 個 production operations 基線
+## 228 個 production operations 基線
 
-此數字按 HTTP method + route 計數：18 個 non-operator operations、209 個 operator
-operations；其中 107 個為 operator JSON、102 個為 HTML/BFF/CSV/download。Operator 另按 exact
-capability 分成 `view=83`、`operate=24`、`admin=102`。這組數字由 route/API/service/Web/CLI
-合約測試固定；227-operation surface 包含受 operator view 保護的 Agent bootstrap download、Tailnet Settings、Maintenance、Ticket usage、資料揭露面、註冊報告、每日早報預覽、註冊上限、軟體清查、每機安裝狀態、發佈與指派對照、Hub 名冊重新命名及名冊備註、管理中心導覽語言偏好，
+此數字按 HTTP method + route 計數：18 個 non-operator operations、210 個 operator
+operations；其中 107 個為 operator JSON、103 個為 HTML/BFF/CSV/download。Operator 另按 exact
+capability 分成 `view=83`、`operate=24`、`admin=103`。這組數字由 route/API/service/Web/CLI
+合約測試固定；228-operation surface 包含受 operator view 保護的 Agent bootstrap download、Tailnet Settings、Maintenance、Ticket usage、資料揭露面、註冊報告、每日早報預覽、註冊上限、軟體清查、每機安裝狀態、發佈與指派對照、Hub 名冊重新命名及名冊備註、管理中心導覽語言偏好，
 以及只開兩條 route 的 verifier transport；
 這是 repo 的 route manifest 基線，live binary 的實機紀錄是私人工作筆記，不在這個公開倉庫，兩者在部署前本來就可能不同。
 新增、移除或改 method 時，須同步更新本節與 route manifest 測試。
@@ -84,7 +84,7 @@ Machine bearer 與 operator auth 不互相繼承；實作邊界見
 `cmd/clawctl-hub/api.go`、`cmd/clawctl-hub/operator_boundary.go`。Verifier bearer 與這兩者也不互相繼承，
 resolver 在 `cmd/clawctl-hub/verifier_api.go`。
 
-### Operator HTML/BFF 與 JSON（209）
+### Operator HTML/BFF 與 JSON（210）
 
 | # | Method / route | 類型 | 人工 action | 備註 |
 |---:|---|---|---|---|
@@ -298,6 +298,7 @@ resolver 在 `cmd/clawctl-hub/verifier_api.go`。
 | 225 | `POST /account/security/totp/confirm` | HTML | Mutation | `admin`; local sessions only; Tailscale principals receive 404 |
 | 226 | `POST /account/security/totp/disable` | HTML | Mutation | `admin`; local sessions only; Tailscale principals receive 404 |
 | 227 | `POST /account/security/password` | HTML | Mutation | `admin`; local sessions only; Tailscale principals receive 404 |
+| 228 | `POST /account/security/recovery-codes/regenerate` | HTML | Mutation | `admin`; local sessions only; password plus authenticator required; replaces ten codes, shown once; shared lockout and audit without codes; host alternative `regenerate-recovery-codes` |
 
 HTML/BFF handlers 見 `internal/web/web.go`、`internal/web/actions.go`、
 `internal/web/terminal_open.go`、

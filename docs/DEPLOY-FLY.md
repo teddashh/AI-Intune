@@ -121,6 +121,8 @@ fly logs -a <your-app-name>
 
 Read the generated first-run setup code from the Hub log; protect log access. Press Ctrl-C to stop following logs. If you supplied `CLAWCTL_SETUP_CODE`, use that value instead: it is not printed. Open **`https://<your-app-name>.fly.dev/setup`**, enter the code, and create your admin (username: 3–64 letters, digits, dots, underscores or hyphens; password: 12–256 bytes). Add the displayed TOTP secret to your authenticator, confirm a six-digit code, and save the one-time recovery codes. MFA is required by default. Setup closes after the first admin exists; subsequent sign-ins use `/login`.
 
+Account security can regenerate ten recovery codes with the current password and an unused authenticator code; recovery codes are not accepted. All previous codes are invalidated. Failures count toward the shared account/client lockout. New codes are shown once, and the regeneration audit contains no codes. Alternatively, stop the Hub and run `clawctl-hub regenerate-recovery-codes --db PATH --username U`, then restart it; the host command requires MFA enabled and prints one code per line.
+
 ### 5. Optional custom domain — choose before enrolling machines
 
 ```sh

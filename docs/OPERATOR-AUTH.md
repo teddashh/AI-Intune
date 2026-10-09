@@ -12,6 +12,8 @@ Local accounts are the default for the recommended [Autopilot quick start](AUTOP
 
 Forwarded headers never establish operator identity. Local mode includes setup-code bootstrap, one admin, login rate limits and lockout; see [Autopilot security and recovery](AUTOPILOT.md#security-model-and-current-limits). Operator CLI/MCP still uses the Tailscale path; local maintenance CLI commands are documented separately there.
 
+Account security can regenerate ten recovery codes with the current password and an unused authenticator code; recovery codes are not accepted. All previous codes are invalidated. Failures count toward the shared account/client lockout. New codes are shown once, and the regeneration audit contains no codes. Alternatively, stop the Hub and run `clawctl-hub regenerate-recovery-codes --db PATH --username U`, then restart it; the host command requires MFA enabled and prints one code per line.
+
 ## Quick start (English)
 
 This existing quick start describes the advanced **tailscale** mode. For local accounts and HTTPS, start with [Autopilot](AUTOPILOT.md).
@@ -169,11 +171,11 @@ example.com/cap/clawctl-admin
 
 此 Tailscale surface 不含另列於 [API-SURFACE.md](API-SURFACE.md) 的 6 條公開 account operations；包含新的 Admin keyed-installer download。
 
-目前 code route manifest 固定為 227 operations：18 條 non-operator，加上 209 條 operator
-routes；operator manifest 的 exact capability tally 是 `view=83`、`operate=24`、`admin=102`，
-其中 `/v1/operator/*` JSON routes 共 107 條、HTML/BFF/CSV/download 共 102 條。這些數字由 route manifest 測試固定，不能靠
+目前 code route manifest 固定為 228 operations：18 條 non-operator，加上 210 條 operator
+routes；operator manifest 的 exact capability tally 是 `view=83`、`operate=24`、`admin=103`，
+其中 `/v1/operator/*` JSON routes 共 107 條、HTML/BFF/CSV/download 共 103 條。這些數字由 route manifest 測試固定，不能靠
 較高 capability 的隱含繼承湊數。
-227-operation boundary 包含 machine-bearer bootstrap readiness receipt、operator-only bundle download、Tailnet Settings、Retention Maintenance、資料揭露面、註冊報告、每日早報預覽、註冊上限、軟體清查、每機安裝狀態、發佈與指派對照、Hub 名冊重新命名／備註、verifier registry 與派工、disk-clean 摘要與發布；完整 route 與 ledger 證據的實機紀錄是私人工作筆記，不在這個公開倉庫。
+228-operation boundary 包含 machine-bearer bootstrap readiness receipt、operator-only bundle download、Tailnet Settings、Retention Maintenance、資料揭露面、註冊報告、每日早報預覽、註冊上限、軟體清查、每機安裝狀態、發佈與指派對照、Hub 名冊重新命名／備註、verifier registry 與派工、disk-clean 摘要與發布；完整 route 與 ledger 證據的實機紀錄是私人工作筆記，不在這個公開倉庫。
 
 operator route manifest 與實際註冊清單在 Hub 啟動時做雙向比對。繞過 operator
 boundary 的 18 條 route 也有另一份完整 manifest；兩份不能

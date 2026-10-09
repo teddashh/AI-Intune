@@ -329,3 +329,110 @@ func TestEnrollmentRevokesPasswordOnlySessionsAndLogins(t *testing.T) {
 		t.Fatal("stale factor snapshot accepted", err)
 	}
 }
+
+func TestRegenerateRecoveryCodes(t *testing.T) {
+	fastAccountHashes(t)
+	s := newTestStore(t)
+	now := time.Unix(1800000000, 0)
+	s.nowFn = func() time.Time { return now }
+	a, err := s.CreateFirstAdmin("admin", testAdminPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RegenerateAdminRecoveryCodes("admin"); !errors.Is(err, ErrAccountAuth) {
+		t.Fatal(err)
+	}
+	if _, err := s.RegenerateAdminRecoveryCodes("unknown"); err == nil {
+		t.Fatal("unknown user accepted")
+	}
+	secret, _ := s.BeginTOTPEnrollment(a.AccountID)
+	code, _ := totp.Code(secret, now.Unix()/30)
+	old, err := s.ConfirmTOTP(a.AccountID, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip := "192.0.2.1"
+	for _, bad := range []string{code, old[0], "bad", "bad", "bad"} {
+		if _, err := s.RegenerateRecoveryCodes(a.AccountID, ip, bad); !errors.Is(err, ErrAccountAuth) {
+			t.Fatal(err)
+		}
+	}
+	now = now.Add(30 * time.Second)
+	code, _ = totp.Code(secret, now.Unix()/30)
+	if _, err := s.RegenerateRecoveryCodes(a.AccountID, ip, code); !errors.Is(err, ErrAccountAuth) {
+		t.Fatal("lockout bypass", err)
+	}
+	var count int
+	if err := s.DB().QueryRow(`SELECT count(*) FROM hub_account_recovery_codes WHERE account_id=? AND used_at IS NULL`, a.AccountID).Scan(&count); err != nil || count != 10 {
+		t.Fatal(count, err)
+	}
+	// Recovery rejection neither consumes the code nor changes the set.
+	if err := s.VerifySecondFactor(a.AccountID, "192.0.2.2", old[0]); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(16 * time.Minute)
+	code, _ = totp.Code(secret, now.Unix()/30)
+	if _, err := s.DB().Exec(`UPDATE hub_accounts SET disabled_at=? WHERE account_id=?`, fmtTime(now), a.AccountID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RegenerateRecoveryCodes(a.AccountID, ip, code); !errors.Is(err, ErrAccountAuth) {
+		t.Fatal("disabled account accepted", err)
+	}
+	if _, err := s.DB().Exec(`UPDATE hub_accounts SET disabled_at=NULL WHERE account_id=?`, a.AccountID); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := s.RegenerateRecoveryCodes(a.AccountID, ip, code)
+	if err != nil || len(fresh) != 10 {
+		t.Fatal("regeneration failed", err)
+	}
+	seen := map[string]bool{}
+	for _, c := range fresh {
+		if seen[c] {
+			t.Fatal("duplicate")
+		}
+		seen[c] = true
+	}
+	if _, err := s.RegenerateRecoveryCodes(a.AccountID, ip, code); !errors.Is(err, ErrAccountAuth) {
+		t.Fatal("replay", err)
+	}
+	for i, c := range old {
+		if err := s.VerifySecondFactor(a.AccountID, fmt.Sprintf("198.51.100.%d", i+1), c); !errors.Is(err, ErrAccountAuth) {
+			t.Fatal("old code accepted", err)
+		}
+	}
+	for _, c := range fresh {
+		if err := s.VerifySecondFactor(a.AccountID, ip, c); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.VerifySecondFactor(a.AccountID, ip, c); !errors.Is(err, ErrAccountAuth) {
+			t.Fatal("reuse", err)
+		}
+	}
+	if !IsKnownAuditAction(AuditRecoveryCodesRegenerated) {
+		t.Fatal("unknown regeneration audit action")
+	}
+	rows, err := s.DB().Query(`SELECT * FROM audit_log WHERE action=?`, AuditRecoveryCodesRegenerated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	columns, _ := rows.Columns()
+	if !rows.Next() {
+		t.Fatal("missing audit")
+	}
+	values := make([]any, len(columns))
+	dest := make([]any, len(columns))
+	for i := range values {
+		dest[i] = &values[i]
+	}
+	if err := rows.Scan(dest...); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range values {
+		for _, c := range append(old, fresh...) {
+			if strings.Contains(fmt.Sprint(value), c) {
+				t.Fatal("audit contains code")
+			}
+		}
+	}
+}

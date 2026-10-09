@@ -332,12 +332,21 @@ func TestRequiredMFAGatesEveryOperatorRoute(t *testing.T) {
 func TestMFAEnrollmentPOSTsRejectCrossOrigin(t *testing.T) {
 	unsetMFARequirement(t)
 	h, st := localAccountHandler(t)
-	if _, err := st.CreateFirstAdmin("admin", "a long test password"); err != nil {
+	a, err := st.CreateFirstAdmin("admin", "a long test password")
+	if err != nil {
 		t.Fatal(err)
 	}
 	w := accountRequest(h, "POST", "/login", "username=admin&password=a+long+test+password", nil)
 	session := w.Result().Cookies()[0]
-	for _, path := range []string{"/login/mfa", "/account/security/totp/begin", "/account/security/totp/confirm"} {
+	secret, err := st.BeginTOTPEnrollment(a.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _ := totp.Code(secret, time.Now().Unix()/30-1)
+	if _, err := st.ConfirmTOTPForSession(a.AccountID, code, session.Value); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/login/mfa", "/account/security/totp/begin", "/account/security/totp/confirm", "/account/security/recovery-codes/regenerate"} {
 		r := httptest.NewRequest("POST", "https://hub.example.com"+path, strings.NewReader("code=123456"))
 		r.RemoteAddr = "192.0.2.1:1234"
 		r.Header.Set("Origin", "https://attacker.example")
