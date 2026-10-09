@@ -198,6 +198,16 @@ func main() {
 			log.Fatal(err)
 		}
 		switch command {
+		case "add-admin":
+			if err := runAdminPasswordCommand("add-admin", os.Args[2:], os.Stdin); err != nil {
+				log.Fatal(err)
+			}
+			return
+		case "set-email", "rename-user", "disable-user", "enable-user":
+			if err := runUserCommand(command, os.Args[2:]); err != nil {
+				log.Fatal(err)
+			}
+			return
 		case "bootstrap-admin":
 			if err := runBootstrapAdmin(os.Args[2:], os.Stdin); err != nil {
 				log.Fatal(err)
@@ -393,7 +403,7 @@ func classifyTopLevel(argv []string) (string, error) {
 		return "", nil
 	}
 	switch argv[0] {
-	case "bootstrap-admin", "reset-admin-password", "regenerate-recovery-codes", "enroll-token", "machines", "audit", "retire", "report", "data", "tickets", "tailnet",
+	case "add-admin", "set-email", "rename-user", "disable-user", "enable-user", "bootstrap-admin", "reset-admin-password", "regenerate-recovery-codes", "enroll-token", "machines", "audit", "retire", "report", "data", "tickets", "tailnet",
 		"enrollment-limit", "prune", "restore-drill", "job", "machine", "deployment",
 		"artifact", "catalog", "verifier", "settings", "compliance", "version", "notify-check":
 		return argv[0], nil

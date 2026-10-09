@@ -85,6 +85,9 @@ func (s *Store) ConfirmTOTPForSession(id, code, keepToken string, metadata ...Au
 	if _, err = tx.Exec(`UPDATE hub_account_mfa SET totp_secret=pending_secret,pending_secret=NULL,enabled_at=?,last_used_step=? WHERE account_id=?`, fmtTime(s.nowFn()), step, id); err != nil {
 		return nil, err
 	}
+	if _, err = tx.Exec(`UPDATE hub_accounts SET auth_generation=auth_generation+1 WHERE account_id=?`, id); err != nil {
+		return nil, err
+	}
 	if _, err = tx.Exec(`UPDATE hub_sessions SET revoked_at=? WHERE account_id=? AND session_hash<>? AND revoked_at IS NULL`, fmtTime(s.nowFn()), id, sessionHash(keepToken)); err != nil {
 		return nil, err
 	}
@@ -94,12 +97,32 @@ func (s *Store) ConfirmTOTPForSession(id, code, keepToken string, metadata ...Au
 	return codes, tx.Commit()
 }
 func (s *Store) VerifySecondFactor(id, clientIP, code string, metadata ...AuditEntry) error {
+	return s.verifyLoginSecondFactor(id, nil, clientIP, code, metadata...)
+}
+
+// VerifyLoginSecondFactor rejects stale password steps before consuming a factor.
+// CreateSession checks the same snapshot atomically with session issuance.
+func (s *Store) VerifyLoginSecondFactor(a HubAccount, clientIP, code string, metadata ...AuditEntry) error {
+	return s.verifyLoginSecondFactor(a.AccountID, &a.authGeneration, clientIP, code, metadata...)
+}
+
+func (s *Store) verifyLoginSecondFactor(id string, generation *int64, clientIP, code string, metadata ...AuditEntry) error {
 	clientIP = clientip.Key(clientIP)
 	tx, err := s.beginWrite(context.Background(), "verify_second_factor")
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if generation != nil {
+		var current int64
+		err = tx.QueryRow(`SELECT auth_generation FROM hub_accounts WHERE account_id=? AND disabled_at IS NULL`, id).Scan(&current)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && current != *generation) {
+			return ErrSessionAuth
+		}
+		if err != nil {
+			return err
+		}
+	}
 	err = s.verifySecondFactorTx(tx, id, clientIP, code, true, metadata...)
 	if err != nil && !errors.Is(err, ErrAccountAuth) {
 		return err
@@ -213,6 +236,9 @@ func (s *Store) DisableMFA(id string, metadata ...AuditEntry) error {
 	if _, err = tx.Exec(`DELETE FROM hub_account_mfa WHERE account_id=?`, id); err != nil {
 		return err
 	}
+	if _, err = tx.Exec(`UPDATE hub_accounts SET auth_generation=auth_generation+1 WHERE account_id=?`, id); err != nil {
+		return err
+	}
 	if err = s.recordAuditTx(tx, accountAudit(AuditMFADisabled, a, true, metadata...)); err != nil {
 		return err
 	}
@@ -275,6 +301,9 @@ func (s *Store) replaceRecoveryCodesTx(tx dbTx, id string, metadata ...AuditEntr
 		return nil, err
 	}
 	if _, err := tx.Exec(`DELETE FROM hub_account_recovery_codes WHERE account_id=?`, id); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`UPDATE hub_accounts SET auth_generation=auth_generation+1 WHERE account_id=?`, id); err != nil {
 		return nil, err
 	}
 	codes, err := generateRecoveryCodesTx(tx, id)

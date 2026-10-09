@@ -75,3 +75,7 @@ Type the exact app name at the prompt. Non-TTY stdin is supported, but must supp
 - MFA `Pending login expired`: login is bound to the full client IP. New connections can rotate egress IP; use one keep-alive HTTPS connection. First-run setup uses `__Host-clawctl_session` directly, not `hub_pending_mfa`.
 - Restore drill missing R2 variables: configure replication first. The drill requires `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `LITESTREAM_BUCKET`, and `LITESTREAM_ENDPOINT`; it does not work without R2.
 - Wrong-host 421 after switching domains: open the origin set in `CLAWCTL_PUBLIC_URL`, verify DNS and TLS, and enroll real machines only after that origin is stable. Old agent URLs require re-enrollment.
+
+After initial setup, add more admins through `/account/users`, or stop the Hub and
+run `clawctl-hub add-admin --db PATH --username alice [--email alice@example.com]`
+with the initial password on stdin. New admins must enroll MFA on first login.

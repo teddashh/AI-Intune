@@ -30,6 +30,11 @@ type AuditAction string
 const (
 	AuditHubGuessing               AuditAction = "hub-login-guessing"
 	AuditHubSetup                  AuditAction = "hub-setup"
+	AuditHubUserCreated            AuditAction = "hub-user-created"
+	AuditHubUserDisabled           AuditAction = "hub-user-disabled"
+	AuditHubUserEnabled            AuditAction = "hub-user-enabled"
+	AuditHubUserRenamed            AuditAction = "hub-user-renamed"
+	AuditHubUserEmailChanged       AuditAction = "hub-user-email-changed"
 	AuditHubLoginOK                AuditAction = "hub-login-ok"
 	AuditHubLoginFailed            AuditAction = "hub-login-failed"
 	AuditHubLockout                AuditAction = "hub-lockout"
