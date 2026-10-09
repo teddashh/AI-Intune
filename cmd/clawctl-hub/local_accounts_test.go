@@ -19,6 +19,7 @@ import (
 	"github.com/teddashh/AI-Intune/internal/localauth"
 	"github.com/teddashh/AI-Intune/internal/operatorauth"
 	"github.com/teddashh/AI-Intune/internal/store"
+	"github.com/teddashh/AI-Intune/internal/totp"
 	"github.com/teddashh/AI-Intune/internal/web"
 )
 
@@ -536,5 +537,63 @@ func TestLoginIPv6Rotation(t *testing.T) {
 		if w.Code != want {
 			t.Fatalf("attempt %d: %d want %d", i, w.Code, want)
 		}
+	}
+}
+
+func TestRegenerateRecoveryCodesCommand(t *testing.T) {
+	st := boundaryStore(t)
+	a, err := st.CreateFirstAdmin("admin", "long admin password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seq int
+	var name, path string
+	if err := st.DB().QueryRow(`PRAGMA database_list`).Scan(&seq, &name, &path); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"--db", path, "--username", "admin"}
+	var out bytes.Buffer
+	if err := runRegenerateRecoveryCodes(args, &out); err == nil || out.Len() != 0 {
+		t.Fatal("non MFA accepted")
+	}
+	if err := runRegenerateRecoveryCodes([]string{"--db", path, "--username", "unknown"}, &out); err == nil {
+		t.Fatal("unknown accepted")
+	}
+	secret, _ := st.BeginTOTPEnrollment(a.AccountID)
+	code, _ := totp.Code(secret, time.Now().Unix()/30)
+	old, err := st.ConfirmTOTP(a.AccountID, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command, err := classifyTopLevel(append([]string{"regenerate-recovery-codes"}, args...)); err != nil || command != "regenerate-recovery-codes" {
+		t.Fatal(command, err)
+	}
+	if err := runRegenerateRecoveryCodes(args, &out); err != nil {
+		t.Fatal(err)
+	}
+	fresh := strings.Fields(out.String())
+	if len(fresh) != 10 || strings.Count(out.String(), "\n") != 10 {
+		t.Fatal("unexpected output format")
+	}
+	seen := map[string]bool{}
+	for _, c := range fresh {
+		if !regexp.MustCompile(`^[a-z2-7]{4}-[a-z2-7]{4}-[a-z2-7]{4}$`).MatchString(c) || seen[c] {
+			t.Fatal("invalid code")
+		}
+		seen[c] = true
+	}
+	for i, c := range old {
+		if err := st.VerifySecondFactor(a.AccountID, fmt.Sprintf("198.51.100.%d", i+1), c); err == nil {
+			t.Fatal("old code accepted")
+		}
+	}
+	if err := st.VerifySecondFactor(a.AccountID, "192.0.2.1", fresh[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(upgradeMaintenanceMarker(path), []byte("maintenance"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := rejectTopLevelCLIWhileUpgradeMaintenance("regenerate-recovery-codes", append([]string{"regenerate-recovery-codes"}, args...)); err == nil {
+		t.Fatal("maintenance allowed")
 	}
 }

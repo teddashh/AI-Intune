@@ -81,14 +81,15 @@ func renderMFAForm(w http.ResponseWriter, message string) {
 	_ = mfaForm.Execute(w, struct{ Error string }{message})
 }
 
-var securityForm = template.Must(template.New("security").Parse(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Account security · clawctl</title><a href="/">Hub</a><h1>Account security</h1>{{if .Warning}}<p role="alert" style="padding:12px 16px;border:1px solid #d29200;background:#fff4ce;color:#8a3b00">WARNING: {{.Warning}}</p>{{end}}<p>MFA enabled: {{.Enabled}}</p>{{if .Secret}}<p>Add this secret to your authenticator: <code>{{.Secret}}</code></p><p><code>{{.URI}}</code></p><a href="{{.URI}}">Authenticator URI (copy link)</a><form method="post" action="/account/security/totp/confirm"><label>6-digit code <input name="code" required maxlength="6"></label><button>Enable MFA</button></form>{{else}}{{if .Enabled}}{{if .Required}}<p>MFA is required. Only host recovery can remove it.</p>{{else}}<form method="post" action="/account/security/totp/disable"><label>Current password <input type="password" name="password" required maxlength="256"></label><label>Authenticator or recovery code <input name="code" required maxlength="32"></label><button>Disable MFA</button></form>{{end}}{{else}}<form method="post" action="/account/security/totp/begin"><button>Set up authenticator</button></form>{{end}}{{end}}{{if .Codes}}<h2>Recovery codes — save these now</h2><p>Each code works once. These codes will only be shown once.</p><pre>{{range .Codes}}{{.}}
+var securityForm = template.Must(template.New("security").Parse(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Account security · clawctl</title><a href="/">Hub</a><h1>Account security</h1>{{if .Warning}}<p role="alert" style="padding:12px 16px;border:1px solid #d29200;background:#fff4ce;color:#8a3b00">WARNING: {{.Warning}}</p>{{end}}<p>MFA enabled: {{.Enabled}}</p>{{if .Secret}}<p>Add this secret to your authenticator: <code>{{.Secret}}</code></p><p><code>{{.URI}}</code></p><a href="{{.URI}}">Authenticator URI (copy link)</a><form method="post" action="/account/security/totp/confirm"><label>6-digit code <input name="code" required maxlength="6"></label><button>Enable MFA</button></form>{{else}}{{if .Enabled}}<form method="post" action="/account/security/recovery-codes/regenerate"><label>Current password <input type="password" name="password" required maxlength="256"></label><label>Authenticator code <input name="code" required maxlength="6" inputmode="numeric" autocomplete="one-time-code"></label><button>Regenerate recovery codes</button></form>{{if .Required}}<p>MFA is required. Only host recovery can remove it.</p>{{else}}<form method="post" action="/account/security/totp/disable"><label>Current password <input type="password" name="password" required maxlength="256"></label><label>Authenticator or recovery code <input name="code" required maxlength="32"></label><button>Disable MFA</button></form>{{end}}{{else}}<form method="post" action="/account/security/totp/begin"><button>Set up authenticator</button></form>{{end}}{{end}}{{if .Codes}}<h2>Recovery codes — save these now</h2><p>Previous recovery codes no longer work. Each code works once. These codes will only be shown once.</p><pre>{{range .Codes}}{{.}}
 {{end}}</pre><a href="/">I saved my recovery codes — continue to Hub</a>{{end}}{{if or .Enabled (not .Required)}}<form method="post" action="/account/security/password"><label>Current password <input type="password" name="password" required maxlength="256"></label><label>New password <input type="password" name="new_password" required minlength="12" maxlength="256"></label><button>Change password and revoke other sessions</button></form>{{end}}<form method="post" action="/logout"><button>Sign out</button></form></html>`))
-var securityPatterns = []string{"GET /account/security", "POST /account/security/totp/begin", "POST /account/security/totp/confirm", "POST /account/security/totp/disable", "POST /account/security/password"}
+var securityPatterns = []string{"GET /account/security", "POST /account/security/totp/begin", "POST /account/security/totp/confirm", "POST /account/security/totp/disable", "POST /account/security/password", "POST /account/security/recovery-codes/regenerate"}
 
 func registerSecurityRoutes(mux *http.ServeMux, st *store.Store, authority string, resolver clientip.Resolver, cloud ...cloudBoundaryConfig) []string {
 	required := len(cloud) > 0 && cloud[0].requireMFA
 	limiter := newIPLimiter(10, 5)
 	handler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		p, ok := operatorauth.PrincipalFromContext(r.Context())
 		if !ok || p.AuthMethod != operatorauth.AuthMethodLocalAccountSession {
 			http.NotFound(w, r)
@@ -156,11 +157,14 @@ func registerSecurityRoutes(mux *http.ServeMux, st *store.Store, authority strin
 					data.Codes, err = st.ConfirmTOTPForSession(id, r.PostForm.Get("code"), c.Value, metadata)
 				}
 				data.Enabled = err == nil
-			case "/account/security/totp/disable", "/account/security/password":
+			case "/account/security/totp/disable", "/account/security/password", "/account/security/recovery-codes/regenerate":
 				var a store.HubAccount
 				a, err = st.VerifyPassword(p.TailnetUserLogin, r.PostForm.Get("password"), ip, metadata)
 				if err == nil && a.AccountID != id {
 					err = store.ErrAccountAuth
+				}
+				if err == nil && r.URL.Path == "/account/security/recovery-codes/regenerate" {
+					data.Codes, err = st.RegenerateRecoveryCodes(id, ip, r.PostForm.Get("code"), metadata)
 				}
 				if err == nil && r.URL.Path == "/account/security/totp/disable" {
 					err = st.VerifySecondFactor(id, ip, r.PostForm.Get("code"), metadata)

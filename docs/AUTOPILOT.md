@@ -111,6 +111,8 @@ Use [Oracle Cloud](DEPLOY-OCI.md) when you want the same Docker + Caddy pack on 
 
 Both commands require an **existing initialized Hub database**, explicit `--db` and `--username`, and read the password from **stdin**, not a password flag. Run as the database owner. Stop the Hub for this maintenance workflow, then restart it. `bootstrap-admin` creates only the first account; `reset-admin-password` changes the existing admin password, clears lockout, and revokes that account's sessions.
 
+`regenerate-recovery-codes --db PATH --username U` is also available for an MFA-enabled admin; it prints ten new recovery codes and takes no password on stdin. Stop the Hub before running it.
+
 For the bare user service (replace the command with `reset-admin-password` for recovery):
 
 ```bash
@@ -200,4 +202,6 @@ MFA enforcement defaults on in `local` / `both`. Until enrollment is confirmed, 
 
 While enforcement is on, disabling MFA in Account security is refused: only the host CLI can remove it. When explicitly opted out, disabling requires your current password and a valid authenticator or recovery code. You can also change your password there; other sessions are revoked. For a lost authenticator and exhausted recovery codes, stop the Hub and run `clawctl-hub reset-admin-password --db PATH --username U --disable-mfa`, supplying the new password through stdin as described above, then restart. This host recovery revokes all sessions and clears MFA; enforcement forces re-enrollment at the next login. Password reset without this flag preserves MFA.
 
-The server must retain the TOTP secret to verify codes. It is stored as-is: **database read access means MFA bypass**, as with any TOTP server. Database backups are sensitive and must receive the same protection as the live database. Audit rows record MFA enable/disable/failure and recovery-code use without secrets or codes.
+Account security can regenerate ten recovery codes with the current password and an unused authenticator code; recovery codes are not accepted. All previous codes are invalidated. Failures count toward the shared account/client lockout. New codes are shown once, and the regeneration audit contains no codes. Alternatively, stop the Hub and run `clawctl-hub regenerate-recovery-codes --db PATH --username U`, then restart it; the host command requires MFA enabled and prints one code per line.
+
+The server must retain the TOTP secret to verify codes. It is stored as-is: **database read access means MFA bypass**, as with any TOTP server. Database backups are sensitive and must receive the same protection as the live database. Audit rows record MFA enable/disable/failure and recovery-code use/regeneration without secrets or codes.

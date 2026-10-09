@@ -392,3 +392,31 @@ func runAdminPasswordCommand(command string, args []string, in io.Reader) error 
 	}
 	return nil
 }
+
+// Stop the Hub before using this host maintenance command.
+func runRegenerateRecoveryCodes(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("regenerate-recovery-codes", flag.ContinueOnError)
+	db := fs.String("db", "", "path to existing Hub database (stop the Hub first)")
+	username := fs.String("username", "", "admin username")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *db == "" || *username == "" || fs.NArg() != 0 {
+		return fmt.Errorf("regenerate-recovery-codes requires --db PATH --username U")
+	}
+	st, err := openExisting(*db)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	codes, err := st.RegenerateAdminRecoveryCodes(*username)
+	if err != nil {
+		return err
+	}
+	for _, code := range codes {
+		if _, err := fmt.Fprintln(out, code); err != nil {
+			return err
+		}
+	}
+	return nil
+}
