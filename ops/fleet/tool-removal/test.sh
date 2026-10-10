@@ -6,7 +6,7 @@ TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" PATH="$TMP/bin:$PATH"
 mkdir -p "$HOME/.claude" "$TMP/bin"
 # All inventory commands are local fakes. Never inspect the real host.
-for cmd in systemctl ps ss crontab dpkg-query rpm snap flatpak npm docker rg iptables-save; do
+for cmd in systemctl ps ss crontab dpkg-query rpm snap flatpak npm docker rg iptables-save ip6tables-save; do
  printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/bin/$cmd"
 done
 cat > "$TMP/bin/find" <<'STUB'

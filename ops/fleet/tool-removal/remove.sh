@@ -71,8 +71,10 @@ else
   elif command -v rpm >/dev/null; then rpm -ql "$package" > "$backup_dir/package-$package" 2>/dev/null || true; fi
  done
  for family in iptables ip6tables; do
-  if [[ -n $PORT ]] && command -v "$family" >/dev/null; then command -v "$family-save" >/dev/null || exit 1; fi
-  if command -v "$family-save" >/dev/null; then "$family-save" > "$backup_dir/$family.rules"; fi
+  # Firewall rules are only touched (and so only backed up) when PORT is set.
+  [[ -n $PORT ]] && command -v "$family" >/dev/null || continue
+  command -v "$family-save" >/dev/null || exit 1
+  "$family-save" > "$backup_dir/$family.rules"
  done
 fi
 printf 'private removal backup\n' > "$backup_dir/receipt"
