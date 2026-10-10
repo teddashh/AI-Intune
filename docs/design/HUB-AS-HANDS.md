@@ -14,8 +14,8 @@ Status: **DRAFT for review.** No code in this PR.
    Hub MCP** and takes direction from the Grok Bots. It does not SSH into hosts or run scripts itself.
 3. **Grok Bots are treated as people** (operators: the box bot and the per-host bots). They direct Hermes through the
    Hub MCP and go into a machine directly only when the first two layers fail, the way a human operator would.
-   Anything a Grok Bot had to do by hand is a gap to fold back into layer 1 or 2. Nothing operational stays
-   on the box, because box state does not persist.
+   Anything a Grok Bot had to do by hand is a gap to fold back into layer 1 or 2. No scheduled job or system-of-record data lives
+   only on the box: the box is the Grok Bot layer's last-resort access (see §1a).
 
 **Two tools follow the same logic:**
 - **Intune is for operations:** fleet health, maintenance, backups, upgrades, host lifecycle.
@@ -35,10 +35,16 @@ web app, C4 = agent-runtime host). The real-name mapping lives in the private ov
 
 The box and all six hosts were checked read-only on 2026-10-10.
 
-### 1a. Operator box (does not persist)
+### 1a. Operator box: Grok Bot last-resort access (kept)
+The box state (ssh aliases, tunnels, connector installs, credentials) is **kept and maintained**. It is the
+Grok Bot layer's last-resort path into the fleet. The rule is narrower: **no scheduled job and no system-of-record
+data lives only on the box.** Every script and runbook used from here must also exist in the Hub or this repo,
+and every recurring job runs from the Hub or Hermes. Because box state is not guaranteed to persist, it is
+rebuildable from a repo checklist (private overlay).
+
 | Item | What it does | Notes |
 |---|---|---|
-| `~/.ssh/config`: 19 host aliases; 7 via userspace `tailscale nc`, 8 via `cloudflared access ssh` | The only path into most hosts | Needs a userspace `tailscaled` (started by hand with sudo) and cached Cloudflare Access tokens in `~/.cloudflared`. Lost on every box rebuild. |
+| `~/.ssh/config`: 19 host aliases; 7 via userspace `tailscale nc`, 8 via `cloudflared access ssh` | The Grok Bot last-resort path into most hosts (kept) | Needs a userspace `tailscaled` (started by hand with sudo) and cached Cloudflare Access tokens in `~/.cloudflared`. Lost on every box rebuild. |
 | `~/.local/bin`: bat-connector-mcp, bat-agent-connector-mcp, batc, bat-connect(-supervise), bat-launch, bat-provision, cloudflared(-access-ssh), ensure-tailscale, ts-tcp-forward.py, AI CLIs, hermes/hgw | Connector and tunnel installs | Installed by hand; no manifest. |
 | `~/.hermes` (a full Hermes home: config, cron, scripts, kanban/state DBs, profiles) | A copy of the agent runtime | The cron config enables `fleet-health-daily` and `task-events-sweep`, but no gateway process was running at check time. The live runtime is on C4. |
 | `/workspace/fleet-inventory/` (RUNBOOK.md, collect*.sh, `health/fleet-health.py` + daily JSON/MD) | Fleet health check that posts to Discord | The C4 cron points at this path (`fleet-health.sh`), but it only exists on the box. |
@@ -103,7 +109,7 @@ preview digest, and a human confirms in the Hub UI (or Telegram link) before the
 | Task-events safety sweep | bat-agent-connector | 1 SaaS (BAT push primary) | `task_events_sweep` | Hub every 30m | operate (posts to threads) | no |
 | Free-workshop dispatch watch | bat-agent-connector | 2 Hermes | stays in the agent runtime (judgment) | agent runtime | — | — |
 | Private overlay drift check | Intune (repo ops) | 1 SaaS | `sot_drift_check` (GitHub-side script, no box) | Hub daily | view | no |
-| Box ssh config / tunnels | — | 3 Grok Bot only (break-glass) | **retired** as a procedure path: the Hub reaches hosts through the agent link; direct access is break-glass only | — | — | — |
+| Box ssh config, tunnels, connector, credentials | — | 3 Grok Bot (last resort) | **kept and maintained** as Grok Bot last-resort access; not a scheduled path (the Hub reaches hosts through the agent link). Rebuild checklist lives in the private overlay | Grok Bot (manual upkeep) | — | — |
 
 **bat-agent-connector (development), not Intune:** the BAT sweep and its parts (permission approvals, quota failover, session
 cleanup, idle nudges), the task-events safety sweep, and free-workshop dispatch. The BAT server auto-update timers
@@ -138,7 +144,7 @@ For these the Hub only schedules and audits; the actions are bat-agent-connector
 ## 4. Migration order
 
 0. **Freeze the inventory.** Export each chat bot's routines (§1d). Move `fleet-health.py` and the box daily-check logic into this repo.
-   Record the box-only credentials that must move to Fly secrets or host files.
+   For each box-held credential the Hub or Hermes also needs, add a copy as a Fly secret or host file (the box keeps its own).
 1. **Pilot: BAT sweep.**
    - Port `bat_hourly_sweep.py` into the catalog. Ship `script_v1`, the scheduler, and a service token (view/operate).
    - Run it in report-only mode from the Hub on W1 and W2 for one week, next to a manual comparison.
@@ -148,10 +154,10 @@ For these the Hub only schedules and audits; the actions are bat-agent-connector
    Retire the box `*-daily-state.json` routines and the `fleet-health-daily` cron.
 3. **Hub self-care.** Daily snapshot plus replica check, monthly restore drill, drift check.
 4. **Hermes as the only judgment client.** Point Hermes (C4) at the Hub MCP with its service token.
-   Grok Bots switch to directing Hermes through the Hub MCP, and go direct only on failure (record each fallback as a gap). Delete the box `~/.hermes` copy.
+   Grok Bots switch to directing Hermes through the Hub MCP, and go direct only on failure (record each fallback as a gap). The box `~/.hermes` copy may stay for last-resort use, with its cron jobs disabled.
 5. **Admin tools behind approval.** Timers install, AI-CLI install, net fixes, bootstrap, migration, tool removal, Hub upgrade.
 6. **Fallback.** Enable `hub-fallback` on C4, run a drill (stop the Fly machine in a window, confirm the C4 takeover is read-only), and document it.
-7. **Retire box state.** Drop the box ssh config and tunnels from the procedures. The box keeps only what a human session needs.
+7. **Box as last-resort access.** Keep the box ssh config, tunnels, connector, and credentials maintained for the Grok Bot layer. Write the rebuild checklist into the private overlay. Confirm no scheduled job or only-copy data remains on the box (scripts and runbooks mirrored in the Hub or repo).
 
 ## 5. Risks
 
@@ -159,9 +165,10 @@ For these the Hub only schedules and audits; the actions are bat-agent-connector
 |---|---|
 | **Central point of control.** A compromised Hub or token can act on every host. | `admin` actions are never available to service tokens without human approval. Catalog scripts are hash-pinned, and there is no free-form command. Agents verify the catalog signature or hash. Per-host allowlists. Rate limits. Approval notices go to Telegram. Keep MFA on human logins. |
 | **Fly outage.** No scheduler and no tools. | The dead-man check on C2 detects it. `hub-fallback` on C4 runs read-only checks. Host timers (disk-clean, daily check) keep running locally because they never depended on the Hub. A restore from R2 to C4 is the documented rebuild path (restore drill: ~25 s for the DB). |
-| **Hub DB or backup leak.** It holds TOTP secrets, hashes, and tokens. | Separate R2 key, private bucket, restore only to tmpfs, no copies on the box, a key rotation runbook. |
+| **Hub DB or backup leak.** It holds TOTP secrets, hashes, and tokens. | Separate R2 key, private bucket, restore only to tmpfs, no persistent DB copies on the box, a key rotation runbook. |
 | **Script runs as root on many hosts at once.** | Canary, then batches (reuse the rollout/canary model). Preview digests. Per-job single-flight. Timeouts. Root only for catalog steps marked `root`. |
 | **Agent runtime makes a bad judgment call.** | It holds view/operate only. Destructive tools need a human approval. Every call is audited. |
 | **Network paths differ** (W2 corporate proxy, userspace-tailnet hosts). | The executor runs on the host through the existing agent link, so there is no SSH from the Hub. The proxy drop-in already ships with the agent installer. |
+| **Box drift:** last-resort access rots unused (expired Access tokens, stale aliases). | Periodic Grok Bot check of the box path (read-only ssh to each host); rebuild checklist in the private overlay. |
 | **Migration gap:** a procedure stops while it is moving. | Run old and new side by side (report-only) per step. The BAT sweep and the health check are already stopped today, so the pilot only adds coverage. |
-| **Secrets drift between Fly secrets, host files, and the box.** | A single list in the private overlay of which secret lives where. Nothing on the box. |
+| **Secrets drift between Fly secrets, host files, and the box.** | A single list in the private overlay of which secret lives where (Fly, host, box). Box copies are for last-resort access only; the Hub never depends on them. |
