@@ -491,6 +491,7 @@ func operatorTerminalPageFrame(end operatorTerminalEnd, code int) ([]byte, bool)
 }
 
 type operatorTerminalCommand struct {
+	ready  bool // Agent readiness observed when the page command was read.
 	resize bool
 	data   []byte
 	cols   int
@@ -781,6 +782,7 @@ func (s *operatorTerminalSession) readLoop(ctx context.Context) {
 			return
 		}
 		cmd := operatorTerminalCommand{
+			ready:  s.readyFired(),
 			resize: frame.Type == agentrelay.PageResize,
 			data:   append([]byte(nil), frame.Data...),
 			cols:   frame.Cols, rows: frame.Rows,
@@ -827,7 +829,8 @@ func (s *operatorTerminalSession) produce(ctx context.Context) {
 		return
 	}
 	openCols, openRows := cols, rows
-	if !s.waitReady(ctx, &cols, &rows) {
+	first, ready := s.waitReady(ctx, &cols, &rows)
+	if !ready {
 		return
 	}
 	if cols != openCols || rows != openRows {
@@ -838,7 +841,7 @@ func (s *operatorTerminalSession) produce(ctx context.Context) {
 			return
 		}
 	}
-	s.forward(ctx)
+	s.forward(ctx, first)
 }
 
 func (s *operatorTerminalSession) openGeometry(ctx context.Context) (int, int, bool) {
@@ -868,15 +871,21 @@ func (s *operatorTerminalSession) openGeometry(ctx context.Context) (int, int, b
 	}
 }
 
-func (s *operatorTerminalSession) waitReady(ctx context.Context, cols, rows *int) bool {
+// Preserve the first command read after agent readiness. The page writer can
+// acknowledge ready before this producer is scheduled; draining all commands
+// here would discard input sent in response to that acknowledgement.
+func (s *operatorTerminalSession) waitReady(ctx context.Context, cols, rows *int) (*operatorTerminalCommand, bool) {
 	for !s.readyFired() {
 		select {
 		case <-ctx.Done():
-			return false
+			return nil, false
 		case <-s.readyCh:
 		case frame, ok := <-s.frames:
 			if !ok {
-				return false
+				return nil, false
+			}
+			if frame.ready {
+				return &frame, true
 			}
 			if frame.resize {
 				*cols, *rows = frame.cols, frame.rows
@@ -887,44 +896,60 @@ func (s *operatorTerminalSession) waitReady(ctx context.Context, cols, rows *int
 	return s.drainCommands(ctx, cols, rows)
 }
 
-func (s *operatorTerminalSession) drainCommands(ctx context.Context, cols, rows *int) bool {
+func (s *operatorTerminalSession) drainCommands(ctx context.Context, cols, rows *int) (*operatorTerminalCommand, bool) {
 	for {
 		select {
 		case <-ctx.Done():
-			return false
+			return nil, false
 		case frame, ok := <-s.frames:
 			if !ok {
-				return false
+				return nil, false
+			}
+			if frame.ready {
+				return &frame, true
 			}
 			if frame.resize {
 				*cols, *rows = frame.cols, frame.rows
 			}
 			s.notePageCommand()
 		default:
-			return true
+			return nil, true
 		}
 	}
 }
 
-func (s *operatorTerminalSession) forward(ctx context.Context) {
+func (s *operatorTerminalSession) forward(ctx context.Context, first *operatorTerminalCommand) {
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case frame, ok := <-s.frames:
-			if !ok {
+		var frame operatorTerminalCommand
+		if first != nil {
+			frame = *first
+			first = nil
+		} else {
+			select {
+			case <-ctx.Done():
 				return
+			case next, ok := <-s.frames:
+				if !ok {
+					return
+				}
+				frame = next
 			}
-			down := agentrelay.Downstream{Type: agentrelay.DownstreamInput, Session: s.sessionID, Data: frame.data}
-			if frame.resize {
-				down = agentrelay.Downstream{Type: agentrelay.DownstreamResize, Session: s.sessionID, Cols: frame.cols, Rows: frame.rows}
-			}
-			if err := s.sendDownstream(ctx, down); err != nil {
-				s.noteSend(err)
-				return
-			}
-			s.notePageCommand()
 		}
+		// A command read before readiness may have been queued behind the
+		// producer's last readiness check. Early input must still be dropped.
+		if !frame.resize && !frame.ready {
+			s.notePageCommand()
+			continue
+		}
+		down := agentrelay.Downstream{Type: agentrelay.DownstreamInput, Session: s.sessionID, Data: frame.data}
+		if frame.resize {
+			down = agentrelay.Downstream{Type: agentrelay.DownstreamResize, Session: s.sessionID, Cols: frame.cols, Rows: frame.rows}
+		}
+		if err := s.sendDownstream(ctx, down); err != nil {
+			s.noteSend(err)
+			return
+		}
+		s.notePageCommand()
 	}
 }
 
