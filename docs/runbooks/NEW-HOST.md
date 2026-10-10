@@ -41,6 +41,7 @@ This caps journald at 500 MB without restarting it, enables linger for `ops`,
 and calls optional timer and AI CLI installers when present. The timer installer
 is called with `--scope user` and `--scope root`, plus `--plan` or `--apply`.
 The AI CLI installer receives `--plan` or `--apply`. Missing scripts are skipped.
+`FLEET_TIMERS_INSTALLER` and `FLEET_AI_CLI_INSTALLER` override the delegated installer paths for tests and custom checkouts.
 Non-root apply prints root commands and records `needs-root`; it does not invoke sudo.
 Review each printed single-line command before running it.
 

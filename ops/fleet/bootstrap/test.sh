@@ -7,6 +7,8 @@ mkdir -p "$TMP/bin" "$TMP/home" "$TMP/root/etc"
 export HOME=$TMP/home
 export PATH=$TMP/bin:/usr/bin:/bin
 export TEST_ROOT=$TMP TEST_UID=0
+export FLEET_TIMERS_INSTALLER=$TMP/missing/install-timers.sh
+export FLEET_AI_CLI_INSTALLER=$TMP/missing/install-ai-clis.sh
 unset SUDO_USER HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy
 passed=0 failed=0 output='' rc=0
 BOOT=$ROOT/ops/fleet/bootstrap/bootstrap-host.sh
@@ -46,8 +48,9 @@ for cmd in loginctl tailscale sudo ssh getent; do
 done
 cat > "$TMP/bin/runuser" <<'STUB'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "$TEST_ROOT/runuser-calls"
 shift 3
-"$@"
+TEST_INSTALLER_USER=$SUDO_USER "$@"
 STUB
 cat > "$TMP/bin/stat" <<'STUB'
 #!/usr/bin/env bash
@@ -86,6 +89,53 @@ expect 'optional timer installer skipped' 0 has 'skipped: install-timers.sh not 
 expect 'optional AI installer skipped' 0 has 'skipped: install-ai-clis.sh not in this checkout'
 run bash "$BOOT" --apply --resume --phases journald --state-dir "$TMP/state" --root-prefix "$TMP/root"
 expect 'resume skips done phase' 0 has 'resume: journald done'
+# Present installers are always temporary stubs, regardless of checkout contents.
+mkdir -p "$TMP/installers"
+for installer in install-timers.sh install-ai-clis.sh; do
+    cat > "$TMP/installers/$installer" <<'STUB'
+#!/usr/bin/env bash
+printf '%s: %s: %s\n' "${0##*/}" "${TEST_INSTALLER_USER:-main}" "$*" >> "$TEST_ROOT/installers.log"
+STUB
+done
+cat > "$TMP/bin/getent" <<'STUB'
+#!/usr/bin/env bash
+if [[ $1 == passwd ]]; then
+    printf '%s:x:1000:1000::%s:/bin/bash\n' "$2" "$HOME"
+else
+    exit 0
+fi
+STUB
+cat > "$TMP/bin/chown" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+chmod +x "$TMP/bin/getent" "$TMP/bin/chown"
+export FLEET_TIMERS_INSTALLER=$TMP/installers/install-timers.sh
+export FLEET_AI_CLI_INSTALLER=$TMP/installers/install-ai-clis.sh
+for installer_mode in apply plan; do
+    : > "$TMP/installers.log"
+    TEST_UID=1000 run bash "$BOOT" "--$installer_mode" --phases disk-clean,ai-cli --state-dir "$TMP/delegated-state"
+    expect "user timer $installer_mode argv" 0 grep -qx "install-timers.sh: main: --scope user --$installer_mode" "$TMP/installers.log"
+    expect "user AI $installer_mode argv" 0 grep -qx "install-ai-clis.sh: main: --$installer_mode" "$TMP/installers.log"
+    expect "user AI $installer_mode has no root wrapper" 0 lacks "bash $FLEET_AI_CLI_INSTALLER"
+    if [[ $installer_mode == plan ]]; then
+        expect 'non-root timer root plan runs directly' 0 grep -qx 'install-timers.sh: main: --scope root --plan' "$TMP/installers.log"
+        expect 'non-root delegated plans have no sudo hints' 0 lacks 'sudo'
+    else
+        expect 'non-root timer apply retains root hint' 0 valid_hints
+        expect 'non-root timer root apply is deferred' 0 bash -c '! grep -q -- "--scope root" "$1"' _ "$TMP/installers.log"
+    fi
+    : > "$TMP/installers.log"
+    : > "$TMP/runuser-calls"
+    TEST_UID=0 SUDO_USER=ops run bash "$BOOT" "--$installer_mode" --phases disk-clean,ai-cli --state-dir "$TMP/delegated-state"
+    expect "sudo user timer $installer_mode argv" 0 grep -qx "install-timers.sh: ops: --scope user --$installer_mode" "$TMP/installers.log"
+    expect "root timer $installer_mode argv" 0 grep -qx "install-timers.sh: main: --scope root --$installer_mode" "$TMP/installers.log"
+    expect "sudo user AI $installer_mode argv" 0 grep -qx "install-ai-clis.sh: ops: --$installer_mode" "$TMP/installers.log"
+    expect "AI $installer_mode delegates to main user" 0 grep -Fxq -- "-u ops -- bash $FLEET_AI_CLI_INSTALLER --$installer_mode" "$TMP/runuser-calls"
+    expect "root delegated $installer_mode has no sudo hints" 0 lacks 'sudo'
+done
+export FLEET_TIMERS_INSTALLER=$TMP/missing/install-timers.sh
+export FLEET_AI_CLI_INSTALLER=$TMP/missing/install-ai-clis.sh
 mkdir -m 755 "$TMP/package"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/package/install-agent.sh"
 printf '%s\n' 'FAKE-PRIVATE-TOKEN-VALUE' > "$TMP/package/enroll-token"

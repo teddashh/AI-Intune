@@ -98,12 +98,13 @@ PY
             printf -v command 'set -euo pipefail; source %q; if ! command -v tailscale >/dev/null; then installer=$(mktemp); trap '\''rm -f "$installer"'\'' EXIT; curl -fsSL https://tailscale.com/install.sh -o "$installer"; bash "$installer"; fi; systemctl enable --now tailscaled; tailscale up --auth-key=%q --hostname=%q --ssh=false 2>&1 | fleet_redact %q; shred -u -- %q; tailscale ip -4' "$ROOT/ops/fleet/common.sh" "file:$key" "$hostname" "$key" "$key"
             root_step "$command";;
         disk-clean|ai-cli)
-            if [[ $phase == disk-clean ]]; then script=$ROOT/ops/maintenance/install-timers.sh; else script=$ROOT/ops/fleet/ai-cli/install-ai-clis.sh; fi
+            if [[ $phase == disk-clean ]]; then script=${FLEET_TIMERS_INSTALLER:-$ROOT/ops/maintenance/install-timers.sh}; else script=${FLEET_AI_CLI_INSTALLER:-$ROOT/ops/fleet/ai-cli/install-ai-clis.sh}; fi
             if [[ ! -f $script ]]; then printf 'skipped: %s not in this checkout\n' "${script##*/}"; status=skipped; return; fi
             if [[ $phase == disk-clean ]]; then
                 if [[ $(id -u) == 0 && -n ${SUDO_USER:-} ]]; then runuser -u "$main_user" -- bash "$script" --scope user "$flag" || return 1; else bash "$script" --scope user "$flag" || return 1; fi
                 printf -v command 'bash %q --scope root %q' "$script" "$flag"
-                root_step "$command"
+                if [[ $mode == plan ]]; then bash "$script" --scope root "$flag" || return 1
+                else root_step "$command"; fi
             # The AI CLI installer runs as the main user and prints its own
             # single-line root hints; never run it wholesale as root.
             elif [[ $(id -u) == 0 && -n ${SUDO_USER:-} ]]; then runuser -u "$main_user" -- bash "$script" "$flag" || return 1
