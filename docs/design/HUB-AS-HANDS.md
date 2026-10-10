@@ -19,10 +19,12 @@ Status: **DRAFT for review.** No code in this PR.
 
 **Two tools follow the same logic:**
 - **Intune is for operations:** fleet health, maintenance, backups, upgrades, host lifecycle.
-- **The BAT connector is for development:** coding sessions, permission prompts, session failover/cleanup,
-  task milestones. It has its own SaaS layer (BAT server/task service), Hermes on top, and Grok Bots by hand last.
-  Where a BAT procedure needs scheduling or audit, it is scheduled from the Hub and calls BAT. The development
-  logic stays in BAT.
+- **bat-agent-connector is for development** (public `teddashh/bat-agent-connector` plus the private
+  `teddashh/bat-agent-connector-fleet`). It drives the coding sessions that run in BAT, Ted's terminal app:
+  permission prompts, session failover/cleanup, idle nudges, task milestones. It follows the same layers: its own
+  service/task layer first, then Hermes through its MCP, then Grok Bots by hand. Where a development procedure needs
+  scheduling or audit, the Hub schedules it and calls bat-agent-connector. The development logic stays in
+  bat-agent-connector. BAT itself is not one of the two tools.
 
 C4 is the fallback executor when Fly is down (§5).
 
@@ -75,16 +77,16 @@ definitions are not visible from the box. **Action:** export each bot's routine 
 
 ## 2. Mapping: target tool, scheduler, scope, approval
 
-**Layer** is who owns the procedure first; escalation goes down the layers only on failure. **Tool**: Intune = operations, BAT = development.
+**Layer** is who owns the procedure first; escalation goes down the layers only on failure. **Tool**: Intune = operations, bat-agent-connector = development.
 Scopes follow the Hub's existing grant levels: `view` < `operate` < `admin`. **Approval** means the call returns a
 preview digest, and a human confirms in the Hub UI (or Telegram link) before the apply call runs. The existing
 `*_preview` / `*_apply` + `preview_digest` pattern is reused.
 
 | Procedure | Hub tool / script | Scheduler | Scope | Approval |
 |---|---|---|---|---|
-| BAT hourly sweep, report only | BAT | 1 SaaS (Hub schedule → BAT) | `bat_sweep_preview` (script `bat-sweep`, read mode) | Hub `17 * * * *` | view | no |
-| BAT: approve non-destructive permission prompts | BAT | 1 SaaS (policy) / 2 Hermes (exceptions) | `bat_permission_approve` (per toolUseId, policy-checked) | Hub (sweep) | operate | no for the allowlist; **yes** for anything else |
-| BAT: quota failover, session cleanup, idle nudge | BAT | 1 SaaS / 2 Hermes | `bat_session_failover`, `bat_session_cleanup`, `bat_session_nudge` | Hub (sweep); agent runtime ad hoc | operate | no (CLEAN_ONLY/KEEP); **yes** for MERGE_AND_CLEAN, ESCALATE |
+| BAT hourly sweep, report only | bat-agent-connector | 1 SaaS (Hub schedule → bat-agent-connector) | `bat_sweep_preview` (script `bat-sweep`, read mode) | Hub `17 * * * *` | view | no |
+| BAT: approve non-destructive permission prompts | bat-agent-connector | 1 SaaS (policy) / 2 Hermes (exceptions) | `bat_permission_approve` (per toolUseId, policy-checked) | Hub (sweep) | operate | no for the allowlist; **yes** for anything else |
+| BAT: quota failover, session cleanup, idle nudge | bat-agent-connector | 1 SaaS / 2 Hermes | `bat_session_failover`, `bat_session_cleanup`, `bat_session_nudge` | Hub (sweep); agent runtime ad hoc | operate | no (CLEAN_ONLY/KEEP); **yes** for MERGE_AND_CLEAN, ESCALATE |
 | Fleet health daily (reachability, disk, failed units, backups, cert expiry, error counts) | Intune | 1 SaaS | `fleet_daily_check` → existing `fleet-daily-check` summaries collected by the agent | Hub `23 7 * * *` | view | no |
 | Per-host daily checks (C3 app, W1) and their alert de-dup state | Intune | 1 SaaS | folded into `fleet_daily_check` with per-host check profiles; state in the Hub DB | Hub | view | no |
 | Disk-clean (user/root timers) | Intune | 1 SaaS (host timers audited) | existing `disk_clean_*` tools; timers stay on hosts, Hub reads `last.json` | Host timers (Hub audits) | view; admin for profile publish / canary | **yes** for apply/canary/publish (already) |
@@ -98,15 +100,15 @@ preview digest, and a human confirms in the Hub UI (or Telegram link) before the
 | Proxy / NTP / Tailscale-SSH checks | Intune | 1 SaaS; fixes 2 Hermes | `net_check` (proxy-check, ntp-check) | Hub weekly | view | no; fixes are **yes** |
 | New-host bootstrap | Intune | 2 Hermes | `host_bootstrap_plan` / `_apply` | agent runtime | admin | **yes**, every phase that needs root |
 | Host migration / tool removal / deploy template | Intune | 2 Hermes; 3 Grok Bot for cutover | `migrate_*`, `tool_removal_*`, `app_deploy_*` (scripts from #42) | agent runtime | admin | **yes** (freeze, cutover, remove, deploy) |
-| Task-events safety sweep | BAT | 1 SaaS (BAT push primary) | `task_events_sweep` | Hub every 30m | operate (posts to threads) | no |
-| Free-workshop dispatch watch | BAT | 2 Hermes | stays in the agent runtime (judgment) | agent runtime | — | — |
+| Task-events safety sweep | bat-agent-connector | 1 SaaS (BAT push primary) | `task_events_sweep` | Hub every 30m | operate (posts to threads) | no |
+| Free-workshop dispatch watch | bat-agent-connector | 2 Hermes | stays in the agent runtime (judgment) | agent runtime | — | — |
 | Private overlay drift check | Intune (repo ops) | 1 SaaS | `sot_drift_check` (GitHub-side script, no box) | Hub daily | view | no |
 | Box ssh config / tunnels | — | 3 Grok Bot only (break-glass) | **retired** as a procedure path: the Hub reaches hosts through the agent link; direct access is break-glass only | — | — | — |
 
-**BAT (development), not Intune:** the BAT sweep and its parts (permission approvals, quota failover, session
+**bat-agent-connector (development), not Intune:** the BAT sweep and its parts (permission approvals, quota failover, session
 cleanup, idle nudges), the task-events safety sweep, and free-workshop dispatch. The BAT server auto-update timers
 are host maintenance, so Intune audits them as evidence. **Intune (operations):** everything else in the table.
-For BAT items the Hub only schedules and audits; the actions are BAT connector calls.
+For these the Hub only schedules and audits; the actions are bat-agent-connector calls (its MCP: `bat-connector-mcp` / `bat-agent-connector-mcp`).
 
 ## 3. What the Hub lacks
 
