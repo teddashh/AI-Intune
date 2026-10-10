@@ -1,0 +1,9 @@
+[Unit]
+Description=Allowlist disk maintenance
+
+[Service]
+Type=oneshot
+Environment=HOME=/root
+ExecStart=/usr/local/sbin/disk-clean --scope root
+Nice=19
+IOSchedulingClass=idle

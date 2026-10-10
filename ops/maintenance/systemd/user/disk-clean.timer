@@ -1,0 +1,10 @@
+[Unit]
+Description=Schedule disk-clean
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 UTC
+RandomizedDelaySec=45m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

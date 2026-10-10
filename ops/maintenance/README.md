@@ -22,3 +22,15 @@ uid 0. The agent does not use sudo.
 The script does not reboot, restart services, install packages, or run
 `docker system prune`. The docker category removes dangling images and old
 build cache only.
+
+## Local timers
+
+Install system and user timers from this checkout. Both scopes default to
+dry-run. Bots read summary files instead of scanning disks. See
+[Local maintenance timers](../../docs/MAINTENANCE-TIMERS.md).
+
+## Changelog
+
+- 1.1.1: Defer uv cache pruning when processes hold the cache lock or prune
+  reports a lock timeout. Limit uv lock waits to 60 seconds and report lock
+  holders in dry-run summaries.

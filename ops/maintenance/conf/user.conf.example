@@ -1,0 +1,20 @@
+# Parse-only config. Built-in protected names cannot be removed.
+DRY_RUN=1
+APPLY_CATEGORIES=""
+CATEGORIES="user_tmp tmp_globs npm_cache pip_cache uv_cache go_cache thumbnails trash"
+TMP_DIRS="/tmp /var/tmp"
+TMP_AGE_DAYS=7
+NPM_CLEAN_MIN_MB=1024
+PIP_CACHE_MIN_MB=200
+GO_CACHE_MIN_MB=5120
+THUMB_AGE_DAYS=30
+TRASH_AGE_DAYS=30
+ATTENTION_PCT=90
+MOUNT=/
+DU_TIMEOUT_S=180
+DU_DEPTH=2
+REPORT_PATHS="$HOME/clawctl-backups $HOME/openclaw-backups $HOME/backups $HOME/*backup* $HOME/*snapshot*"
+PROTECT_NAMES=""
+ROOT_SUMMARY=/var/lib/disk-clean/last.json
+ROOT_MAX_AGE_H=48
+# Optional: TMP_GLOB_RULE=glob|min_age_days|keep_newest|busy_process_regex
