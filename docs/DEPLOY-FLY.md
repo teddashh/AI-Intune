@@ -305,6 +305,8 @@ This shape uses one `shared-cpu-1x` machine with 1 GB (`1024mb`) of RAM and a 3 
     set -a; . ./r2.env; set +a; sh ops/fly/restore-drill.sh --config ops/fly/litestream.yml
     ```
 
+    For the full off-host procedure (sandboxing, credentials, comparing with live, pass criteria) see [runbooks/RESTORE-DRILL.md](runbooks/RESTORE-DRILL.md).
+
 ## Litestream tuning
 
 You can tune replication parameters by setting these Fly secrets (using the `secrets.env` method).
