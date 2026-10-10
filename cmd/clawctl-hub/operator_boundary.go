@@ -142,6 +142,9 @@ var nonOperatorRoutePolicies = map[string]nonOperatorRoutePolicy{
 // A newly registered control route therefore fails closed until somebody
 // classifies that exact ServeMux pattern in review.
 var operatorRoutePolicies = map[string]operatorRoutePolicy{
+	"GET /account/service-tokens":                      {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/service-tokens/create":              {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+	"POST /account/service-tokens/revoke":              {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"GET /account/users":                               {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /account/users/create":                       {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /account/users/disable":                      {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
@@ -375,14 +378,15 @@ const (
 )
 
 type operatorBoundary struct {
-	cloud      *cloudBoundaryConfig
-	next       *http.ServeMux
-	authorizer operatorRequestAuthorizer
-	store      *store.Store
-	policies   map[string]operatorRoutePolicy
-	authority  string
-	csrfNext   http.Handler
-	denials    *operatorDenialLimiter
+	cloud           *cloudBoundaryConfig
+	next            *http.ServeMux
+	authorizer      operatorRequestAuthorizer
+	store           *store.Store
+	policies        map[string]operatorRoutePolicy
+	authority       string
+	csrfNext        http.Handler
+	denials         *operatorDenialLimiter
+	serviceAttempts *ipLimiter
 }
 
 func newOperatorBoundary(next *http.ServeMux, authorizer operatorRequestAuthorizer,
@@ -391,7 +395,7 @@ func newOperatorBoundary(next *http.ServeMux, authorizer operatorRequestAuthoriz
 	canonicalAuthority, _ := canonicalLiteralAuthority(authority)
 	b := &operatorBoundary{
 		next: next, authorizer: authorizer, store: st, policies: policies,
-		authority: canonicalAuthority, denials: newOperatorDenialLimiter(time.Now),
+		authority: canonicalAuthority, denials: newOperatorDenialLimiter(time.Now), serviceAttempts: newIPLimiter(10, 5),
 	}
 	if len(cloud) > 0 {
 		b.cloud = &cloud[0]
@@ -607,6 +611,10 @@ func (b *operatorBoundary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		writeOperatorBoundaryError(w, policy.Representation, http.StatusMisdirectedRequest,
 			operatorAuthorityDecisionCode, detail)
+		return
+	}
+	if policy.Representation == operatorJSON && strings.HasPrefix(r.URL.Path, "/v1/operator/") && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer cst_") && b.store != nil {
+		b.serveServiceToken(w, r, pattern, policy)
 		return
 	}
 	if b.authorizer == nil {

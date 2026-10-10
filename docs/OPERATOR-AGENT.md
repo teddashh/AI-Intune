@@ -201,3 +201,9 @@ machine, and do not report the rollout succeeded.
 Do not commit `hub.env`, enrollment tokens, or `CLAWCTL_HUB_URL` values that
 are private to a tailnet if your policy treats them as secret. The example
 files in `ops/docker/` stay examples.
+
+## Service token client
+
+For a public HTTPS Hub, use `clawctl-operator --hub-url https://hub.example.com --token-file /path/to/token mcp` (or `call <tool> [json]`). The file must be regular, mode 0600, and not a symlink. Redirects and ambient proxies remain disabled. Tailnet literal-origin mode is unchanged when no token file is supplied.
+
+Create and revoke tokens at `/account/service-tokens` with a human admin session and MFA. Tokens expire within 90 days and grant only view/operate. Allowlist entries are exact method plus registered route pattern, such as `GET /v1/operator/machines` or `GET /v1/operator/machines/{id}`. Admin and approval-gated routes require a human. Source CIDRs use the TCP peer, ignoring forwarded headers; behind a proxy they restrict the proxy peer.

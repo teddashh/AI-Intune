@@ -308,7 +308,9 @@ type ipLimiter struct {
 func newIPLimiter(perMinute, burst int) *ipLimiter {
 	return &ipLimiter{buckets: make(map[string]ipBucket), perSecond: float64(perMinute) / 60, burst: float64(burst)}
 }
-func (l *ipLimiter) allow(remote string) bool {
+func (l *ipLimiter) allow(remote string) bool { return l.allowWithCost(remote, true) }
+
+func (l *ipLimiter) allowWithCost(remote string, consume bool) bool {
 	ip := clientip.Key(remote)
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -337,7 +339,7 @@ func (l *ipLimiter) allow(remote string) bool {
 	b.tokens = min(l.burst, b.tokens+now.Sub(b.at).Seconds()*l.perSecond)
 	b.at = now
 	allowed := b.tokens >= 1
-	if allowed {
+	if allowed && consume {
 		b.tokens--
 	}
 	l.buckets[ip] = b

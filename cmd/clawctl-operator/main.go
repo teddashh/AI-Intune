@@ -38,7 +38,12 @@ func run(args []string, in io.Reader, out, errOut io.Writer) error {
 		fmt.Fprintln(out, version)
 		return nil
 	}
-	hubURL, rest, err := hubURLFromArgs(args)
+	tokenFile, args, err := tokenFileFromArgs(args)
+	if err != nil {
+		fmt.Fprintln(errOut, err)
+		return err
+	}
+	hubURL, rest, err := hubURLFromArgsMode(args, tokenFile != "")
 	if err != nil {
 		fmt.Fprintln(errOut, err.Error())
 		return err
@@ -47,7 +52,12 @@ func run(args []string, in io.Reader, out, errOut io.Writer) error {
 		fmt.Fprint(errOut, usageText)
 		return errUsage
 	}
-	client, err := operatorclient.New(hubURL)
+	var client *operatorclient.Client
+	if tokenFile != "" {
+		client, err = operatorclient.NewWithTokenFile(hubURL, tokenFile)
+	} else {
+		client, err = operatorclient.New(hubURL)
+	}
 	if err != nil {
 		fmt.Fprintln(errOut, err.Error())
 		return err
@@ -107,7 +117,9 @@ func callErrorPayload(err error) any {
 	return map[string]string{"code": "hub_error", "message": err.Error()}
 }
 
-func hubURLFromArgs(args []string) (string, []string, error) {
+func hubURLFromArgs(args []string) (string, []string, error) { return hubURLFromArgsMode(args, false) }
+
+func hubURLFromArgsMode(args []string, service bool) (string, []string, error) {
 	selected := ""
 	explicit := false
 	i := 0
@@ -142,6 +154,10 @@ done:
 	if selected == "" || strings.TrimSpace(selected) != selected {
 		return "", nil, errors.New("--hub-url is empty or padded")
 	}
+	if service {
+		base, err := operatorclient.ServiceOrigin(selected)
+		return base, args[i:], err
+	}
 	endpoint, err := operatorendpoint.ParseBaseURL(selected)
 	if err != nil {
 		return "", nil, fmt.Errorf("operator Hub URL: %w", err)
@@ -157,7 +173,39 @@ const usageText = `clawctl-operator — call the Hub operator JSON API from a ta
   clawctl-operator version
 
 Identity is the Tailscale node this process runs on. Hub WhoIs the TCP source.
-This command sends no Authorization header and does not open the Hub database.
+Use --token-file PATH with --hub-url https://hub.example.com for service auth.
+The token file must be regular, not a symlink, and mode 0600.
 CLAWCTL_HUB_URL is the same origin when --hub-url is omitted.
 Write tools need preview_digest from a previous preview call.
 `
+
+func tokenFileFromArgs(args []string) (string, []string, error) {
+	var path string
+	var out []string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "call" || args[i] == "mcp" || args[i] == "tools" {
+			out = append(out, args[i:]...)
+			break
+		}
+		if args[i] == "--token-file" {
+			if path != "" || i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+				return "", nil, errors.New("--token-file requires one path")
+			}
+			i++
+			path = args[i]
+			continue
+		}
+		if strings.HasPrefix(args[i], "--token-file=") {
+			if path != "" {
+				return "", nil, errors.New("duplicate --token-file")
+			}
+			path = strings.TrimPrefix(args[i], "--token-file=")
+			if path == "" {
+				return "", nil, errors.New("--token-file requires a path")
+			}
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return path, out, nil
+}

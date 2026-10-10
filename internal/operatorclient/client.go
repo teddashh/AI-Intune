@@ -1,7 +1,5 @@
-// Package operatorclient is the reusable HTTP client for the human/operator
-// control plane. It intentionally has no machine-bearer or invented auth option:
-// the server derives the source identity and exact app capability from Tailscale
-// LocalAPI. A caller-supplied auth header must never override that authority.
+// Package operatorclient calls the Hub operator JSON API using tailnet identity
+// or an explicitly configured HTTPS service token.
 package operatorclient
 
 import (
@@ -31,8 +29,9 @@ const (
 )
 
 type Client struct {
-	base *url.URL
-	http *http.Client
+	token string
+	base  *url.URL
+	http  *http.Client
 }
 
 // New creates a client with a bounded timeout and refuses redirects. A control
@@ -384,6 +383,12 @@ func (c *Client) newOperatorRequest(ctx context.Context, method, path string, bo
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 	if err != nil {
 		return nil, fmt.Errorf("operator client: build request: %w", err)
+	}
+	if c.token != "" {
+		if !strings.HasPrefix(path, "/v1/operator/") {
+			return nil, errors.New("service token cannot access this route")
+		}
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", UserAgent)
