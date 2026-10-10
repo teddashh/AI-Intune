@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+TOKEN_FILE="${CLAUDE_AUTOMATION_TOKEN_FILE:-$HOME/.config/claude-automation/oauth-token}"
+fail() { printf 'claude-automation: %s\n' "$1" >&2; exit 78; }
+[ -f "$TOKEN_FILE" ] && [ ! -L "$TOKEN_FILE" ] || fail "token file missing or symlinked: $TOKEN_FILE"
+case "$(stat -c '%a %U' "$TOKEN_FILE")" in
+    "600 $(id -un)"|"400 $(id -un)") ;;
+    *) fail "$TOKEN_FILE must be mode 600/400 and owned by $(id -un)" ;;
+esac
+self=$(readlink -f "$0")
+bin=${CLAUDE_AUTOMATION_CLAUDE_BIN:-}
+if [ -n "$bin" ]; then
+    bin=$(command -v "$bin") || fail 'claude override not found'
+    [ "$(readlink -f "$bin")" != "$self" ] || fail 'claude override points to wrapper'
+else
+    old_ifs=$IFS
+    IFS=:
+    for dir in $PATH; do
+        candidate=${dir:-.}/claude
+        if [ -f "$candidate" ] && [ -x "$candidate" ] && [ "$(readlink -f "$candidate")" != "$self" ]; then
+            bin=$candidate
+            break
+        fi
+    done
+    IFS=$old_ifs
+fi
+[ -n "$bin" ] && [ -x "$bin" ] || fail 'real claude not found in PATH'
+CLAUDE_CODE_OAUTH_TOKEN=$(tr -d ' \r\n\t' < "$TOKEN_FILE")
+[ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || fail 'token file is empty'
+export CLAUDE_CODE_OAUTH_TOKEN
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX
+exec "$bin" "$@"
