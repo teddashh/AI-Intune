@@ -216,8 +216,8 @@ func newOperatorTerminalFixture(t *testing.T) *operatorTerminalFixture {
 	}
 	auth := &operatorTerminalAuth{userID: operatorTerminalUser}
 	f := &operatorTerminalFixture{t: t, hub: h, machineID: machineID, link: link, auth: auth}
-	f.server, f.authority, f.ui = startOperatorTerminalServer(t, h, auth)
 	f.captureLogs()
+	f.server, f.authority, f.ui = startOperatorTerminalServer(t, h, auth)
 	f.watch(machineID)
 	return f
 }
@@ -239,9 +239,20 @@ func startOperatorTerminalServer(t *testing.T, h *hub, auth operatorRequestAutho
 		ln.Close()
 		t.Fatal(err)
 	}
-	server := &httptest.Server{Listener: ln, Config: &http.Server{Handler: handler}}
+	// httptest.Server.Close does not wait for hijacked websocket handlers.
+	// Join them before the fixture restores log output and closes its DB.
+	var handlers sync.WaitGroup
+	tracked := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlers.Add(1)
+		defer handlers.Done()
+		handler.ServeHTTP(w, r)
+	})
+	server := &httptest.Server{Listener: ln, Config: &http.Server{Handler: tracked}}
 	server.Start()
-	t.Cleanup(server.Close)
+	t.Cleanup(func() {
+		server.Close()
+		handlers.Wait()
+	})
 	return server, authority, ui
 }
 
@@ -297,9 +308,15 @@ func (f *operatorTerminalFixture) dial(sessionID string, header http.Header, pro
 		header = http.Header{}
 	}
 	endpoint := "ws://" + f.authority + "/machines/" + f.machineID + "/terminals/" + sessionID + "/socket"
-	return websocket.Dial(context.Background(), endpoint, &websocket.DialOptions{
+	conn, resp, err := websocket.Dial(context.Background(), endpoint, &websocket.DialOptions{
 		HTTPHeader: header, Subprotocols: protocols,
 	})
+	if conn != nil {
+		// Registered after server cleanup, so sockets close before joining
+		// their handlers, including when a test fails before its own close.
+		f.t.Cleanup(func() { _ = conn.CloseNow() })
+	}
+	return conn, resp, err
 }
 
 func (f *operatorTerminalFixture) connect(sessionID string) *websocket.Conn {
@@ -425,9 +442,15 @@ func assertErrorFrame(t *testing.T, conn *websocket.Conn, reason string) []byte 
 
 func assertNoRoute(t *testing.T, f *operatorTerminalFixture, sessionID string) {
 	t.Helper()
-	if f.hasRoute(sessionID) {
-		t.Fatalf("route %s still registered", sessionID)
+	// Shutdown persists the close reason before unregistering the route.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if !f.hasRoute(sessionID) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
+	t.Fatalf("route %s still registered", sessionID)
 }
 
 func assertRefusal(t *testing.T, resp *http.Response, err error, status int, sentence string) {
@@ -1185,7 +1208,7 @@ func TestOperatorTerminalDuplicate(t *testing.T) {
 func TestOperatorTerminalDuplicateRowCloses(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	var once sync.Once
+	var once, releaseOnce sync.Once
 	useOperatorTerminalSettings(t, operatorTerminalSettings{
 		duplicateWait: func(_ context.Context, closed func() bool) bool {
 			once.Do(func() { close(entered) })
@@ -1194,6 +1217,7 @@ func TestOperatorTerminalDuplicateRowCloses(t *testing.T) {
 		},
 	})
 	f := newOperatorTerminalFixture(t)
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 	first := f.connect("opterm-reload")
 	defer first.Close(websocket.StatusNormalClosure, "")
 	writePageJSON(t, first, map[string]any{"type": "resize", "cols": 80, "rows": 24})
@@ -1211,7 +1235,7 @@ func TestOperatorTerminalDuplicateRowCloses(t *testing.T) {
 	if _, err := f.hub.store.CloseAgentSessionsByID([]string{"opterm-reload"}, store.AgentSessionCloseReasonViewerClosed); err != nil {
 		t.Fatal(err)
 	}
-	close(release)
+	releaseOnce.Do(func() { close(release) })
 	assertErrorFrame(t, second, operatorTerminalEnded)
 	if !f.hasRoute("opterm-reload") {
 		t.Fatal("duplicate path removed the attached route")
@@ -1280,6 +1304,64 @@ func TestOperatorTerminalPingTimeout(t *testing.T) {
 	assertNoRoute(t, f, "opterm-ping")
 }
 
+// Force the page reader to enqueue input after ready, while the producer
+// has not yet entered waitReady. No socket scheduling or sleeps are needed.
+func TestOperatorTerminalInputAfterReadyQueued(t *testing.T) {
+	for _, kind := range []string{"input", "resize"} {
+		t.Run(kind, func(t *testing.T) {
+			link := newOperatorTerminalLink()
+			h := &hub{agentLinks: agentlink.New()}
+			if _, err := h.agentLinks.Attach("machine", link); err != nil {
+				t.Fatal(err)
+			}
+			s := newOperatorTerminalSession(h, nil, store.AgentSessionResult{
+				SessionID: "session", MachineID: "machine",
+			}, defaultOperatorTerminalSettings(h))
+			if err := h.agentLinks.OpenSession("session", "machine", s); err != nil {
+				t.Fatal(err)
+			}
+			// Model commands read before and after Deliver closes readyCh,
+			// all queued before the producer gets another turn.
+			s.frames = make(chan operatorTerminalCommand, 4)
+			s.frames <- operatorTerminalCommand{resize: true, cols: 90, rows: 30}
+			s.frames <- operatorTerminalCommand{data: []byte("early")}
+			if err := s.Deliver(agentrelay.Upstream{Type: agentrelay.UpstreamReady}); err != nil {
+				t.Fatal(err)
+			}
+			cmd := operatorTerminalCommand{ready: s.readyFired(), data: []byte("after-ready")}
+			if kind == "resize" {
+				cmd.resize, cmd.cols, cmd.rows = true, 100, 40
+			}
+			s.frames <- cmd
+			cols, rows := 80, 24
+			first, ok := s.waitReady(context.Background(), &cols, &rows)
+			if !ok || first == nil {
+				t.Fatal("command received after ready was discarded by readiness drain")
+			}
+			if first.ready != cmd.ready || first.resize != cmd.resize || !bytes.Equal(first.data, cmd.data) {
+				t.Fatalf("first command = %#v, want %#v", first, cmd)
+			}
+			if cols != 90 || rows != 30 {
+				t.Fatalf("pre-ready geometry = %dx%d, want 90x30", cols, rows)
+			}
+			// Late-enqueued early input must also be dropped by forward.
+			s.frames <- operatorTerminalCommand{data: []byte("late-early")}
+			close(s.frames)
+			s.forward(context.Background(), first)
+			frames := link.snapshot()
+			if len(frames) != 1 {
+				t.Fatalf("forwarded frames = %#v, want one post-ready command", frames)
+			}
+			if kind == "input" && (frames[0].Type != agentrelay.DownstreamInput || !bytes.Equal(frames[0].Data, cmd.data)) {
+				t.Fatalf("forwarded input = %#v", frames[0])
+			}
+			if kind == "resize" && (frames[0].Type != agentrelay.DownstreamResize || frames[0].Cols != 100 || frames[0].Rows != 40) {
+				t.Fatalf("forwarded resize = %#v", frames[0])
+			}
+		})
+	}
+}
+
 func TestOperatorTerminalPingDuringBusy(t *testing.T) {
 	ticks := make(chan time.Time, 1)
 	started := make(chan struct{})
@@ -1288,12 +1370,20 @@ func TestOperatorTerminalPingDuringBusy(t *testing.T) {
 	blocked := make(chan struct{})
 	releaseBlock := make(chan struct{})
 	pingDone := make(chan error, 1)
-	var busyOnce, blockOnce, startOnce sync.Once
+	var busyOnce, blockOnce, startOnce, releaseBusyOnce, releaseBlockOnce sync.Once
+	unblockBusy := func() { releaseBusyOnce.Do(func() { close(releaseBusy) }) }
+	unblockReader := func() { releaseBlockOnce.Do(func() { close(releaseBlock) }) }
 	useOperatorTerminalSettings(t, operatorTerminalSettings{
 		heartbeatTicks: ticks,
 		heartbeatWait:  150 * time.Millisecond,
 		onPingStart: func() {
 			startOnce.Do(func() { close(started) })
+			// Start the ping deadline only once the producer holds the
+			// busy frame; CI scheduling before that point is irrelevant.
+			select {
+			case <-busyEntered:
+			case <-releaseBusy: // Also release the hook on test failure.
+			}
 		},
 		onPingDone: func(err error) { pingDone <- err },
 		busyWait: func(ctx context.Context, _ time.Duration) error {
@@ -1311,13 +1401,15 @@ func TestOperatorTerminalPingDuringBusy(t *testing.T) {
 		},
 	})
 	f := newOperatorTerminalFixture(t)
+	t.Cleanup(unblockBusy)
+	t.Cleanup(unblockReader)
 	f.link.mu.Lock()
 	f.link.busyLeft[agentrelay.DownstreamInput] = 1
 	f.link.mu.Unlock()
 	conn := f.connect("opterm-ping-busy")
 	writePageJSON(t, conn, map[string]any{"type": "resize", "cols": 80, "rows": 24})
 	f.link.await(t, 1)
-	f.deliver("opterm-ping-busy", agentrelay.Upstream{Type: agentrelay.UpstreamReady})
+	f.ready(conn, "opterm-ping-busy")
 	ticks <- time.Now()
 	select {
 	case <-started:
@@ -1359,8 +1451,8 @@ func TestOperatorTerminalPingDuringBusy(t *testing.T) {
 	if !open {
 		t.Fatal("ping during a held frame closed the session")
 	}
-	close(releaseBlock)
-	close(releaseBusy)
+	unblockReader()
+	unblockBusy()
 	frames := f.link.await(t, 2)
 	if frames[1].Type != agentrelay.DownstreamInput || !bytes.Equal(frames[1].Data, []byte("held")) {
 		t.Fatalf("held frame = %#v", frames[1])
