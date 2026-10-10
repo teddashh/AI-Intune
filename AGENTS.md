@@ -7,4 +7,7 @@ For Oracle Cloud VM deployments, follow [skills/clawctl-oci-deploy/SKILL.md](ski
 For new host bootstrap and network checks, follow [skills/fleet-host-bootstrap/SKILL.md](skills/fleet-host-bootstrap/SKILL.md).
 For operating an existing Hub, follow [skills/clawctl-operator/SKILL.md](skills/clawctl-operator/SKILL.md).
 
+For host migration and generic deploys, follow [skills/fleet-host-migration/SKILL.md](skills/fleet-host-migration/SKILL.md).
+For tool removal, follow [skills/fleet-tool-removal/SKILL.md](skills/fleet-tool-removal/SKILL.md).
+
 Do not merge PRs unless the human asked. Do not print secrets.
