@@ -2520,6 +2520,15 @@ else
 	failed=$((failed + 1))
 fi
 
+for fleet_test in "$ROOT"/ops/fleet/*/test.sh; do
+	[ -f "$fleet_test" ] || continue
+	if bash "$fleet_test"; then
+		passed=$((passed + 1))
+	else
+		failed=$((failed + 1))
+	fi
+done
+
 printf '\npassed: %s, failed: %s\n' "$passed" "$failed"
 if [ "$failed" -ne 0 ]; then
 	exit 1
