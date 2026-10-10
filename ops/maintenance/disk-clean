@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # fleet-disk-clean — config-driven, allowlist-only disk housekeeping.
+# 1.1.1: defer uv pruning while cache locks are held; bound lock waits to 60s.
 # Hardening 1.1.0: BUILTIN_PROTECT is always merged into PROTECT_NAMES and into
 # tmpfiles exclusions. A config file can add names; it cannot remove these.
 # A TMP_GLOB_RULE whose basename glob would match protected data is refused.
@@ -9,7 +10,7 @@
 # Every category is a separate function  cat_<name>  that can be run alone with  --only <name>.
 # Summary schema: fleet-disk-clean/v1 (see README.md). Never deletes outside its allowlist.
 set -uo pipefail
-VERSION="1.1.0"
+VERSION="1.1.1"
 SCHEMA="fleet-disk-clean/v1"
 export LC_ALL=C
 export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
@@ -262,12 +263,43 @@ cat_pip_cache() { # pip's own tool: 'pip cache purge' when above threshold
   timeout 600 $pip cache purge >>"$LOG" 2>&1 || { record pip_cache error 0 0 0 "pip cache purge failed"; return; }
   after=$(sizeof "$dir"); record pip_cache ok "$before" $((before>after ? before-after : 0)) 1 ""
 }
+uv_lock_holders() { # count each PID once, even if it has multiple lock descriptors
+  local lock proc_root="${DISK_CLEAN_PROC_ROOT:-/proc}" pid_dir pid fd target holders=0
+  [ -e "$1/.lock" ] || { echo 0; return; }
+  lock=$(readlink -f -- "$1/.lock" 2>/dev/null) || { echo 0; return; }
+  for pid_dir in "$proc_root"/[0-9]*; do
+    pid=${pid_dir##*/}
+    [[ "$pid" =~ ^[0-9]+$ ]] && [ "$pid" != "$$" ] || continue
+    for fd in "$pid_dir"/fd/*; do
+      target=$(readlink -- "$fd" 2>/dev/null) || continue
+      if [ "$target" = "$lock" ]; then
+        holders=$((holders+1))
+        break
+      fi
+    done
+  done
+  echo "$holders"
+}
 cat_uv_cache() { # uv's own tool: 'uv cache prune' (only unreachable entries)
   command -v uv >/dev/null || { record uv_cache skipped 0 0 0 "uv not installed"; return; }
   local dir; dir="$(uv cache dir 2>/dev/null)"; [ -d "$dir" ] || { record uv_cache ok 0 0 0 "no cache"; return; }
   local before after; before=$(sizeof "$dir")
-  [ $DRY = 1 ] && { record uv_cache ok 0 0 0 "would: uv cache prune (estimate n/a, cache=$before)"; return; }
-  timeout 600 uv cache prune >>"$LOG" 2>&1 || { record uv_cache error 0 0 0 "uv cache prune failed"; return; }
+  # Prune needs an exclusive lock; live uv run commands hold shared locks.
+  # Never pass --force: running interpreters may still need the cache entries.
+  local holders out rc
+  holders=$(uv_lock_holders "$dir")
+  [ $DRY = 1 ] && { record uv_cache ok 0 0 0 "would: uv cache prune (estimate n/a, cache=$before, lock_holders=$holders)"; return; }
+  [ "$holders" -gt 0 ] && { record uv_cache skipped 0 0 0 "deferred: cache lock held by $holders running uv process(es) (cache=$before)"; return; }
+  out=$(UV_LOCK_TIMEOUT=60 timeout 600 uv cache prune 2>&1); rc=$?
+  printf '%s\n' "$out" >>"$LOG"
+  if [ "$rc" -ne 0 ]; then
+    if printf '%s' "$out" | grep -Ei 'waiting for (.* )?lock|lock[ -]*timeout|currently[ -]+in[ -]?use|timeout.*acquir.*lock|acquir.*lock.*timeout' >/dev/null; then
+      record uv_cache skipped 0 0 0 "deferred: uv cache lock busy (cache=$before)"
+    else
+      record uv_cache error 0 0 0 "uv cache prune failed rc=$rc"
+    fi
+    return
+  fi
   after=$(sizeof "$dir"); record uv_cache ok "$before" $((before>after ? before-after : 0)) 1 "cache_before=$before"
 }
 cat_go_cache() { # go's own tool: 'go clean -cache' only when GOCACHE is huge (never -modcache)

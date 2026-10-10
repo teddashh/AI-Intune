@@ -172,5 +172,89 @@ if [ "$(id -u)" -ne 0 ]; then
   fi
 fi
 
+# uv tests use only a PATH stub and a private proc tree/cache.
+run_uv_cache() {
+  local name="$1" holder="$2" dry="$3" stub_mode="$4" status="$5" note="$6" prune="$7"
+  local home="$WORK/uv-$name" rc expected_output
+  local cache="$home/cache" proc="$home/proc" state="$home/state" log="$home/uv.log"
+  mkdir -p "$cache" "$proc" "$state"
+  install_stubs "$home"
+  : >"$cache/.lock"
+  : >"$log"
+  [ "$holder" = missing ] && rm "$cache/.lock"
+  case "$stub_mode" in
+    ok) expected_output="prune completed" ;;
+    lock) expected_output="Timeout acquiring cache lock: currently in-use" ;;
+    waiting) expected_output="waiting for lock timed out" ;;
+    timeout) expected_output="cache lock timeout" ;;
+    error) expected_output="unrelated failure" ;;
+  esac
+  if [ "$holder" = 1 ]; then
+    mkdir -p "$proc/12345/fd"
+    ln -s "$cache/.lock" "$proc/12345/fd/3"
+    ln -s "$cache/.lock" "$proc/12345/fd/4" # same PID must count once
+  fi
+  cat >"$home/.local/bin/uv" <<'EOF'
+#!/bin/sh
+printf 'argv=%s UV_LOCK_TIMEOUT=%s\n' "$*" "${UV_LOCK_TIMEOUT:-unset}" >>"${DISK_CLEAN_STUB_LOG:?}"
+case "$*" in
+  'cache dir') printf '%s\n' "${UV_TEST_CACHE:?}" ;;
+  'cache prune')
+    case "${UV_TEST_MODE:?}" in
+      ok) echo 'prune completed' ;;
+      lock) echo 'Timeout acquiring cache lock: currently in-use' >&2; exit 2 ;;
+      waiting) echo 'waiting for lock timed out' >&2; exit 2 ;;
+      timeout) echo 'cache lock timeout' >&2; exit 2 ;;
+      error) echo 'unrelated failure' >&2; exit 7 ;;
+    esac ;;
+  *) exit 99 ;;
+esac
+EOF
+  cat >"$home/c.conf" <<EOF
+DRY_RUN=$dry
+CATEGORIES="uv_cache"
+MOUNT=/
+ROOT_SUMMARY=$home/missing-root.json
+EOF
+  DISK_CLEAN_PROC_ROOT="$proc" DISK_CLEAN_STATE="$state" DISK_CLEAN_STUB_LOG="$log" \
+    UV_TEST_CACHE="$cache" UV_TEST_MODE="$stub_mode" HOME="$home" \
+    bash "$SCRIPT" --scope user --conf "$home/c.conf" >/dev/null 2>&1; rc=$?
+  # Read only category evidence; never print the summary's host/user fields.
+  if [ "$rc" -ne 0 ] || ! python3 - "$state/last.json" "$status" "$note" <<'PYTEST'
+import json, sys
+category = json.load(open(sys.argv[1]))['categories']['uv_cache']
+assert category['status'] == sys.argv[2]
+assert sys.argv[3] in category['note']
+PYTEST
+  then
+    bad "uv $name summary rc=$rc"
+    return
+  fi
+  if grep -q -- '--force' "$log"; then
+    bad "uv $name passed force"
+  elif [ "$prune" = yes ]; then
+    if ! grep -qx 'argv=cache prune UV_LOCK_TIMEOUT=60' "$log"; then
+      bad "uv $name prune invocation"
+    elif ! grep -Fxq "$expected_output" "$state/log/"*.log; then
+      bad "uv $name prune output missing from log"
+    else
+      ok "uv $name"
+    fi
+  elif grep -q 'argv=cache prune' "$log"; then
+    bad "uv $name unexpectedly pruned"
+  else
+    ok "uv $name"
+  fi
+}
+
+run_uv_cache holder 1 0 ok skipped 'deferred: cache lock held by 1' no
+run_uv_cache missing-lock missing 0 ok ok 'cache_before=' yes
+run_uv_cache free 0 0 ok ok 'cache_before=' yes
+run_uv_cache busy 0 0 lock skipped 'deferred: uv cache lock busy' yes
+run_uv_cache waiting 0 0 waiting skipped 'deferred: uv cache lock busy' yes
+run_uv_cache timeout 0 0 timeout skipped 'deferred: uv cache lock busy' yes
+run_uv_cache failure 0 0 error error 'uv cache prune failed rc=7' yes
+run_uv_cache dry 1 1 ok ok 'lock_holders=1' no
+
 printf '\ndisk-clean tests passed: %s failed: %s\n' "$passed" "$failed"
 [ "$failed" -eq 0 ]

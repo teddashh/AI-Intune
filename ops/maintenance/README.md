@@ -28,3 +28,9 @@ build cache only.
 Install system and user timers from this checkout. Both scopes default to
 dry-run. Bots read summary files instead of scanning disks. See
 [Local maintenance timers](../../docs/MAINTENANCE-TIMERS.md).
+
+## Changelog
+
+- 1.1.1: Defer uv cache pruning when processes hold the cache lock or prune
+  reports a lock timeout. Limit uv lock waits to 60 seconds and report lock
+  holders in dry-run summaries.
