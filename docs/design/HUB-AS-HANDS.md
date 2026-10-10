@@ -2,17 +2,29 @@
 
 Status: **DRAFT for review.** No code in this PR.
 
-## Direction
+## Opening principle: three layers, two tools
 
-The operator box that the chat bots run on does not keep its state, so nothing operational should live there. Every
-procedure the chat bots do today (the operator-box bot and the per-host bots) becomes a **Hub tool**: a vetted
-script plus an MCP tool with a scope, an audit record, and an approval gate when it is dangerous.
+**Three layers. Escalate in this order: SaaS → Hermes → Grok Bot by hand.**
 
-- **Hub** is the only executor. It runs fixed jobs on its own schedule: daily check, disk-clean, BAT sweep, backups, restore drill.
-- **The agent runtime** (Hermes, on the always-on cloud VM C4) does the work that needs judgment. It calls the Hub MCP
-  and never runs SSH or scripts itself.
-- **Chat bots** ask the agent runtime, or call the Hub MCP read-only. They keep no operational state of their own.
-- **C4** is the fallback executor when the Hub host (Fly) is down.
+1. **Intune (the Fly Hub) is the SaaS.** Anything that can be configured inside it is configured there first,
+   including scheduling. Fixed jobs (daily check, disk-clean audit, BAT sweep, backups, restore drill) are Hub
+   schedules running catalog scripts, with a scope, an audit record, and approval for dangerous operations.
+   The Hub is the only executor.
+2. **Hermes is the AI assistant agent** (on the always-on cloud VM C4). It runs cron and judgment jobs **through the
+   Hub MCP** and takes direction from the Grok Bots. It does not SSH into hosts or run scripts itself.
+3. **Grok Bots are treated as people** (operators: the box bot and the per-host bots). They direct Hermes through the
+   Hub MCP and go into a machine directly only when the first two layers fail, the way a human operator would.
+   Anything a Grok Bot had to do by hand is a gap to fold back into layer 1 or 2. Nothing operational stays
+   on the box, because box state does not persist.
+
+**Two tools follow the same logic:**
+- **Intune is for operations:** fleet health, maintenance, backups, upgrades, host lifecycle.
+- **The BAT connector is for development:** coding sessions, permission prompts, session failover/cleanup,
+  task milestones. It has its own SaaS layer (BAT server/task service), Hermes on top, and Grok Bots by hand last.
+  Where a BAT procedure needs scheduling or audit, it is scheduled from the Hub and calls BAT. The development
+  logic stays in BAT.
+
+C4 is the fallback executor when Fly is down (§5).
 
 Host labels used here: **W1** GPU workstation, **W2** corporate-network workstation, **C1–C4** cloud VMs (C3 = production
 web app, C4 = agent-runtime host). The real-name mapping lives in the private overlay, never in this repo.
@@ -63,32 +75,38 @@ definitions are not visible from the box. **Action:** export each bot's routine 
 
 ## 2. Mapping: target tool, scheduler, scope, approval
 
+**Layer** is who owns the procedure first; escalation goes down the layers only on failure. **Tool**: Intune = operations, BAT = development.
 Scopes follow the Hub's existing grant levels: `view` < `operate` < `admin`. **Approval** means the call returns a
 preview digest, and a human confirms in the Hub UI (or Telegram link) before the apply call runs. The existing
 `*_preview` / `*_apply` + `preview_digest` pattern is reused.
 
 | Procedure | Hub tool / script | Scheduler | Scope | Approval |
 |---|---|---|---|---|
-| BAT hourly sweep, report only | `bat_sweep_preview` (script `bat-sweep`, read mode) | Hub `17 * * * *` | view | no |
-| BAT: approve non-destructive permission prompts | `bat_permission_approve` (per toolUseId, policy-checked) | Hub (sweep) | operate | no for the allowlist; **yes** for anything else |
-| BAT: quota failover, session cleanup, idle nudge | `bat_session_failover`, `bat_session_cleanup`, `bat_session_nudge` | Hub (sweep); agent runtime ad hoc | operate | no (CLEAN_ONLY/KEEP); **yes** for MERGE_AND_CLEAN, ESCALATE |
-| Fleet health daily (reachability, disk, failed units, backups, cert expiry, error counts) | `fleet_daily_check` → existing `fleet-daily-check` summaries collected by the agent | Hub `23 7 * * *` | view | no |
-| Per-host daily checks (C3 app, W1) and their alert de-dup state | folded into `fleet_daily_check` with per-host check profiles; state in the Hub DB | Hub | view | no |
-| Disk-clean (user/root timers) | existing `disk_clean_*` tools; timers stay on hosts, Hub reads `last.json` | Host timers (Hub audits) | view; admin for profile publish / canary | **yes** for apply/canary/publish (already) |
-| Install timers / daily check on a host | `host_timers_install` (`ops/maintenance/install-timers.sh`) | agent runtime on request | admin | **yes** |
-| AI-CLI check / report | `ai_cli_check` (`ops/fleet/ai-cli/check-ai-clis.sh --json`) | Hub weekly | view | no |
-| AI-CLI install / fix | `ai_cli_install` (`install-ai-clis.sh --apply`) | agent runtime | admin | **yes** |
-| Hub backup (volume snapshot) + Litestream currency check | `hub_backup_snapshot`, `hub_replica_check` | Hub daily | admin (snapshot), view (check) | no |
-| Restore drill | existing `restore-drill` + off-host variant on C4 | Hub monthly; C4 monthly cross-check | admin | no (read-only restore to tmp) |
-| Hub upgrade | `hub_upgrade_preview` / `_apply` (deploy.sh, records rollback image) | agent runtime on request | admin | **yes** |
-| Hub dead-man (is the Hub alive) | stays **off-Hub** (C2 cron) | C2 | — | — |
-| Proxy / NTP / Tailscale-SSH checks | `net_check` (proxy-check, ntp-check) | Hub weekly | view | no; fixes are **yes** |
-| New-host bootstrap | `host_bootstrap_plan` / `_apply` | agent runtime | admin | **yes**, every phase that needs root |
-| Host migration / tool removal / deploy template | `migrate_*`, `tool_removal_*`, `app_deploy_*` (scripts from #42) | agent runtime | admin | **yes** (freeze, cutover, remove, deploy) |
-| Task-events safety sweep | `task_events_sweep` | Hub every 30m | operate (posts to threads) | no |
-| Free-workshop dispatch watch | stays in the agent runtime (judgment) | agent runtime | — | — |
-| Private overlay drift check | `sot_drift_check` (GitHub-side script, no box) | Hub daily | view | no |
-| Box ssh config / tunnels | **retired**: the Hub reaches hosts through the agent link; humans keep their own access | — | — | — |
+| BAT hourly sweep, report only | BAT | 1 SaaS (Hub schedule → BAT) | `bat_sweep_preview` (script `bat-sweep`, read mode) | Hub `17 * * * *` | view | no |
+| BAT: approve non-destructive permission prompts | BAT | 1 SaaS (policy) / 2 Hermes (exceptions) | `bat_permission_approve` (per toolUseId, policy-checked) | Hub (sweep) | operate | no for the allowlist; **yes** for anything else |
+| BAT: quota failover, session cleanup, idle nudge | BAT | 1 SaaS / 2 Hermes | `bat_session_failover`, `bat_session_cleanup`, `bat_session_nudge` | Hub (sweep); agent runtime ad hoc | operate | no (CLEAN_ONLY/KEEP); **yes** for MERGE_AND_CLEAN, ESCALATE |
+| Fleet health daily (reachability, disk, failed units, backups, cert expiry, error counts) | Intune | 1 SaaS | `fleet_daily_check` → existing `fleet-daily-check` summaries collected by the agent | Hub `23 7 * * *` | view | no |
+| Per-host daily checks (C3 app, W1) and their alert de-dup state | Intune | 1 SaaS | folded into `fleet_daily_check` with per-host check profiles; state in the Hub DB | Hub | view | no |
+| Disk-clean (user/root timers) | Intune | 1 SaaS (host timers audited) | existing `disk_clean_*` tools; timers stay on hosts, Hub reads `last.json` | Host timers (Hub audits) | view; admin for profile publish / canary | **yes** for apply/canary/publish (already) |
+| Install timers / daily check on a host | Intune | 2 Hermes | `host_timers_install` (`ops/maintenance/install-timers.sh`) | agent runtime on request | admin | **yes** |
+| AI-CLI check / report | Intune | 1 SaaS | `ai_cli_check` (`ops/fleet/ai-cli/check-ai-clis.sh --json`) | Hub weekly | view | no |
+| AI-CLI install / fix | Intune | 2 Hermes | `ai_cli_install` (`install-ai-clis.sh --apply`) | agent runtime | admin | **yes** |
+| Hub backup (volume snapshot) + Litestream currency check | Intune | 1 SaaS | `hub_backup_snapshot`, `hub_replica_check` | Hub daily | admin (snapshot), view (check) | no |
+| Restore drill | Intune | 1 SaaS | existing `restore-drill` + off-host variant on C4 | Hub monthly; C4 monthly cross-check | admin | no (read-only restore to tmp) |
+| Hub upgrade | Intune | 2 Hermes (human approves) | `hub_upgrade_preview` / `_apply` (deploy.sh, records rollback image) | agent runtime on request | admin | **yes** |
+| Hub dead-man (is the Hub alive) | Intune | outside the Hub (C2) | stays **off-Hub** (C2 cron) | C2 | — | — |
+| Proxy / NTP / Tailscale-SSH checks | Intune | 1 SaaS; fixes 2 Hermes | `net_check` (proxy-check, ntp-check) | Hub weekly | view | no; fixes are **yes** |
+| New-host bootstrap | Intune | 2 Hermes | `host_bootstrap_plan` / `_apply` | agent runtime | admin | **yes**, every phase that needs root |
+| Host migration / tool removal / deploy template | Intune | 2 Hermes; 3 Grok Bot for cutover | `migrate_*`, `tool_removal_*`, `app_deploy_*` (scripts from #42) | agent runtime | admin | **yes** (freeze, cutover, remove, deploy) |
+| Task-events safety sweep | BAT | 1 SaaS (BAT push primary) | `task_events_sweep` | Hub every 30m | operate (posts to threads) | no |
+| Free-workshop dispatch watch | BAT | 2 Hermes | stays in the agent runtime (judgment) | agent runtime | — | — |
+| Private overlay drift check | Intune (repo ops) | 1 SaaS | `sot_drift_check` (GitHub-side script, no box) | Hub daily | view | no |
+| Box ssh config / tunnels | — | 3 Grok Bot only (break-glass) | **retired** as a procedure path: the Hub reaches hosts through the agent link; direct access is break-glass only | — | — | — |
+
+**BAT (development), not Intune:** the BAT sweep and its parts (permission approvals, quota failover, session
+cleanup, idle nudges), the task-events safety sweep, and free-workshop dispatch. The BAT server auto-update timers
+are host maintenance, so Intune audits them as evidence. **Intune (operations):** everything else in the table.
+For BAT items the Hub only schedules and audits; the actions are BAT connector calls.
 
 ## 3. What the Hub lacks
 
@@ -127,8 +145,8 @@ preview digest, and a human confirms in the Hub UI (or Telegram link) before the
 2. **Fleet daily check.** Install `fleet-daily-check` timers on all hosts (#40), then add the Hub `fleet_daily_check` job.
    Retire the box `*-daily-state.json` routines and the `fleet-health-daily` cron.
 3. **Hub self-care.** Daily snapshot plus replica check, monthly restore drill, drift check.
-4. **The agent runtime as the only judgment client.** Point the agent runtime (C4) at the Hub MCP with its service token.
-   Chat bots switch to "ask the agent runtime / read the Hub". Delete the box `~/.hermes` copy.
+4. **Hermes as the only judgment client.** Point Hermes (C4) at the Hub MCP with its service token.
+   Grok Bots switch to directing Hermes through the Hub MCP, and go direct only on failure (record each fallback as a gap). Delete the box `~/.hermes` copy.
 5. **Admin tools behind approval.** Timers install, AI-CLI install, net fixes, bootstrap, migration, tool removal, Hub upgrade.
 6. **Fallback.** Enable `hub-fallback` on C4, run a drill (stop the Fly machine in a window, confirm the C4 takeover is read-only), and document it.
 7. **Retire box state.** Drop the box ssh config and tunnels from the procedures. The box keeps only what a human session needs.
