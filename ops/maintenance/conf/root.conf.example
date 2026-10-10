@@ -1,0 +1,12 @@
+# Parse-only config. Approve a scope with DRY_RUN=0, or selected categories below.
+DRY_RUN=1
+APPLY_CATEGORIES=""
+CATEGORIES="tmpfiles journal pkg_cache docker snap"
+TMP_AGE_DAYS=10
+VARTMP_AGE_DAYS=14
+JOURNAL_MAX_SIZE=500M
+JOURNAL_MAX_AGE=30d
+DOCKER_UNTIL_HOURS=168
+ATTENTION_PCT=90
+MOUNT=/
+PROTECT_NAMES=""

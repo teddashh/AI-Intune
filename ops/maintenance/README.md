@@ -22,3 +22,9 @@ uid 0. The agent does not use sudo.
 The script does not reboot, restart services, install packages, or run
 `docker system prune`. The docker category removes dangling images and old
 build cache only.
+
+## Local timers
+
+Install system and user timers from this checkout. Both scopes default to
+dry-run. Bots read summary files instead of scanning disks. See
+[Local maintenance timers](../../docs/MAINTENANCE-TIMERS.md).

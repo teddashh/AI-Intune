@@ -1,0 +1,8 @@
+[Unit]
+Description=Read daily host maintenance evidence
+After=disk-clean.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/fleet-daily-check --write
+SuccessExitStatus=1 2

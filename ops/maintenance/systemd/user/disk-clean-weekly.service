@@ -1,0 +1,8 @@
+[Unit]
+Description=Allowlist disk maintenance
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/disk-clean --scope user --weekly
+Nice=19
+IOSchedulingClass=idle
