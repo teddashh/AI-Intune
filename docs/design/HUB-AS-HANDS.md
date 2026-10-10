@@ -26,7 +26,7 @@ Status: **DRAFT for review.** No code in this PR.
   scheduling or audit, the Hub schedules it and calls bat-agent-connector. The development logic stays in
   bat-agent-connector. BAT itself is not one of the two tools.
 
-C4 is the fallback executor when Fly is down (§5).
+C4 is the fallback executor when Fly is down (§6). Grok Bots supervise both layers (§5).
 
 Host labels used here: **W1** GPU workstation, **W2** corporate-network workstation, **C1–C4** cloud VMs (C3 = production
 web app, C4 = agent-runtime host). The real-name mapping lives in the private overlay, never in this repo.
@@ -135,8 +135,8 @@ For these the Hub only schedules and audits; the actions are bat-agent-connector
 4. **Secrets.** Fly secrets hold the Hub's own keys (R2, Telegram, Fly API for snapshots). Per-host script secrets are not sent
    from the Hub. They stay on the host in root-owned 0600 files referenced by name in the catalog.
    - The Hub DB holds password hashes and TOTP secrets, so the R2 replica is credential material. Keep it on its own key.
-5. **Audit.** Extend the audit log with principal, tool, arguments digest, approval ID, job ID, exit status, and output digest.
-   Add an export and a Telegram digest for every approval-gated action.
+5. **Audit and supervision feeds.** Extend the audit log with principal, tool, arguments digest, approval ID, job ID, exit status, and output digest.
+   Add an export and a Telegram digest for every approval-gated action. Add the read-only summary tools that §5 relies on (`jobs_summary`, `approvals_summary`, `hub_status`, `hermes_decisions_list`) and the Hermes decision-log write path.
 6. **Notifications.** Route sweep and check digests through the Hub notifier (Telegram today; add Discord webhooks per channel).
 7. **Fallback runner on C4.** A small `hub-fallback` mode: the same catalog and scheduler, read-only tools by default,
    enabled only when the dead-man check says the Hub is down.
@@ -159,7 +159,45 @@ For these the Hub only schedules and audits; the actions are bat-agent-connector
 6. **Fallback.** Enable `hub-fallback` on C4, run a drill (stop the Fly machine in a window, confirm the C4 takeover is read-only), and document it.
 7. **Box as last-resort access.** Keep the box ssh config, tunnels, connector, and credentials maintained for the Grok Bot layer. Write the rebuild checklist into the private overlay. Confirm no scheduled job or only-copy data remains on the box (scripts and runbooks mirrored in the Hub or repo).
 
-## 5. Risks
+## 5. Supervision: Grok Bots watch the layers below them
+
+The Grok Bots routinely monitor how the Hub jobs and Hermes are performing, the way a person reviews a team's
+dashboard. They investigate in person only when a layer **fails or degrades**. Direct SSH/Tailscale access
+(the box, §1a) is always available to them, as it is to a human operator. Supervision decides *when* to use it.
+
+### Metrics and where they are read
+| Layer | Metric (rolling 24 h and 7 d) | Where it is read |
+|---|---|---|
+| Hub jobs | success / failure / timeout count per job and per host; last success time per scheduled job | Hub MCP `jobs_summary` (new; read-only, `view`) and the `/jobs` page |
+| Hub jobs | run latency p50 / p95 vs that job's own 7-day baseline; schedule lag (start time minus scheduled time) | `jobs_summary` |
+| Hub approvals | requests, approved / denied / expired, time to decision | `approvals_summary` (new; `view`) |
+| Hub itself | `/healthz`, Litestream replica lag, last backup snapshot, last restore drill result | `hub_status` (new; `view`); the external dead-man check on C2 |
+| Hermes | decisions taken, tool calls by tool, error rate, actions needing approval vs auto, escalations raised | **Hermes decision log**: one append-only record per decision (input digest, tools called, outcome, approval ID), written through the Hub so it lands in the audit log; read with `hermes_decisions_list` (new; `view`) |
+| Hermes | liveness: last heartbeat or run, cron jobs enabled vs expected | `hermes_status` via the Hub agent on C4 |
+
+A Grok Bot reads these on a fixed routine (daily summary; hourly for the pilot week). The Hub posts the same
+summary to the Telegram/Discord digest, so a person sees what the bots see.
+
+### Thresholds that trigger a Grok Bot to step in
+| Signal | Step in when |
+|---|---|
+| Scheduled job missed | no successful run for 2 consecutive intervals (daily job: more than 26 h since the last success) |
+| Job failure rate | over 10% of runs in 24 h, or any failure of backup, restore drill, or disk-clean root apply |
+| Latency | p95 above 2× its 7-day baseline for 24 h, or schedule lag above 15 min |
+| Approvals | a request pending more than 4 h; denial rate over 30% in 7 d (Hermes is proposing bad actions); any destructive action without an approval ID (immediate) |
+| Hub health | `/healthz` down more than 5 min (dead-man alert), replica lag over 5 min, no snapshot in 26 h |
+| Hermes | no heartbeat for 30 min; error rate over 10% in 24 h; a decision that bypassed the Hub MCP (any direct SSH/script by Hermes) |
+| Fleet coverage | an active machine without a check-in for more than 10 min while the Hub is healthy |
+
+**Stepping in, in escalation order:**
+1. Re-run or adjust through the Hub (layer 1).
+2. Direct Hermes to fix it (layer 2).
+3. Only then go in by hand over SSH/Tailscale (layer 3).
+
+Every layer-3 intervention gets a short note: what failed, what was done by hand, and which tool or threshold
+change would have handled it at layer 1 or 2. The note goes into the gap list for §4.
+
+## 6. Risks
 
 | Risk | Mitigation |
 |---|---|
