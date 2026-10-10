@@ -442,9 +442,15 @@ func assertErrorFrame(t *testing.T, conn *websocket.Conn, reason string) []byte 
 
 func assertNoRoute(t *testing.T, f *operatorTerminalFixture, sessionID string) {
 	t.Helper()
-	if f.hasRoute(sessionID) {
-		t.Fatalf("route %s still registered", sessionID)
+	// Shutdown persists the close reason before unregistering the route.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if !f.hasRoute(sessionID) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
+	t.Fatalf("route %s still registered", sessionID)
 }
 
 func assertRefusal(t *testing.T, resp *http.Response, err error, status int, sentence string) {
