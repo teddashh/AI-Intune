@@ -29,6 +29,7 @@ import (
 
 const (
 	defaultResolveTimeout         = 3 * time.Second
+	AuthMethodServiceToken        = "service-token"
 	AuthMethodLocalAccountSession = "local-account-session"
 	AuthMethodLocalAPI            = "tailscale-localapi-app-cap"
 	minimumDaemonVersion          = "1.100.0"
@@ -226,6 +227,9 @@ type Principal struct {
 }
 
 func (p Principal) StableSubject() string {
+	if p.AuthMethod == AuthMethodServiceToken && p.TailnetUserID != "" {
+		return "service:" + p.TailnetUserID
+	}
 	if p.TailnetUserID == "" {
 		return ""
 	}

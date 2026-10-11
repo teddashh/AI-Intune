@@ -126,12 +126,12 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		t.Fatalf("non-operator registered=%d policies=%d, want 24/24",
 			len(nonOperatorRegistered), len(nonOperatorRoutePolicies))
 	}
-	if len(operatorRegistered) != 216 || len(operatorRoutePolicies) != 216 {
-		t.Fatalf("operator registered=%d policies=%d, want 216/216",
+	if len(operatorRegistered) != 219 || len(operatorRoutePolicies) != 219 {
+		t.Fatalf("operator registered=%d policies=%d, want 219/219",
 			len(operatorRegistered), len(operatorRoutePolicies))
 	}
-	if len(nonOperatorRegistered)+len(operatorRegistered) != 240 {
-		t.Fatalf("all registered routes=%d, 預期 240", len(nonOperatorRegistered)+len(operatorRegistered))
+	if len(nonOperatorRegistered)+len(operatorRegistered) != 243 {
+		t.Fatalf("all registered routes=%d, 預期 243", len(nonOperatorRegistered)+len(operatorRegistered))
 	}
 	counts := map[operatorauth.Permission]int{}
 	representations := map[operatorRepresentation]int{}
@@ -141,14 +141,14 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		representations[policy.Representation]++
 		profiles[policy.SecurityProfile]++
 	}
-	if counts[operatorauth.View] != 83 || counts[operatorauth.Operate] != 24 || counts[operatorauth.Admin] != 109 {
-		t.Fatalf("permission counts=%v, want view=83 operate=24 admin=109", counts)
+	if counts[operatorauth.View] != 83 || counts[operatorauth.Operate] != 24 || counts[operatorauth.Admin] != 112 {
+		t.Fatalf("permission counts=%v, want view=83 operate=24 admin=112", counts)
 	}
-	if representations[operatorJSON] != 107 || representations[operatorHTML] != 108 || representations[operatorPlain] != 1 {
-		t.Fatalf("representation counts=%v, want JSON=107 HTML=108 plain=1", representations)
+	if representations[operatorJSON] != 107 || representations[operatorHTML] != 111 || representations[operatorPlain] != 1 {
+		t.Fatalf("representation counts=%v, want JSON=107 HTML=111 plain=1", representations)
 	}
-	if profiles[operatorSecurityLocked] != 215 || profiles[operatorSecurityTerminal] != 1 {
-		t.Fatalf("security profiles=%v, want locked=215 terminal=1", profiles)
+	if profiles[operatorSecurityLocked] != 218 || profiles[operatorSecurityTerminal] != 1 {
+		t.Fatalf("security profiles=%v, want locked=218 terminal=1", profiles)
 	}
 }
 
@@ -188,7 +188,7 @@ func TestNonOperatorRouteManifestValidationRejectsDriftAndOperatorShadowing(t *t
 	}
 
 	operatorPolicy := map[string]operatorRoutePolicy{
-		"GET /healthz": {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+		"GET /healthz": {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false},
 	}
 	if err := validateRouteManifests(valid, policy, valid, operatorPolicy); err == nil {
 		t.Fatal("route shared by root and operator mux was accepted")
@@ -198,7 +198,7 @@ func TestNonOperatorRouteManifestValidationRejectsDriftAndOperatorShadowing(t *t
 func TestOperatorRouteManifestValidationRejectsDrift(t *testing.T) {
 	valid := []string{"GET /{$}"}
 	policy := map[string]operatorRoutePolicy{
-		"GET /{$}": {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+		"GET /{$}": {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false},
 	}
 	if err := validateOperatorRoutePolicies(valid, policy); err != nil {
 		t.Fatal(err)
@@ -211,21 +211,21 @@ func TestOperatorRouteManifestValidationRejectsDrift(t *testing.T) {
 		{name: "registered route missing policy", registered: []string{"GET /future"}, policies: policy},
 		{name: "policy missing route", registered: nil, policies: policy},
 		{name: "duplicate route", registered: []string{"GET /{$}", "GET /{$}"}, policies: policy},
-		{name: "invalid permission", registered: valid, policies: map[string]operatorRoutePolicy{"GET /{$}": {99, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}}},
-		{name: "invalid representation", registered: valid, policies: map[string]operatorRoutePolicy{"GET /{$}": {operatorauth.View, 99, operator.SourceKindWeb, operatorSecurityLocked}}},
-		{name: "invalid source kind", registered: valid, policies: map[string]operatorRoutePolicy{"GET /{$}": {operatorauth.View, operatorHTML, "from-user-agent", operatorSecurityLocked}}},
-		{name: "unsafe mutation classified view", registered: []string{"POST /future"}, policies: map[string]operatorRoutePolicy{"POST /future": {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}}},
-		{name: "unknown method token", registered: []string{"BREW /future"}, policies: map[string]operatorRoutePolicy{"BREW /future": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}}},
-		{name: "operator API outside namespace", registered: valid, policies: map[string]operatorRoutePolicy{"GET /{$}": {operatorauth.View, operatorHTML, operator.SourceKindOperatorAPI, operatorSecurityLocked}}},
+		{name: "invalid permission", registered: valid, policies: map[string]operatorRoutePolicy{"GET /{$}": {99, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}}},
+		{name: "invalid representation", registered: valid, policies: map[string]operatorRoutePolicy{"GET /{$}": {operatorauth.View, 99, operator.SourceKindWeb, operatorSecurityLocked, false}}},
+		{name: "invalid source kind", registered: valid, policies: map[string]operatorRoutePolicy{"GET /{$}": {operatorauth.View, operatorHTML, "from-user-agent", operatorSecurityLocked, false}}},
+		{name: "unsafe mutation classified view", registered: []string{"POST /future"}, policies: map[string]operatorRoutePolicy{"POST /future": {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}}},
+		{name: "unknown method token", registered: []string{"BREW /future"}, policies: map[string]operatorRoutePolicy{"BREW /future": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}}},
+		{name: "operator API outside namespace", registered: valid, policies: map[string]operatorRoutePolicy{"GET /{$}": {operatorauth.View, operatorHTML, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}}},
 		{name: "omitted security profile", registered: []string{"GET /future"}, policies: map[string]operatorRoutePolicy{
 			"GET /future": {Permission: operatorauth.View, Representation: operatorHTML, SourceKind: operator.SourceKindWeb},
 		}},
 		{name: "terminal document without its profile", registered: []string{operatorTerminalDocumentPattern}, policies: map[string]operatorRoutePolicy{
-			operatorTerminalDocumentPattern: {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+			operatorTerminalDocumentPattern: {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false},
 		}},
 		{name: "terminal profile on a second route", registered: []string{operatorTerminalDocumentPattern, "GET /other"}, policies: map[string]operatorRoutePolicy{
-			operatorTerminalDocumentPattern: {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal},
-			"GET /other":                    {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal},
+			operatorTerminalDocumentPattern: {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal, false},
+			"GET /other":                    {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal, false},
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -261,222 +261,225 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		path    string
 		policy  operatorRoutePolicy
 	}{
-		{"GET /metrics", "/metrics", operatorRoutePolicy{operatorauth.View, operatorPlain, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /{$}", "/", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /preferences/navigation-language", "/preferences/navigation-language", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /machines", "/machines", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /machines/enrollment", "/machines/enrollment", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/enrollment/limit-preview", "/machines/enrollment/limit-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/enrollment/limits", "/machines/enrollment/limits", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /downloads/agent/{arch}", "/downloads/agent/amd64", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /machines/lifecycle", "/machines/lifecycle", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /machines/configuration", "/machines/configuration", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /machines/compliance", "/machines/compliance", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /machines/diagnostics", "/machines/diagnostics", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /machines/{id}", "/machines/machine-1", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /jobs", "/jobs", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /jobs/{id}", "/jobs/job-1", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /apps", "/apps", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /apps/artifacts/{id}", "/apps/artifacts/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /apps/artifact-fetches/{id}", "/apps/artifact-fetches/operation-1", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /deployments", "/deployments", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /deployments/{id}", "/deployments/deploy-1", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /updates", "/updates", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /reports/tickets", "/reports/tickets", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /reports/tickets.csv", "/reports/tickets.csv", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /reports/changes", "/reports/changes", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /reports", "/reports", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /machines/{id}/timeline", "/machines/machine-1/timeline", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /machines/{id}/timeline.csv", "/machines/machine-1/timeline.csv", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /audit", "/audit", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /settings/tailnet", "/settings/tailnet", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /tenant/maintenance", "/tenant/maintenance", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /tenant/data", "/tenant/data", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /machines/{id}/data", "/machines/machine-1/data", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /machines/{id}/data.csv", "/machines/machine-1/data.csv", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /v1/operator/data-disclosure", "/v1/operator/data-disclosure", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/machines/{id}/data", "/v1/operator/machines/machine-1/data", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /reports/enrollment", "/reports/enrollment", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /reports/enrollment.csv", "/reports/enrollment.csv", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /reports/software", "/reports/software", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /reports/software.csv", "/reports/software.csv", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /reports/install", "/reports/install", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /reports/install.csv", "/reports/install.csv", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /reports/profile", "/reports/profile", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /reports/profile.csv", "/reports/profile.csv", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /v1/operator/enrollment-report", "/v1/operator/enrollment-report", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/software-report", "/v1/operator/software-report", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/install-report", "/v1/operator/install-report", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/profile-report", "/v1/operator/profile-report", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/enrollment-limit", "/v1/operator/enrollment-limit", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/enrollment-limit/preview", "/v1/operator/enrollment-limit/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/enrollment-limit", "/v1/operator/enrollment-limit", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/machines", "/v1/operator/machines", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/machines/{id}", "/v1/operator/machines/machine-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/machines/{id}/evidence", "/v1/operator/machines/machine-1/evidence", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/jobs", "/v1/operator/jobs", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/jobs/{id}", "/v1/operator/jobs/job-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/jobs/{id}/evidence", "/v1/operator/jobs/job-1/evidence", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/deployments", "/v1/operator/deployments", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/deployments/{id}", "/v1/operator/deployments/deployment-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/artifacts", "/v1/operator/artifacts", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/artifacts/{sha256}", "/v1/operator/artifacts/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/artifact-fetches/preview", "/v1/operator/artifact-fetches/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/artifact-fetches", "/v1/operator/artifact-fetches", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/artifact-fetches", "/v1/operator/artifact-fetches", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/artifact-fetches/{id}", "/v1/operator/artifact-fetches/operation-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/updates", "/v1/operator/updates", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/audit-events", "/v1/operator/audit-events", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/changes", "/v1/operator/changes", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/tickets", "/v1/operator/tickets", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/machines/{id}/actions", "/v1/operator/machines/machine-1/actions", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/reports", "/v1/operator/reports", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/daily-report", "/v1/operator/daily-report", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/machines/{id}/timeline", "/v1/operator/machines/machine-1/timeline", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/machines/{id}/lifecycle", "/v1/operator/machines/machine-1/lifecycle", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/machines/{id}/lifecycle-preview", "/v1/operator/machines/machine-1/lifecycle-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"PUT /v1/operator/machines/{id}/lifecycle", "/v1/operator/machines/machine-1/lifecycle", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/machines/{id}/display-name-preview", "/v1/operator/machines/machine-1/display-name-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"PUT /v1/operator/machines/{id}/display-name", "/v1/operator/machines/machine-1/display-name", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/machines/{id}/notes-preview", "/v1/operator/machines/machine-1/notes-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"PUT /v1/operator/machines/{id}/notes", "/v1/operator/machines/machine-1/notes", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/deployments/preview", "/v1/operator/deployments/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/deployments", "/v1/operator/deployments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/deployments/{id}/continuation-preview", "/v1/operator/deployments/deployment-1/continuation-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/deployments/{id}/continuations", "/v1/operator/deployments/deployment-1/continuations", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/deployments/{id}/retry-preview", "/v1/operator/deployments/deployment-1/retry-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/deployments/{id}/retries", "/v1/operator/deployments/deployment-1/retries", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/deployments/{id}/abandonment-preview", "/v1/operator/deployments/deployment-1/abandonment-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/deployments/{id}/abandonments", "/v1/operator/deployments/deployment-1/abandonments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/machines/{id}/channel", "/v1/operator/machines/machine-1/channel", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/machines/{id}/assigned-user", "/v1/operator/machines/machine-1/assigned-user", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/machines/{id}/enrollment-token", "/v1/operator/machines/machine-1/enrollment-token", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/machines/{id}/diagnostic-noop-preview", "/v1/operator/machines/machine-1/diagnostic-noop-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/machines/{id}/diagnostic-noop-jobs", "/v1/operator/machines/machine-1/diagnostic-noop-jobs", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/catalog-manifests", "/v1/operator/catalog-manifests", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/catalog-manifests", "/v1/operator/catalog-manifests", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/machine-profiles", "/v1/operator/machine-profiles", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/machine-profiles", "/v1/operator/machine-profiles", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/machines/{id}/profile-assignment-preview", "/v1/operator/machines/machine-1/profile-assignment-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/machines/{id}/profile-assignments", "/v1/operator/machines/machine-1/profile-assignments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/catalog-manifests/standard-preview", "/v1/operator/catalog-manifests/standard-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/machine-profiles/preview", "/v1/operator/machine-profiles/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/tailnet", "/v1/operator/tailnet", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/tailnet/peer-ignore-preview", "/v1/operator/tailnet/peer-ignore-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"PUT /v1/operator/tailnet/peer-ignores/{id}", "/v1/operator/tailnet/peer-ignores/node-1", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/maintenance/retention", "/v1/operator/maintenance/retention", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/maintenance/retention/prune-preview", "/v1/operator/maintenance/retention/prune-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/maintenance/retention/prunes", "/v1/operator/maintenance/retention/prunes", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/maintenance/restore-drill-preview", "/v1/operator/maintenance/restore-drill-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/maintenance/restore-drills", "/v1/operator/maintenance/restore-drills", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/maintenance/restore-drills", "/v1/operator/maintenance/restore-drills", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/maintenance/restore-drills/{id}", "/v1/operator/maintenance/restore-drills/operation-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /machines/{id}/connect", "/machines/machine-1/connect", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /apps/artifact-fetches/preview", "/apps/artifact-fetches/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /apps/artifact-fetches", "/apps/artifact-fetches", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /apps/store/packages/preview", "/apps/store/packages/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /apps/store/packages", "/apps/store/packages", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /apps/profiles/preview", "/apps/profiles/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /apps/profiles", "/apps/profiles", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /apps/profile-assignments/preview", "/apps/profile-assignments/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /apps/profile-assignments", "/apps/profile-assignments", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /jobs/{id}/verifier-assignment-preview", "/jobs/job-1/verifier-assignment-preview", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /jobs/{id}/verifier-assignments", "/jobs/job-1/verifier-assignments", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /deployments/preview", "/deployments/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /deployments", "/deployments", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /deployments/{id}/continue-preview", "/deployments/deploy-1/continue-preview", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /deployments/{id}/continue", "/deployments/deploy-1/continue", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /deployments/{id}/retry-preview", "/deployments/deploy-1/retry-preview", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /deployments/{id}/retry", "/deployments/deploy-1/retry", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /deployments/{id}/abandon-preview", "/deployments/deploy-1/abandon-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /deployments/{id}/abandon", "/deployments/deploy-1/abandon", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/retire", "/machines/machine-1/retire", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/unretire", "/machines/machine-1/unretire", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/lifecycle-preview", "/machines/machine-1/lifecycle-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/configuration/policy-preview", "/machines/configuration/policy-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/configuration/policies", "/machines/configuration/policies", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/configuration/assignment-preview", "/machines/configuration/assignment-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/configuration/assignments", "/machines/configuration/assignments", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/compliance/policy-preview", "/machines/compliance/policy-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/compliance/policies", "/machines/compliance/policies", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/compliance/assignment-preview", "/machines/compliance/assignment-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/compliance/assignments", "/machines/compliance/assignments", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/diagnostic-noop-preview", "/machines/machine-1/diagnostic-noop-preview", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/diagnostic-noop-jobs", "/machines/machine-1/diagnostic-noop-jobs", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /enrollments", "/enrollments", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /enrollments/preview", "/enrollments/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/revoke-token/preview", "/machines/machine-1/revoke-token/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/keyed-installer", "/machines/machine-1/keyed-installer", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/revoke-token", "/machines/machine-1/revoke-token", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/channel", "/machines/machine-1/channel", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/assigned-user", "/machines/machine-1/assigned-user", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/assigned-user-preview", "/machines/machine-1/assigned-user-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/display-name-preview", "/machines/machine-1/display-name-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/display-name", "/machines/machine-1/display-name", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/notes-preview", "/machines/machine-1/notes-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /machines/{id}/notes", "/machines/machine-1/notes", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /settings/tailnet/peer-ignore-preview", "/settings/tailnet/peer-ignore-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /settings/tailnet/peer-ignores", "/settings/tailnet/peer-ignores", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /tenant/maintenance/retention/prune-preview", "/tenant/maintenance/retention/prune-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /tenant/maintenance/retention/prunes", "/tenant/maintenance/retention/prunes", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /tenant/maintenance/restore-drills/{id}", "/tenant/maintenance/restore-drills/operation-1", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /tenant/maintenance/restore-drill-preview", "/tenant/maintenance/restore-drill-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /tenant/maintenance/restore-drills", "/tenant/maintenance/restore-drills", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"PUT /v1/operator/machines/{id}/channel", "/v1/operator/machines/machine-1/channel", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"PUT /v1/operator/machines/{id}/assigned-user", "/v1/operator/machines/machine-1/assigned-user", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/enrollment-tokens/preview", "/v1/operator/enrollment-tokens/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/enrollment-tokens", "/v1/operator/enrollment-tokens", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/machines/{id}/enrollment-token/revocation-preview", "/v1/operator/machines/machine-1/enrollment-token/revocation-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/machines/{id}/enrollment-token/revocations", "/v1/operator/machines/machine-1/enrollment-token/revocations", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/verifiers/preview", "/v1/operator/verifiers/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/verifiers", "/v1/operator/verifiers", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/verifiers", "/v1/operator/verifiers", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/verifiers/{id}", "/v1/operator/verifiers/verifier-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/verifiers/{id}/revocation-preview", "/v1/operator/verifiers/verifier-1/revocation-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/verifiers/{id}/revocations", "/v1/operator/verifiers/verifier-1/revocations", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/verifiers/{id}/assignment-preview", "/v1/operator/verifiers/verifier-1/assignment-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/verifiers/{id}/assignments", "/v1/operator/verifiers/verifier-1/assignments", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/settings", "/v1/operator/settings", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/setting-policies/preview", "/v1/operator/setting-policies/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/setting-policies", "/v1/operator/setting-policies", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/setting-assignments/preview", "/v1/operator/setting-assignments/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/setting-assignments", "/v1/operator/setting-assignments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/compliance", "/v1/operator/compliance", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/compliance-policies/preview", "/v1/operator/compliance-policies/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/compliance-policies", "/v1/operator/compliance-policies", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/compliance-assignments/preview", "/v1/operator/compliance-assignments/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/compliance-assignments", "/v1/operator/compliance-assignments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /machines/{id}/terminals", "/machines/machine-1/terminals", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{operatorTerminalDocumentPattern, "/machines/machine-1/terminals/session-1", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal}},
-		{operatorTerminalSocketPattern, "/machines/machine-1/terminals/session-1/socket", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /deployments/{id}/skip-failed-batch-preview", "/deployments/deploy-1/skip-failed-batch-preview", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /deployments/{id}/skip-failed-batch", "/deployments/deploy-1/skip-failed-batch", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /v1/operator/deployments/{id}/skip-failed-batch-preview", "/v1/operator/deployments/deployment-1/skip-failed-batch-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/deployments/{id}/skip-failed-batches", "/v1/operator/deployments/deployment-1/skip-failed-batches", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/disk-clean/summaries", "/v1/operator/disk-clean/summaries", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /v1/operator/disk-clean/summaries/{id}", "/v1/operator/disk-clean/summaries/machine-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/profile-preview", "/v1/operator/disk-clean/profile-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/profiles", "/v1/operator/disk-clean/profiles", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/dry-run-preview", "/v1/operator/disk-clean/dry-run-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/dry-runs", "/v1/operator/disk-clean/dry-runs", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/canary-preview", "/v1/operator/disk-clean/canary-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/canaries", "/v1/operator/disk-clean/canaries", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/continuation-preview", "/v1/operator/disk-clean/continuation-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/continuations", "/v1/operator/disk-clean/continuations", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/abandonment-preview", "/v1/operator/disk-clean/abandonment-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"POST /v1/operator/disk-clean/abandonments", "/v1/operator/disk-clean/abandonments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked}},
-		{"GET /account/security", "/account/security", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /account/security/totp/begin", "/account/security/totp/begin", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /account/security/totp/confirm", "/account/security/totp/confirm", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /account/security/totp/disable", "/account/security/totp/disable", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /account/security/password", "/account/security/password", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /account/security/recovery-codes/regenerate", "/account/security/recovery-codes/regenerate", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"GET /account/users", "/account/users", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /account/users/create", "/account/users/create", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /account/users/disable", "/account/users/disable", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /account/users/enable", "/account/users/enable", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /account/users/email", "/account/users/email", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
-		{"POST /account/users/rename", "/account/users/rename", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
+		{"GET /metrics", "/metrics", operatorRoutePolicy{operatorauth.View, operatorPlain, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /{$}", "/", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /preferences/navigation-language", "/preferences/navigation-language", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /machines", "/machines", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /machines/enrollment", "/machines/enrollment", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/enrollment/limit-preview", "/machines/enrollment/limit-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/enrollment/limits", "/machines/enrollment/limits", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /downloads/agent/{arch}", "/downloads/agent/amd64", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /machines/lifecycle", "/machines/lifecycle", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /machines/configuration", "/machines/configuration", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /machines/compliance", "/machines/compliance", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /machines/diagnostics", "/machines/diagnostics", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /machines/{id}", "/machines/machine-1", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /jobs", "/jobs", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /jobs/{id}", "/jobs/job-1", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /apps", "/apps", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /apps/artifacts/{id}", "/apps/artifacts/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /apps/artifact-fetches/{id}", "/apps/artifact-fetches/operation-1", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /deployments", "/deployments", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /deployments/{id}", "/deployments/deploy-1", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /updates", "/updates", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /reports/tickets", "/reports/tickets", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /reports/tickets.csv", "/reports/tickets.csv", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /reports/changes", "/reports/changes", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /reports", "/reports", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /machines/{id}/timeline", "/machines/machine-1/timeline", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /machines/{id}/timeline.csv", "/machines/machine-1/timeline.csv", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /audit", "/audit", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /settings/tailnet", "/settings/tailnet", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /tenant/maintenance", "/tenant/maintenance", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /tenant/data", "/tenant/data", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /machines/{id}/data", "/machines/machine-1/data", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /machines/{id}/data.csv", "/machines/machine-1/data.csv", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /v1/operator/data-disclosure", "/v1/operator/data-disclosure", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/machines/{id}/data", "/v1/operator/machines/machine-1/data", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /reports/enrollment", "/reports/enrollment", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /reports/enrollment.csv", "/reports/enrollment.csv", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /reports/software", "/reports/software", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /reports/software.csv", "/reports/software.csv", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /reports/install", "/reports/install", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /reports/install.csv", "/reports/install.csv", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /reports/profile", "/reports/profile", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /reports/profile.csv", "/reports/profile.csv", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /v1/operator/enrollment-report", "/v1/operator/enrollment-report", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/software-report", "/v1/operator/software-report", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/install-report", "/v1/operator/install-report", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/profile-report", "/v1/operator/profile-report", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/enrollment-limit", "/v1/operator/enrollment-limit", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"POST /v1/operator/enrollment-limit/preview", "/v1/operator/enrollment-limit/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/enrollment-limit", "/v1/operator/enrollment-limit", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"GET /v1/operator/machines", "/v1/operator/machines", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/machines/{id}", "/v1/operator/machines/machine-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/machines/{id}/evidence", "/v1/operator/machines/machine-1/evidence", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/jobs", "/v1/operator/jobs", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/jobs/{id}", "/v1/operator/jobs/job-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/jobs/{id}/evidence", "/v1/operator/jobs/job-1/evidence", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/deployments", "/v1/operator/deployments", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/deployments/{id}", "/v1/operator/deployments/deployment-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/artifacts", "/v1/operator/artifacts", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/artifacts/{sha256}", "/v1/operator/artifacts/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"POST /v1/operator/artifact-fetches/preview", "/v1/operator/artifact-fetches/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/artifact-fetches", "/v1/operator/artifact-fetches", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"GET /v1/operator/artifact-fetches", "/v1/operator/artifact-fetches", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/artifact-fetches/{id}", "/v1/operator/artifact-fetches/operation-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/updates", "/v1/operator/updates", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/audit-events", "/v1/operator/audit-events", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/changes", "/v1/operator/changes", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/tickets", "/v1/operator/tickets", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/machines/{id}/actions", "/v1/operator/machines/machine-1/actions", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/reports", "/v1/operator/reports", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/daily-report", "/v1/operator/daily-report", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/machines/{id}/timeline", "/v1/operator/machines/machine-1/timeline", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/machines/{id}/lifecycle", "/v1/operator/machines/machine-1/lifecycle", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"POST /v1/operator/machines/{id}/lifecycle-preview", "/v1/operator/machines/machine-1/lifecycle-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"PUT /v1/operator/machines/{id}/lifecycle", "/v1/operator/machines/machine-1/lifecycle", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/machines/{id}/display-name-preview", "/v1/operator/machines/machine-1/display-name-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"PUT /v1/operator/machines/{id}/display-name", "/v1/operator/machines/machine-1/display-name", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/machines/{id}/notes-preview", "/v1/operator/machines/machine-1/notes-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"PUT /v1/operator/machines/{id}/notes", "/v1/operator/machines/machine-1/notes", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/deployments/preview", "/v1/operator/deployments/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/deployments", "/v1/operator/deployments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/deployments/{id}/continuation-preview", "/v1/operator/deployments/deployment-1/continuation-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/deployments/{id}/continuations", "/v1/operator/deployments/deployment-1/continuations", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/deployments/{id}/retry-preview", "/v1/operator/deployments/deployment-1/retry-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/deployments/{id}/retries", "/v1/operator/deployments/deployment-1/retries", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/deployments/{id}/abandonment-preview", "/v1/operator/deployments/deployment-1/abandonment-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/deployments/{id}/abandonments", "/v1/operator/deployments/deployment-1/abandonments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"GET /v1/operator/machines/{id}/channel", "/v1/operator/machines/machine-1/channel", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/machines/{id}/assigned-user", "/v1/operator/machines/machine-1/assigned-user", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/machines/{id}/enrollment-token", "/v1/operator/machines/machine-1/enrollment-token", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"POST /v1/operator/machines/{id}/diagnostic-noop-preview", "/v1/operator/machines/machine-1/diagnostic-noop-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/machines/{id}/diagnostic-noop-jobs", "/v1/operator/machines/machine-1/diagnostic-noop-jobs", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"GET /v1/operator/catalog-manifests", "/v1/operator/catalog-manifests", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"POST /v1/operator/catalog-manifests", "/v1/operator/catalog-manifests", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"GET /v1/operator/machine-profiles", "/v1/operator/machine-profiles", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"POST /v1/operator/machine-profiles", "/v1/operator/machine-profiles", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/machines/{id}/profile-assignment-preview", "/v1/operator/machines/machine-1/profile-assignment-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/machines/{id}/profile-assignments", "/v1/operator/machines/machine-1/profile-assignments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/catalog-manifests/standard-preview", "/v1/operator/catalog-manifests/standard-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/machine-profiles/preview", "/v1/operator/machine-profiles/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"GET /v1/operator/tailnet", "/v1/operator/tailnet", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"POST /v1/operator/tailnet/peer-ignore-preview", "/v1/operator/tailnet/peer-ignore-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"PUT /v1/operator/tailnet/peer-ignores/{id}", "/v1/operator/tailnet/peer-ignores/node-1", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"GET /v1/operator/maintenance/retention", "/v1/operator/maintenance/retention", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"POST /v1/operator/maintenance/retention/prune-preview", "/v1/operator/maintenance/retention/prune-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/maintenance/retention/prunes", "/v1/operator/maintenance/retention/prunes", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/maintenance/restore-drill-preview", "/v1/operator/maintenance/restore-drill-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/maintenance/restore-drills", "/v1/operator/maintenance/restore-drills", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"GET /v1/operator/maintenance/restore-drills", "/v1/operator/maintenance/restore-drills", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/maintenance/restore-drills/{id}", "/v1/operator/maintenance/restore-drills/operation-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"POST /machines/{id}/connect", "/machines/machine-1/connect", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /apps/artifact-fetches/preview", "/apps/artifact-fetches/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /apps/artifact-fetches", "/apps/artifact-fetches", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /apps/store/packages/preview", "/apps/store/packages/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /apps/store/packages", "/apps/store/packages", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /apps/profiles/preview", "/apps/profiles/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /apps/profiles", "/apps/profiles", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /apps/profile-assignments/preview", "/apps/profile-assignments/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /apps/profile-assignments", "/apps/profile-assignments", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /jobs/{id}/verifier-assignment-preview", "/jobs/job-1/verifier-assignment-preview", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /jobs/{id}/verifier-assignments", "/jobs/job-1/verifier-assignments", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /deployments/preview", "/deployments/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /deployments", "/deployments", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /deployments/{id}/continue-preview", "/deployments/deploy-1/continue-preview", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /deployments/{id}/continue", "/deployments/deploy-1/continue", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /deployments/{id}/retry-preview", "/deployments/deploy-1/retry-preview", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /deployments/{id}/retry", "/deployments/deploy-1/retry", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /deployments/{id}/abandon-preview", "/deployments/deploy-1/abandon-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /deployments/{id}/abandon", "/deployments/deploy-1/abandon", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/retire", "/machines/machine-1/retire", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/unretire", "/machines/machine-1/unretire", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/lifecycle-preview", "/machines/machine-1/lifecycle-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/configuration/policy-preview", "/machines/configuration/policy-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/configuration/policies", "/machines/configuration/policies", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/configuration/assignment-preview", "/machines/configuration/assignment-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/configuration/assignments", "/machines/configuration/assignments", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/compliance/policy-preview", "/machines/compliance/policy-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/compliance/policies", "/machines/compliance/policies", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/compliance/assignment-preview", "/machines/compliance/assignment-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/compliance/assignments", "/machines/compliance/assignments", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/diagnostic-noop-preview", "/machines/machine-1/diagnostic-noop-preview", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/diagnostic-noop-jobs", "/machines/machine-1/diagnostic-noop-jobs", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /enrollments", "/enrollments", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /enrollments/preview", "/enrollments/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/revoke-token/preview", "/machines/machine-1/revoke-token/preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/keyed-installer", "/machines/machine-1/keyed-installer", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/revoke-token", "/machines/machine-1/revoke-token", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/channel", "/machines/machine-1/channel", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/assigned-user", "/machines/machine-1/assigned-user", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/assigned-user-preview", "/machines/machine-1/assigned-user-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/display-name-preview", "/machines/machine-1/display-name-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/display-name", "/machines/machine-1/display-name", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/notes-preview", "/machines/machine-1/notes-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/notes", "/machines/machine-1/notes", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /settings/tailnet/peer-ignore-preview", "/settings/tailnet/peer-ignore-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /settings/tailnet/peer-ignores", "/settings/tailnet/peer-ignores", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /tenant/maintenance/retention/prune-preview", "/tenant/maintenance/retention/prune-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /tenant/maintenance/retention/prunes", "/tenant/maintenance/retention/prunes", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /tenant/maintenance/restore-drills/{id}", "/tenant/maintenance/restore-drills/operation-1", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /tenant/maintenance/restore-drill-preview", "/tenant/maintenance/restore-drill-preview", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /tenant/maintenance/restore-drills", "/tenant/maintenance/restore-drills", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"PUT /v1/operator/machines/{id}/channel", "/v1/operator/machines/machine-1/channel", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"PUT /v1/operator/machines/{id}/assigned-user", "/v1/operator/machines/machine-1/assigned-user", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/enrollment-tokens/preview", "/v1/operator/enrollment-tokens/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/enrollment-tokens", "/v1/operator/enrollment-tokens", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/machines/{id}/enrollment-token/revocation-preview", "/v1/operator/machines/machine-1/enrollment-token/revocation-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/machines/{id}/enrollment-token/revocations", "/v1/operator/machines/machine-1/enrollment-token/revocations", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/verifiers/preview", "/v1/operator/verifiers/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/verifiers", "/v1/operator/verifiers", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"GET /v1/operator/verifiers", "/v1/operator/verifiers", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/verifiers/{id}", "/v1/operator/verifiers/verifier-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"POST /v1/operator/verifiers/{id}/revocation-preview", "/v1/operator/verifiers/verifier-1/revocation-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/verifiers/{id}/revocations", "/v1/operator/verifiers/verifier-1/revocations", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/verifiers/{id}/assignment-preview", "/v1/operator/verifiers/verifier-1/assignment-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/verifiers/{id}/assignments", "/v1/operator/verifiers/verifier-1/assignments", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"GET /v1/operator/settings", "/v1/operator/settings", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"POST /v1/operator/setting-policies/preview", "/v1/operator/setting-policies/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/setting-policies", "/v1/operator/setting-policies", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/setting-assignments/preview", "/v1/operator/setting-assignments/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/setting-assignments", "/v1/operator/setting-assignments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"GET /v1/operator/compliance", "/v1/operator/compliance", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"POST /v1/operator/compliance-policies/preview", "/v1/operator/compliance-policies/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/compliance-policies", "/v1/operator/compliance-policies", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/compliance-assignments/preview", "/v1/operator/compliance-assignments/preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/compliance-assignments", "/v1/operator/compliance-assignments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /machines/{id}/terminals", "/machines/machine-1/terminals", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{operatorTerminalDocumentPattern, "/machines/machine-1/terminals/session-1", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal, false}},
+		{operatorTerminalSocketPattern, "/machines/machine-1/terminals/session-1/socket", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /deployments/{id}/skip-failed-batch-preview", "/deployments/deploy-1/skip-failed-batch-preview", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /deployments/{id}/skip-failed-batch", "/deployments/deploy-1/skip-failed-batch", operatorRoutePolicy{operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /v1/operator/deployments/{id}/skip-failed-batch-preview", "/v1/operator/deployments/deployment-1/skip-failed-batch-preview", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/deployments/{id}/skip-failed-batches", "/v1/operator/deployments/deployment-1/skip-failed-batches", operatorRoutePolicy{operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"GET /v1/operator/disk-clean/summaries", "/v1/operator/disk-clean/summaries", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"GET /v1/operator/disk-clean/summaries/{id}", "/v1/operator/disk-clean/summaries/machine-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, true}},
+		{"POST /v1/operator/disk-clean/profile-preview", "/v1/operator/disk-clean/profile-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/disk-clean/profiles", "/v1/operator/disk-clean/profiles", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/disk-clean/dry-run-preview", "/v1/operator/disk-clean/dry-run-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/disk-clean/dry-runs", "/v1/operator/disk-clean/dry-runs", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/disk-clean/canary-preview", "/v1/operator/disk-clean/canary-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/disk-clean/canaries", "/v1/operator/disk-clean/canaries", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/disk-clean/continuation-preview", "/v1/operator/disk-clean/continuation-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/disk-clean/continuations", "/v1/operator/disk-clean/continuations", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/disk-clean/abandonment-preview", "/v1/operator/disk-clean/abandonment-preview", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"POST /v1/operator/disk-clean/abandonments", "/v1/operator/disk-clean/abandonments", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, false}},
+		{"GET /account/security", "/account/security", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /account/security/totp/begin", "/account/security/totp/begin", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /account/security/totp/confirm", "/account/security/totp/confirm", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /account/security/totp/disable", "/account/security/totp/disable", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /account/security/password", "/account/security/password", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /account/security/recovery-codes/regenerate", "/account/security/recovery-codes/regenerate", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /account/users", "/account/users", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"GET /account/service-tokens", "/account/service-tokens", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /account/service-tokens/create", "/account/service-tokens/create", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /account/service-tokens/revoke", "/account/service-tokens/revoke", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /account/users/create", "/account/users/create", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /account/users/disable", "/account/users/disable", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /account/users/enable", "/account/users/enable", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /account/users/email", "/account/users/email", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
+		{"POST /account/users/rename", "/account/users/rename", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
 	}
 	casePatterns := make(map[string]struct{}, len(tests))
 	for _, test := range tests {
@@ -708,8 +711,8 @@ func TestSafeDenialFloodCannotSuppressFirstUnsafePersistentAudit(t *testing.T) {
 		t.Fatal("host-denied request reached mutation")
 	})
 	policies := map[string]operatorRoutePolicy{
-		"GET /{$}":     {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
-		"POST /mutate": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+		"GET /{$}":     {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false},
+		"POST /mutate": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false},
 	}
 	boundary := newOperatorBoundary(inner, &boundaryAuthorizer{allow: true}, st, policies, testOperatorAuthority)
 
@@ -742,8 +745,8 @@ func TestUnsafeDenialFloodIsSampledAndAggregatedAtRollover(t *testing.T) {
 	})
 	inner.HandleFunc("GET /{$}", func(http.ResponseWriter, *http.Request) {})
 	policies := map[string]operatorRoutePolicy{
-		"POST /mutate": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
-		"GET /{$}":     {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+		"POST /mutate": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false},
+		"GET /{$}":     {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false},
 	}
 	boundary := newOperatorBoundary(inner, &boundaryAuthorizer{allow: true}, st, policies, testOperatorAuthority)
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
@@ -796,7 +799,7 @@ func TestUnsafeDenialFloodRecordsTruncationBeforeAnyoneElseArrives(t *testing.T)
 		t.Error("host-denied request reached mutation")
 	})
 	policies := map[string]operatorRoutePolicy{
-		"POST /mutate": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+		"POST /mutate": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false},
 	}
 	boundary := newOperatorBoundary(inner, &boundaryAuthorizer{allow: true}, st, policies, testOperatorAuthority)
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
@@ -1231,7 +1234,7 @@ func TestContradictoryAuthorizationResultNeverReachesMutation(t *testing.T) {
 			mutations := 0
 			inner.HandleFunc("POST /mutate", func(http.ResponseWriter, *http.Request) { mutations++ })
 			policy := map[string]operatorRoutePolicy{
-				"POST /mutate": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+				"POST /mutate": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false},
 			}
 			boundary := newOperatorBoundary(inner, test.authorizer, st, policy, testOperatorAuthority)
 			rec := httptest.NewRecorder()
@@ -1305,7 +1308,7 @@ func TestCrossOriginProtectionRunsAfterAuthAndBeforeHandler(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	policy := map[string]operatorRoutePolicy{
-		"POST /machines/{id}/channel": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
+		"POST /machines/{id}/channel": {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false},
 	}
 	authorizer := &boundaryAuthorizer{allow: true}
 	boundary := newOperatorBoundary(inner, authorizer, st, policy, testOperatorAuthority)
@@ -1746,7 +1749,7 @@ func TestOperatorBoundarySecurityHeadersAndDestinationParsing(t *testing.T) {
 	inner := http.NewServeMux()
 	inner.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	boundary := newOperatorBoundary(inner, &boundaryAuthorizer{allow: true}, nil,
-		map[string]operatorRoutePolicy{"GET /{$}": {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}},
+		map[string]operatorRoutePolicy{"GET /{$}": {operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}},
 		testOperatorAuthority)
 	rec := httptest.NewRecorder()
 	req := newBoundaryRequest(http.MethodGet, "/", nil)
@@ -1836,8 +1839,8 @@ func TestCrossOriginDenialCannotUseTerminalSecurityProfile(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	policies := map[string]operatorRoutePolicy{
-		"POST /mutate":                  {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
-		operatorTerminalDocumentPattern: {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal},
+		"POST /mutate":                  {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false},
+		operatorTerminalDocumentPattern: {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal, false},
 	}
 	boundary := newOperatorBoundary(inner, &boundaryAuthorizer{allow: true}, boundaryStore(t), policies, testOperatorAuthority)
 	req := newBoundaryRequest(http.MethodPost, "/mutate", nil)
@@ -2024,7 +2027,7 @@ func TestContentSecurityPolicyNamesPinnedListenerNotRequestHost(t *testing.T) {
 		})
 		boundary := newOperatorBoundary(inner, &boundaryAuthorizer{allow: true}, nil,
 			map[string]operatorRoutePolicy{
-				operatorTerminalDocumentPattern: {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal},
+				operatorTerminalDocumentPattern: {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityTerminal, false},
 			}, authority)
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "http://"+hostileHost+"/machines/machine-1/terminals/session-1", nil)
@@ -2211,7 +2214,7 @@ func TestNavigationLanguageIsTheOnlyUnsafeViewRoute(t *testing.T) {
 	if err := validateOperatorRoutePolicies(registered, operatorRoutePolicies); err != nil {
 		t.Fatal(err)
 	}
-	want := operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked}
+	want := operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, false}
 	if got, ok := operatorRoutePolicies["POST /preferences/navigation-language"]; !ok || got != want {
 		t.Fatalf("navigation language policy=%+v ok=%t, want %+v", got, ok, want)
 	}

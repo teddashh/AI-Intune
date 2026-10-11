@@ -1557,3 +1557,10 @@ CREATE TABLE IF NOT EXISTS hub_login_failures (
 );
 
 CREATE INDEX IF NOT EXISTS idx_hub_login_failures_age ON hub_login_failures(last_failed_at);
+
+CREATE TABLE IF NOT EXISTS service_tokens (
+ id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, scope TEXT NOT NULL CHECK(scope IN ('view','operate')),
+ token_hash BLOB NOT NULL UNIQUE CHECK(length(token_hash)=32), allowlist TEXT NOT NULL, source_cidrs TEXT NOT NULL,
+ created_by TEXT NOT NULL REFERENCES hub_accounts(account_id), created_at TEXT NOT NULL,
+ expires_at TEXT NOT NULL CHECK(julianday(expires_at) IS NOT NULL AND julianday(expires_at)>julianday(created_at) AND julianday(expires_at)<=julianday(created_at)+90), last_used_at TEXT, revoked_at TEXT
+);
