@@ -91,6 +91,7 @@ type Checkin struct {
 	// executor. Old agents omit it; the Hub must treat omission as unsupported
 	// and must not infer support from agent_version text.
 	DeviceSyncV1 bool `json:"device_sync_v1,omitempty"`
+	ScriptV1     bool `json:"script_v1,omitempty"`
 
 	// MaintenanceDiskCleanV1 says this process has the embedded disk-clean
 	// executor. Omission means unsupported. The Hub must not infer it from

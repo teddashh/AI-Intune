@@ -608,6 +608,7 @@ func runAgent() {
 
 func advertiseJobCapabilities(checkin *model.Checkin) {
 	checkin.DeviceSyncV1 = true
+	checkin.ScriptV1 = runtime.GOOS == "linux" && os.Geteuid() != 0
 	checkin.MaintenanceDiskCleanV1 = true
 }
 

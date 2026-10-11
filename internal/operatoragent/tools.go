@@ -70,6 +70,8 @@ func (s *Service) Call(ctx context.Context, name string, raw json.RawMessage) (a
 		return nil, &CallError{Code: "invalid_arguments", Message: "context is required"}
 	}
 	switch name {
+	case "script_catalog_list", "script_run_preview", "script_run_apply":
+		return s.scriptCall(ctx, name, raw)
 	case "fleet_overview":
 		return s.fleetOverview(ctx, raw)
 	case "machines_list":

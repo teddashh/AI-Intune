@@ -201,3 +201,14 @@ machine, and do not report the rollout succeeded.
 Do not commit `hub.env`, enrollment tokens, or `CLAWCTL_HUB_URL` values that
 are private to a tailnet if your policy treats them as secret. The example
 files in `ops/docker/` stay examples.
+
+## Embedded script catalog
+
+`script_catalog_list` reads the view-scoped build-time allowlist.
+`script_run_preview` validates hash, closed args, timeout, reason and 1–50 explicit
+machine IDs. `script_run_apply` requires that preview's `preview_digest` and an
+`idempotency_key`; it never calls preview itself. Read scripts require `operate`;
+write scripts require `admin`. Only the harmless
+Linux `fleet-probe-v1` is registered in phase 1. The agent runs without elevation
+and refuses root execution. Output is capped/redacted job evidence; audit stores
+only metadata/digests. Use `job_get` / `job_evidence` to inspect resulting jobs.

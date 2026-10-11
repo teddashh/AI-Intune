@@ -15,6 +15,7 @@ import (
 	appcatalog "github.com/teddashh/AI-Intune/internal/catalog"
 	"github.com/teddashh/AI-Intune/internal/deploy"
 	"github.com/teddashh/AI-Intune/internal/model"
+	"github.com/teddashh/AI-Intune/internal/scriptcatalog"
 )
 
 var (
@@ -431,6 +432,9 @@ func directManagedCatalogSpec(raw string) bool {
 	kind, _, err := model.ParseJobSpec([]byte(raw))
 	if err != nil {
 		return false
+	}
+	if kind == scriptcatalog.Kind {
+		return true
 	}
 	for _, registered := range agentadapter.ExecutorKinds() {
 		if kind == registered {
@@ -1065,6 +1069,17 @@ func (s *Store) RecordVerification(jobID, machineID, leaseToken, ruleID, command
 		!validJobEvidenceTime(verifiedAt) || !validJobEvidenceTime(receivedAt) {
 		return ErrInvalidJobEvidence
 	}
+	var resourceKind string
+	if err := s.rdb.QueryRow(`SELECT d.resource_kind FROM jobs j JOIN desired_state d ON d.desired_id=j.desired_id WHERE j.job_id=? AND j.machine_id=?`, jobID, machineID).Scan(&resourceKind); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if resourceKind == scriptcatalog.Kind {
+		stdoutExcerpt = scriptcatalog.Redact(stdoutExcerpt)
+		stderrExcerpt = scriptcatalog.Redact(stderrExcerpt)
+		if len(stdoutExcerpt) > maxJobVerificationExcerptBytes || len(stderrExcerpt) > maxJobVerificationExcerptBytes {
+			return ErrInvalidJobEvidence
+		}
+	}
 	// ⚠ command 不做整理或改寫，讓人可以從證據列原樣複製後重跑。
 	res, err := s.execWrite(context.Background(), "record_verification", `
 INSERT INTO verification_results
@@ -1124,6 +1139,10 @@ SELECT command, exit_code, stdout_excerpt, stderr_excerpt, passed, verified_at
 // MarkSucceededIfVerified 只依 Hub 已保存的驗證證據判定工作單成功。
 // ⚠ 回傳的是判決後工作單真正停在的狀態；呼叫端不得假設 nil 就等於 succeeded。
 func (s *Store) MarkSucceededIfVerified(jobID string, now time.Time) (deploy.JobState, error) {
+	scriptRequired, scriptReady, scriptErr := s.scriptEvidenceReady(jobID)
+	if scriptErr != nil {
+		return "", scriptErr
+	}
 	wired, required, ready, err := s.measuredEvidenceDecision(jobID)
 	if err != nil {
 		return "", err
@@ -1139,6 +1158,9 @@ func (s *Store) MarkSucceededIfVerified(jobID string, now time.Time) (deploy.Job
 			required, ready = true, false
 		}
 	}
+	if scriptRequired {
+		required, ready = true, scriptReady
+	}
 	// ⚠⚠ EXISTS 與 NOT EXISTS 跟狀態更新在同一個 SQL 敘述中，擋的是
 	// 沒有證據便成功，以及檢查後才插入失敗證據的競態。
 	//
@@ -1153,7 +1175,7 @@ func (s *Store) MarkSucceededIfVerified(jobID string, now time.Time) (deploy.Job
 	// 而這裡是**唯一**能寫進 succeeded 的 SQL —— 如果它允許從 claimed 直接
 	// 跳過去，那組測試就只是在測一個沒有人用的函式，
 	// 而一台根本沒開始裝的機器會被判成裝好了。
-	res, err := s.execWrite(context.Background(), "mark_succeeded_if_verified", `
+	res, err := s.terminalJobWrite(context.Background(), "mark_succeeded_if_verified", jobID, `
 UPDATE jobs
    SET state = ?, terminal_at = ?, lease_token = NULL, lease_expires_at = NULL
  WHERE job_id = ?
@@ -2135,6 +2157,11 @@ func (s *Store) advanceJob(jobID, machineID, leaseToken string, requireLease boo
 	} else if n != 1 {
 		return from, ErrJobNotFound
 	}
+	if deploy.IsTerminal(to) {
+		if err := s.recordScriptCompletionTx(tx, jobID); err != nil {
+			return "", err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return "", fmt.Errorf("store: commit advanced job: %w", err)
 	}
@@ -2146,7 +2173,7 @@ func (s *Store) FailJob(jobID string, irreversible bool, now time.Time) error {
 	terminalState := deploy.OnFailure(irreversible)
 	// ⚠ 終態一律取自 deploy.OnFailure，而且 caller 帶來的旗標必須和開單時
 	// 保存的 irreversible 相同，擋的是 stale/錯誤 caller 把兩個失敗判決互換。
-	res, err := s.execWrite(context.Background(), "fail_job", `
+	res, err := s.terminalJobWrite(context.Background(), "fail_job", jobID, `
 UPDATE jobs
    SET state = ?, terminal_at = ?, lease_token = NULL, lease_expires_at = NULL
  WHERE job_id = ?
