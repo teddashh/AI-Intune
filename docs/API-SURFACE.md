@@ -3,13 +3,13 @@
 > 這是控制面 parity 的帳本，不是行銷功能表。只要正常操作仍只有 CLI，
 > 就留在「缺口」欄；高風險不是把入口藏起來，而是補 RBAC、preview、確認、
 > 冪等與 audit。共同成功語意見 [CONTROL-PLANE-CONTRACT.md](CONTROL-PLANE-CONTRACT.md)。
-> 逐一對照 240 個 HTTP operations（24 non-operator＋216 operator；107 條 operator JSON）、
+> 逐一對照 243 個 HTTP operations（24 non-operator＋219 operator；110 條 operator JSON）、
 > native Store、UI／CLI 與 Intune-style submenu 的完整清單，
 > 見 [FEATURE-INVENTORY.md](FEATURE-INVENTORY.md)。
 
 ## Public local-account routes (Autopilot)
 
-These six operations are included in the 240-operation tally above (24 non-operator + 216 operator). The inventory/contract excludes these six public account operations and totals 234. Account routes return 404 in `tailscale` mode. In `local` / `both`, they pin Host to `CLAWCTL_PUBLIC_URL`, use locked security headers and Go CrossOriginProtection, and do not require an existing operator session.
+These six operations are included in the 243-operation tally above (24 non-operator + 219 operator). The inventory/contract excludes these six public account operations and totals 237. Account routes return 404 in `tailscale` mode. In `local` / `both`, they pin Host to `CLAWCTL_PUBLIC_URL`, use locked security headers and Go CrossOriginProtection, and do not require an existing operator session.
 
 | Method | Route | Authority / behavior |
 |---|---|---|
@@ -539,3 +539,51 @@ and `/rename` require active local admin sessions and password/TOTP re-auth.
 These six operator HTML routes use CSRF protection, bounded bodies, IP limiting,
 no-store responses and the standard forced MFA boundary. Tailscale principals
 receive 404. See [operator authentication](OPERATOR-AUTH.md#multiple-admin-accounts).
+
+## Read-only supervision
+
+`GET /v1/operator/jobs-summary`, `GET /v1/operator/approvals-summary`, and
+`GET /v1/operator/hub-status` require only `view`, return no-store JSON
+(`schema_version=1`), and never enqueue work or write audit/approval records.
+The matching MCP tools are `jobs_summary`, `approvals_summary`, and `hub_status`.
+
+Jobs accept `kind`, `machine_id`, `window=24h|7d` (omit for both), and
+`per_machine=true|false`. Groups use executor `spec.kind` (resource kind if
+absent), plus `spec.script_id` when present; a machine filter also splits by
+machine. This branch has no persisted scheduler: cadence and `missed_daily`
+are null with a reason. Counts use the creation-time cohort, with inclusive
+window starts and no future-created jobs. `lease_expired` maps to `timed_out`;
+nonterminal states map to `pending`; manual intervention and unknown states
+remain explicit. Duration is creation-to-terminal seconds, including queue wait,
+using nearest-rank p50/p95. Last success is the newest successful terminal time
+in the scanned cohort, including successes older than seven days.
+
+Hub flags compare unsuccessful terminal runs (failed/rejected/timed-out/manual
+intervention) to all terminal runs in 24h, strictly above 10%; latency compares
+24h p95 to twice the inclusive seven-day p95. No samples/baseline means null.
+The daily missed threshold is strictly above 26h when cadence becomes known.
+Reads cap history at 10,000 rows and groups at 200, using existing creation-time
+indexes before parsing bounded specs. `truncated` means counts are partial,
+last-success evidence may be incomplete, and job threshold flags are null.
+The kind filter applies within the bounded cohort (machine filtering precedes
+the cap); it cannot claim a complete history for sparse kinds when truncated.
+
+Approvals accept only `window=24h|7d`. A successful canonical preview-gated
+audit mutation with a nonempty idempotency key and request digest counts as
+`applied`; replay/transport markers, uncorrelated legacy rows, and session or
+assigned-user operations are excluded. This observes the existing preview/apply
+confirmation contract, not a separately persisted human approval. Successful
+previews are pure reads and have no persisted creation event or pending record.
+Consequently created/expired/abandoned counts, preview-to-apply percentiles,
+oldest pending age and the >4h flag are null with an explicit reason. Failed
+applies are not classified as human denials. The newest 10,000 audit rows in the
+seven-day window bound the read; `truncated` marks partial applied counts.
+
+Status includes process version/uptime, local DB/WAL byte sizes, the latest
+completed persisted restore-drill result/time, and the latest backup evidence
+referenced by a restore-drill operation (not a claim that newer backups do not
+exist). It omits backup filenames, paths, raw errors, credentials and tokens.
+Litestream sync telemetry is not recorded locally: its timestamp is null with
+a reason. Active means non-retired registry machines; reporting means a Hub
+check-in received within ten minutes; stale includes machines never reporting.
+Read times describe evaluation, not a cross-table atomic snapshot.

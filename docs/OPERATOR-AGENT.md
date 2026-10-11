@@ -201,3 +201,16 @@ machine, and do not report the rollout succeeded.
 Do not commit `hub.env`, enrollment tokens, or `CLAWCTL_HUB_URL` values that
 are private to a tailnet if your policy treats them as secret. The example
 files in `ops/docker/` stay examples.
+
+### Supervision tools
+
+`jobs_summary`, `approvals_summary`, and `hub_status` call the corresponding
+`GET /v1/operator/{jobs-summary,approvals-summary,hub-status}` APIs with `view`.
+All have `readOnlyHint=true` and closed argument schemas. Jobs accept `kind`,
+`machine_id`, `per_machine`, and `window` (`24h` or `7d`); approvals accept
+`window`; status accepts no arguments. Omit window for both rolling windows.
+Null metrics/flags mean unavailable evidence, not healthy or zero. In particular,
+this branch does not persist successful previews or pending approvals, scheduler
+cadence, or Litestream sync telemetry. Partial scans explicitly return
+`truncated`; clients must not treat their counts as complete. See
+[the supervision contract](API-SURFACE.md#read-only-supervision) for definitions.
