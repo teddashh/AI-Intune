@@ -3,13 +3,13 @@
 > 這是控制面 parity 的帳本，不是行銷功能表。只要正常操作仍只有 CLI，
 > 就留在「缺口」欄；高風險不是把入口藏起來，而是補 RBAC、preview、確認、
 > 冪等與 audit。共同成功語意見 [CONTROL-PLANE-CONTRACT.md](CONTROL-PLANE-CONTRACT.md)。
-> 逐一對照 240 個 HTTP operations（24 non-operator＋216 operator；107 條 operator JSON）、
+> 逐一對照 243 個 HTTP operations（24 non-operator＋219 operator；110 條 operator JSON）、
 > native Store、UI／CLI 與 Intune-style submenu 的完整清單，
 > 見 [FEATURE-INVENTORY.md](FEATURE-INVENTORY.md)。
 
 ## Public local-account routes (Autopilot)
 
-These six operations are included in the 240-operation tally above (24 non-operator + 216 operator). The inventory/contract excludes these six public account operations and totals 234. Account routes return 404 in `tailscale` mode. In `local` / `both`, they pin Host to `CLAWCTL_PUBLIC_URL`, use locked security headers and Go CrossOriginProtection, and do not require an existing operator session.
+These six operations are included in the 243-operation tally above (24 non-operator + 219 operator). The inventory/contract excludes these six public account operations and totals 237. Account routes return 404 in `tailscale` mode. In `local` / `both`, they pin Host to `CLAWCTL_PUBLIC_URL`, use locked security headers and Go CrossOriginProtection, and do not require an existing operator session.
 
 | Method | Route | Authority / behavior |
 |---|---|---|
@@ -539,3 +539,25 @@ and `/rename` require active local admin sessions and password/TOTP re-auth.
 These six operator HTML routes use CSRF protection, bounded bodies, IP limiting,
 no-store responses and the standard forced MFA boundary. Tailscale principals
 receive 404. See [operator authentication](OPERATOR-AUTH.md#multiple-admin-accounts).
+
+## Embedded script jobs (phase 1)
+
+`GET /v1/operator/script-catalog` requires `view` and returns an object with an `items` array. `POST /v1/operator/script-runs/preview`
+and `POST /v1/operator/script-runs` require `operate` for read scripts; write entries
+require `admin`. Bodies contain `script_id`, bare 64-hex `script_sha256`,
+closed `args`, `targets` (1–50 explicit machine IDs), `reason`, and optional
+`timeout_seconds`. Apply also requires the matching `preview_digest` and
+`Idempotency-Key`. Targets must report `script_v1`, Linux and enabled execution,
+with no active job. All target validation, job creation, receipt and audit are atomic.
+Phase 1 uses explicit IDs; selectors can be resolved with the existing machine list.
+
+The sole entry is `fleet-probe-v1`: uptime, three load averages, root disk use percent,
+and failed systemd unit count (`null` when unavailable). It exposes no host identity.
+The embedded catalog is shared at build time; agents independently verify exact bytes,
+validate arguments, refuse root execution, and use JSON stdin, a private working directory,
+minimal environment and process-group timeout. Each stream is capped at 64 KiB and
+redacted; SHA-256 covers the full original stream before redaction. Job verification
+evidence contains capped stdout/stderr plus a `script_v1_metadata` record with duration,
+exit code, timeout, truncation flags and full-stream hashes. Audit contains identities,
+argument/output digests and status, never raw output. Catalog scripts are trusted reviewed
+code; phase 1 does not introduce an OS filesystem sandbox or arbitrary command input.

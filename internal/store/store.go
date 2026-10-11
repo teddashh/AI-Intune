@@ -1689,6 +1689,14 @@ ON CONFLICT(machine_id, sent_at) DO UPDATE SET
 		machineID, fmtTime(c.SentAt), model.MaintenanceDiskCleanCapability); err != nil {
 		return fmt.Errorf("store: replace disk-clean job capability: %w", err)
 	}
+	if _, err := tx.Exec(`DELETE FROM machine_job_capabilities WHERE machine_id=? AND sent_at=? AND capability='script_v1'`, machineID, fmtTime(c.SentAt)); err != nil {
+		return err
+	}
+	if c.ScriptV1 {
+		if _, err := tx.Exec(`INSERT INTO machine_job_capabilities (machine_id,sent_at,capability,supported) VALUES (?,?,'script_v1',1)`, machineID, fmtTime(c.SentAt)); err != nil {
+			return err
+		}
+	}
 	if c.MaintenanceDiskCleanV1 {
 		if _, err := tx.Exec(`INSERT INTO machine_job_capabilities
 		 (machine_id,sent_at,capability,supported) VALUES (?,?,?,1)`,

@@ -350,6 +350,9 @@ var operatorRoutePolicies = map[string]operatorRoutePolicy{
 	"POST /deployments/{id}/skip-failed-batch":                            {operatorauth.Operate, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked},
 	"POST /v1/operator/deployments/{id}/skip-failed-batch-preview":        {operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
 	"POST /v1/operator/deployments/{id}/skip-failed-batches":              {operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
+	"GET /v1/operator/script-catalog":                                     {operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
+	"POST /v1/operator/script-runs/preview":                               {operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
+	"POST /v1/operator/script-runs":                                       {operatorauth.Operate, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
 	"GET /v1/operator/disk-clean/summaries":                               {operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
 	"GET /v1/operator/disk-clean/summaries/{id}":                          {operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
 	"POST /v1/operator/disk-clean/profile-preview":                        {operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked},
@@ -617,6 +620,9 @@ func (b *operatorBoundary) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if pattern == "POST /v1/operator/script-runs/preview" || pattern == "POST /v1/operator/script-runs" {
+		policy.Permission = scriptRequestPermission(r)
+	}
 	before := routingOf(r)
 	authed, decision := b.authorizer.Authorize(r, policy.Permission)
 	if !decision.Allowed || authed == nil {

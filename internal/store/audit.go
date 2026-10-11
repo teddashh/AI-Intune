@@ -28,6 +28,9 @@ import (
 type AuditAction string
 
 const (
+	AuditScriptPreview             AuditAction = "script-run-preview"
+	AuditScriptApply               AuditAction = "script-run-apply"
+	AuditScriptComplete            AuditAction = "script-run-complete"
 	AuditHubGuessing               AuditAction = "hub-login-guessing"
 	AuditHubSetup                  AuditAction = "hub-setup"
 	AuditHubUserCreated            AuditAction = "hub-user-created"
@@ -159,7 +162,7 @@ func IsCanonicalOperatorAction(action AuditAction) bool {
 		action == AuditDeploymentCreate || action == AuditDeploymentRetry ||
 		action == AuditDeploymentContinue || action == AuditDeploymentSkipFailedBatch || action == AuditDeploymentAbandon ||
 		action == AuditArtifactFetch || action == AuditCatalogManifest || action == AuditMachineProfile ||
-		action == AuditMachineProfileAssign || action == AuditDiagnosticNoop || action == AuditDeviceSync || action == AuditTailnetPeerIgnore ||
+		action == AuditScriptPreview || action == AuditScriptApply || action == AuditScriptComplete || action == AuditMachineProfileAssign || action == AuditDiagnosticNoop || action == AuditDeviceSync || action == AuditTailnetPeerIgnore ||
 		action == AuditRetentionPrune || action == AuditRestoreDrill ||
 		action == AuditVerifierRegister || action == AuditVerifierRevoke ||
 		action == AuditVerificationAssign ||

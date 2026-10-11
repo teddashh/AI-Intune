@@ -25,6 +25,7 @@ import (
 	"github.com/teddashh/AI-Intune/internal/deploy"
 	"github.com/teddashh/AI-Intune/internal/maintenance"
 	"github.com/teddashh/AI-Intune/internal/model"
+	"github.com/teddashh/AI-Intune/internal/scriptcatalog"
 )
 
 const (
@@ -624,7 +625,7 @@ func newJobsRunner(opts jobsOptions) (*jobsRunner, error) {
 	if opts.Executor == nil {
 		openclaw, nodeRuntime, hermes, claude, codex, grok, batServer, antigravity := executorsForGOOS(runtime.GOOS, opts.HubURL, opts.Token, opts.Now)
 		opts.Executor = newKindExecutor(noopExecutor{now: opts.Now}, deviceSyncExecutor{now: opts.Now},
-			openclaw, nodeRuntime, hermes).withKind(agentadapter.ExecutorKindClaudeCode, claude).withKind(agentadapter.ExecutorKindCodex, codex).withKind(agentadapter.ExecutorKindGrok, grok).withKind(agentadapter.ExecutorKindBATServer, batServer).withKind(agentadapter.ExecutorKindAntigravity, antigravity).withKind(maintenance.JobKind, maintenanceExecutor{})
+			openclaw, nodeRuntime, hermes).withKind(agentadapter.ExecutorKindClaudeCode, claude).withKind(agentadapter.ExecutorKindCodex, codex).withKind(agentadapter.ExecutorKindGrok, grok).withKind(agentadapter.ExecutorKindBATServer, batServer).withKind(agentadapter.ExecutorKindAntigravity, antigravity).withKind(maintenance.JobKind, maintenanceExecutor{}).withKind(scriptcatalog.Kind, scriptExecutor{})
 	}
 	w, err := loadWatermarkJournal(opts.JournalPath)
 	if err != nil {

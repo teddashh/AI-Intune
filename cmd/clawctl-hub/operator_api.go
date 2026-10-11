@@ -295,6 +295,10 @@ func (h *hub) operatorRoutes(mux *http.ServeMux) []string {
 	} {
 		mux.HandleFunc(patterns[diskClean+i], handler)
 	}
+	patterns = append(patterns, "GET /v1/operator/script-catalog", "POST /v1/operator/script-runs/preview", "POST /v1/operator/script-runs")
+	mux.HandleFunc("GET /v1/operator/script-catalog", h.handleScriptCatalog)
+	mux.HandleFunc("POST /v1/operator/script-runs/preview", h.handleScriptPreview)
+	mux.HandleFunc("POST /v1/operator/script-runs", h.handleScriptApply)
 	return patterns
 }
 
