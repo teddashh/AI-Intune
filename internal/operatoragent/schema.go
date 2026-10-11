@@ -142,6 +142,9 @@ func Tools() []Tool {
 	ttl := intBound(int(store.OperatorEnrollTokenMinTTLSeconds), int(store.OperatorEnrollTokenMaxTTLSeconds), "Seconds. Hub accepts 60 to 86400.")
 
 	return append([]Tool{
+		{Name: "jobs_summary", Description: "Read bounded Hub job counts and threshold flags. Scope view. Null flags mean insufficient evidence.", InputSchema: obj(map[string]any{"kind": strField(1, 256, "", "Executor kind"), "machine_id": strField(1, 256, "", "Machine identifier"), "window": strEnum("24h", "7d"), "per_machine": boolField}), Annotations: readAnn("jobs_summary")},
+		{Name: "approvals_summary", Description: "Read observed approvals. Scope view. Preview and pending metrics are null when not persisted.", InputSchema: obj(map[string]any{"window": strEnum("24h", "7d")}), Annotations: readAnn("approvals_summary")},
+		{Name: "hub_status", Description: "Read Hub storage, uptime, restore drill and machine health. Scope view. No secrets or local paths.", InputSchema: obj(map[string]any{}), Annotations: readAnn("hub_status")},
 		{Name: "fleet_overview", Description: "Read GET /v1/operator/machines. Totals are the fleet index. Items are one page. A non-null next_cursor means this page is not the whole fleet.", InputSchema: obj(map[string]any{}), Annotations: readAnn("fleet_overview")},
 		{Name: "machines_list", Description: "Read GET /v1/operator/machines with the same filters as the operator client.", InputSchema: obj(map[string]any{
 			"machine_id": text256, "display_name": text256, "states": stateArray(machineStates),
