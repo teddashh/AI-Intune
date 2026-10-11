@@ -1,8 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"html/template"
-	"net"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -52,10 +53,13 @@ func registerServiceTokenRoutes(mux *http.ServeMux, st *store.Store) []string {
 					var expires time.Time
 					expires, err = time.Parse(time.RFC3339, r.PostForm.Get("expires_at"))
 					allow := splitServiceList(r.PostForm.Get("allowlist"))
+					if len(allow) == 0 {
+						err = store.ErrServiceToken
+					}
 					if err == nil {
 						for _, route := range allow {
 							policy, valid := operatorRoutePolicies[route]
-							if !valid || policy.Representation != operatorJSON || policy.Permission == operatorauth.Admin || !strings.Contains(route, " /v1/operator/") {
+							if !valid || !policy.ServiceTokenEligible || policy.Representation != operatorJSON || policy.Permission == operatorauth.Admin || !strings.Contains(route, " /v1/operator/") {
 								err = store.ErrServiceToken
 								break
 							}
@@ -106,38 +110,91 @@ func splitServiceList(v string) []string {
 	return out
 }
 
-func (b *operatorBoundary) serveServiceToken(w http.ResponseWriter, r *http.Request, pattern string, policy operatorRoutePolicy) {
-	peer, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		peer = r.RemoteAddr
+// serviceResponseWriter records the first final status, including implicit 200s.
+type serviceResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *serviceResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+func (w *serviceResponseWriter) WriteHeader(status int) {
+	if status >= 100 && status < 200 && status != http.StatusSwitchingProtocols {
+		w.ResponseWriter.WriteHeader(status)
+		return
 	}
-	if !b.serviceAttempts.allowWithCost(peer, false) {
-		writeOperatorBoundaryError(w, operatorJSON, 429, "RATE_LIMITED", "Too many attempts")
+	if w.status != 0 {
+		return
+	}
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+func (w *serviceResponseWriter) Write(data []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func (b *operatorBoundary) serveServiceToken(w http.ResponseWriter, r *http.Request, pattern string, policy operatorRoutePolicy) {
+	source := b.clientIP.Resolve(r)
+	response := &serviceResponseWriter{ResponseWriter: w}
+	principal := operatorauth.Principal{AuthMethod: operatorauth.AuthMethodServiceToken, SourceAddr: source}
+	defer func() {
+		panicked := recover()
+		if panicked != nil {
+			defer func() { panic(panicked) }()
+		}
+		status := response.status
+		if panicked != nil && status == 0 {
+			status = http.StatusInternalServerError
+		}
+		if status == 0 {
+			status = http.StatusOK
+		}
+		entry := store.AuditEntry{Action: "service-token-request", AuthSubject: principal.StableSubject(), AuthMethod: principal.AuthMethod, Subject: pattern, SourceAddr: source, OK: status < 400, Detail: fmt.Sprintf("HTTP status %d", status)}
+		var err error
+		if status >= 400 {
+			entry.Action = store.AuditOperatorDenied
+			// Bound denial write I/O as well as ledger size, including 429 floods.
+			admission := b.denials.admit(true, source)
+			if admission.suppressedUnsafe != 0 {
+				b.persistSuppressedDenials(admission)
+			}
+			if !admission.persistUnsafe {
+				return
+			}
+			err = b.store.RecordOperatorDenial(entry)
+		} else {
+			err = b.store.RecordAudit(entry)
+		}
+		if err != nil {
+			log.Printf("service-token request audit unavailable: %v", err)
+		}
+	}()
+	if !b.serviceAttempts.allowWithCost(source, false) {
+		writeOperatorBoundaryError(response, operatorJSON, 429, "RATE_LIMITED", "Too many attempts")
 		return
 	}
 	secret := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	t, err := b.store.AuthenticateServiceToken(secret, pattern, peer, policy.Permission.String())
-	deniedPrincipal := operatorauth.Principal{}
-	if t.Name != "" {
-		deniedPrincipal = operatorauth.Principal{AuthMethod: operatorauth.AuthMethodServiceToken, TailnetUserID: t.Name, TailnetUserLogin: "service:" + t.Name, SourceAddr: peer, NodeStableID: t.ID}
+	required := policy.Permission.String()
+	if !policy.ServiceTokenEligible {
+		required = ""
 	}
-	if err != nil {
-		b.serviceAttempts.allow(peer)
-		b.observeAuthDenial(r, pattern, policy, string(operatorauth.Unauthenticated), "Authentication required", deniedPrincipal, nil)
-		if isSafeMethod(r.Method) && deniedPrincipal.StableSubject() != "" {
-			_ = b.store.RecordOperatorDenial(store.AuditEntry{Action: store.AuditOperatorDenied, AuthSubject: deniedPrincipal.StableSubject(), AuthMethod: deniedPrincipal.AuthMethod, Subject: pattern, SourceAddr: peer, OK: false})
-		}
-		writeOperatorBoundaryError(w, operatorJSON, 401, "UNAUTHENTICATED", "Authentication required")
+	token, err := b.store.AuthenticateServiceToken(secret, pattern, source, required)
+	if token.Name != "" {
+		principal.TailnetUserID = token.Name
+		principal.TailnetUserLogin = "service:" + token.Name
+		principal.NodeStableID = token.ID
+	}
+	if err != nil || !policy.ServiceTokenEligible || policy.Permission == operatorauth.Admin {
+		b.serviceAttempts.allow(source)
+		writeOperatorBoundaryError(response, operatorJSON, 401, "UNAUTHENTICATED", "Authentication required")
 		return
 	}
-	p := operatorauth.Principal{AuthMethod: operatorauth.AuthMethodServiceToken, TailnetUserID: t.Name, TailnetUserLogin: "service:" + t.Name, SourceAddr: peer, NodeStableID: t.ID, GrantedCapabilities: operatorauth.CapabilityNames{View: "view"}}
-	if t.Scope == "operate" {
-		p.GrantedCapabilities.Operate = "operate"
+	principal.GrantedCapabilities.View = "view"
+	if token.Scope == "operate" {
+		principal.GrantedCapabilities.Operate = "operate"
 	}
-	p.AuthorizedCapability = policy.Permission.String()
-	if err = b.store.RecordAudit(store.AuditEntry{Action: "service-token-request", AuthSubject: p.StableSubject(), AuthMethod: p.AuthMethod, Subject: pattern, SourceAddr: peer, OK: true}); err != nil {
-		writeOperatorBoundaryError(w, operatorJSON, 503, "INTERNAL", "Audit unavailable")
-		return
-	}
-	b.csrfNext.ServeHTTP(w, operatorauth.WithPrincipal(r, p))
+	principal.AuthorizedCapability = policy.Permission.String()
+	b.csrfNext.ServeHTTP(response, operatorauth.WithPrincipal(r, principal))
 }

@@ -98,3 +98,32 @@ func TestServiceTokenLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestServiceTokenRequiresExactNonemptyAllowlist(t *testing.T) {
+	fastAccountHashes(t)
+	st := newTestStore(t)
+	actor, err := st.CreateFirstAdmin("admin", testAdminPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := ServiceToken{Name: "agent", Scope: "view", ExpiresAt: st.now().Add(time.Hour)}
+	for _, list := range [][]string{nil, {}, {""}, {"/v1/operator/machines"}, {"GET  /v1/operator/machines"}, {"get /v1/operator/machines"}, {"GET /account/security"}, {"GET /v1/operator/machines?x=1"}, {"GET /v1/operator/{bad"}, {"GET /v1/operator/machines\n"}} {
+		base.Allowlist = list
+		if _, _, err = st.CreateServiceToken(base, actor.AccountID); err == nil {
+			t.Fatalf("invalid allowlist accepted: %q", list)
+		}
+	}
+	base.Allowlist = []string{"GET /v1/operator/machines"}
+	token, secret, err := st.CreateServiceToken(base, actor.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{"null", "[]", `["GET  /v1/operator/machines"]`, `["GET /v1/operator/machines", "bad"]`} {
+		if _, err = st.db.Exec(`UPDATE service_tokens SET allowlist=? WHERE id=?`, raw, token.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = st.AuthenticateServiceToken(secret, "GET /v1/operator/machines", "192.0.2.1", "view"); err == nil {
+			t.Fatalf("legacy invalid allowlist accepted: %s", raw)
+		}
+	}
+}

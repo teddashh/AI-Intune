@@ -227,7 +227,7 @@ type Principal struct {
 }
 
 func (p Principal) StableSubject() string {
-	if p.AuthMethod == AuthMethodServiceToken {
+	if p.AuthMethod == AuthMethodServiceToken && p.TailnetUserID != "" {
 		return "service:" + p.TailnetUserID
 	}
 	if p.TailnetUserID == "" {

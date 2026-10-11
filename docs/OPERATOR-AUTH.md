@@ -631,3 +631,13 @@ clawctl-hub reset-admin-password --db PATH --username alice < password-file
 works with existing accounts. `reset-admin-password` selects the normalized
 username; optional `--disable-mfa` forces enrollment again. Host disable also
 protects the last active admin. User mutations are audit logged without passwords.
+
+## Scoped service-token boundary
+
+`operatorRoutePolicies.ServiceTokenEligible` is an explicit opt-in, defaulting to false. Currently only read-only `GET /v1/operator/*` routes with the view capability are eligible (GET patterns also serve HEAD). All existing mutations and human preview/apply routes—including deployment/rollout continuations, retries, failed-batch skips, diagnostics, and verifier assignments—remain human-only, even for an operate token with those routes in a legacy allowlist. Future automation routes must be deliberately classified and tested.
+
+Management requires a human admin session and MFA. Creation requires at least one exact registered method/route-pattern entry, each explicitly eligible; malformed or empty lists are rejected at creation and authentication. Route eligibility is checked on every bearer request independently of its allowlist. Tokens retain view/operate scopes, expiry and immediate revocation checks.
+
+The boundary receives the Hub's configured `clientip.Resolver`: CIDRs, failure limiter keys, principal source and audit source use the resolved client address. `Fly-Client-IP` or `X-Forwarded-For` is trusted only when the connection peer matches `CLAWCTL_TRUSTED_PROXIES`, with `CLAWCTL_CLIENT_IP_HEADER` selecting the configured header. Untrusted peers cannot supply their own client identity; IPv6 limiter keys retain the shared /64 grouping.
+
+Service request audit is written once after CSRF and downstream handling complete. The first final HTTP status determines success (`<400`); implicit responses are 200 and informational headers do not determine the outcome. Denied requests use the bounded operator-denial ledger. Audit write failures after a response are logged without rewriting the completed response.

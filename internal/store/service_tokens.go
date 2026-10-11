@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/netip"
 	"regexp"
 	"strings"
@@ -40,11 +41,11 @@ func ValidServiceSecret(secret string) bool {
 
 func (s *Store) CreateServiceToken(t ServiceToken, actor string) (ServiceToken, string, error) {
 	now := s.now().UTC()
-	if !serviceName.MatchString(t.Name) || (t.Scope != "view" && t.Scope != "operate") || !t.ExpiresAt.After(now) || t.ExpiresAt.After(now.Add(90*24*time.Hour)) || len(t.Allowlist) > 128 || len(t.SourceCIDRs) > 32 {
+	if !serviceName.MatchString(t.Name) || (t.Scope != "view" && t.Scope != "operate") || !t.ExpiresAt.After(now) || t.ExpiresAt.After(now.Add(90*24*time.Hour)) || len(t.Allowlist) == 0 || len(t.Allowlist) > 128 || len(t.SourceCIDRs) > 32 {
 		return ServiceToken{}, "", ErrServiceToken
 	}
 	for _, v := range t.Allowlist {
-		if v == "" || len(v) > 256 || strings.ContainsAny(v, "\r\n") {
+		if !validServiceRoute(v) {
 			return ServiceToken{}, "", ErrServiceToken
 		}
 	}
@@ -188,11 +189,16 @@ func (s *Store) AuthenticateServiceToken(secret, route, peer string, required st
 	if err != nil {
 		return ServiceToken{}, ErrServiceToken
 	}
-	if !serviceName.MatchString(t.Name) {
+	if !serviceName.MatchString(t.Name) || len(t.Allowlist) == 0 || len(t.Allowlist) > 128 {
 		return ServiceToken{}, ErrServiceToken
 	}
 	if (required != "view" && required != "operate") || (t.Scope != "view" && t.Scope != "operate") || (required == "operate" && t.Scope != "operate") || t.RevokedAt != nil || !t.ExpiresAt.After(s.now()) || t.ExpiresAt.After(t.CreatedAt.Add(90*24*time.Hour)) {
 		return t, ErrServiceToken
+	}
+	for _, route := range t.Allowlist {
+		if !validServiceRoute(route) {
+			return t, ErrServiceToken
+		}
 	}
 	if len(t.Allowlist) > 0 {
 		found := false
@@ -230,4 +236,21 @@ func (s *Store) AuthenticateServiceToken(secret, route, peer string, required st
 		return t, ErrServiceToken
 	}
 	return t, nil
+}
+
+var serviceRoute = regexp.MustCompile(`^(GET|HEAD|POST|PUT|PATCH|DELETE) /v1/operator/[A-Za-z0-9_{}./$-]+$`)
+
+// Validate using the same ServeMux pattern parser as the Hub, without accepting
+// a malformed method, whitespace, query, fragment, or wildcard pattern.
+func validServiceRoute(route string) (valid bool) {
+	if len(route) > 256 || !serviceRoute.MatchString(route) {
+		return false
+	}
+	defer func() {
+		if recover() != nil {
+			valid = false
+		}
+	}()
+	http.NewServeMux().Handle(route, http.NotFoundHandler())
+	return true
 }
