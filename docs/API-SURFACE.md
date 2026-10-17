@@ -3,7 +3,7 @@
 > 這是控制面 parity 的帳本，不是行銷功能表。只要正常操作仍只有 CLI，
 > 就留在「缺口」欄；高風險不是把入口藏起來，而是補 RBAC、preview、確認、
 > 冪等與 audit。共同成功語意見 [CONTROL-PLANE-CONTRACT.md](CONTROL-PLANE-CONTRACT.md)。
-> 逐一對照 314 個 HTTP operations（30 non-operator＋284 operator；142 條 operator JSON）、
+> 逐一對照 315 個 HTTP operations（30 non-operator＋285 operator；143 條 operator JSON）、
 > native Store、UI／CLI 與 Intune-style submenu 的完整清單，
 > 見 [FEATURE-INVENTORY.md](FEATURE-INVENTORY.md)。
 
@@ -12,7 +12,7 @@ is off by default and uses its own signature/secret boundary. See [CHANNELS.md](
 
 ## Public local-account routes (Autopilot)
 
-These six operations are included in the 314-operation tally above (30 non-operator + 284 operator). The inventory/contract excludes these six public account operations and totals 308. Account routes return 404 in `tailscale` mode. In `local` / `both`, they pin Host to `CLAWCTL_PUBLIC_URL`, use locked security headers and Go CrossOriginProtection, and do not require an existing operator session.
+These six operations are included in the 315-operation tally above (30 non-operator + 285 operator). The inventory/contract excludes these six public account operations and totals 309. Account routes return 404 in `tailscale` mode. In `local` / `both`, they pin Host to `CLAWCTL_PUBLIC_URL`, use locked security headers and Go CrossOriginProtection, and do not require an existing operator session.
 
 | Method | Route | Authority / behavior |
 |---|---|---|
@@ -1014,3 +1014,38 @@ bearer API. Fields: token `id`, repeated manifest `routes`, current `password`,
 and fresh TOTP `code`. It uses the same CSRF/origin protection as other sensitive
 account actions. See [Operator authentication](OPERATOR-AUTH.md#editing-service-token-routes)
 for immediate grant semantics, rotation boundaries and audit diffs.
+
+### OOM kill attribution
+
+UI: Machines → machine detail → **Recent OOM kills**, linked from the page heading
+and attention next steps. Recent evidence also produces a memory fleet finding.
+
+`GET /v1/operator/machines/{id}/oom-kills` (View capability; exact service-token
+route grant required) returns `{schema_version: 1, evaluated_at, items: []}` with at most 64 events
+from the last hour, newest first. No query parameters; missing machines return
+404. Responses are no-store. Each item contains UTC time, source
+(oomd, kernel, memcg), optional unit (systemd unit/container scope basename),
+process, pressure_avg10 (percentage), and count (memcg delta).
+Absent attribution is unknown. Counter times are observation times, not kill
+times. Kernel and counter evidence may overlap and must not be summed.
+
+Agent observation schema 1 adds optional oom_kills (maximum 64), retaining
+compatibility with agents that omit it. Hub retains these in append-only
+observed_state under kind/subject oom, governed by existing observation
+retention. Reads inspect at most 128 batches received in the last two hours,
+deduplicate overlapping identical events, and expire attention after one hour.
+Agent times outside the last day or more than five minutes ahead are rejected;
+the ordinary clock-skew signal still applies.
+
+Kernel journal evidence falls back to a bounded ISO-timestamped dmesg read when
+the journal supplies no kernel victim. Only extracted identity basenames
+(128-character restricted alphabet), typed
+timestamps/counters and numeric pressure are uploaded. No raw OOM log, command
+line, environment, full cgroup path, host address or arbitrary error is uploaded
+by this collector. Unit/process identities are operator-controlled metadata:
+do not put credentials in names. This is not general secret redaction for
+other observation fields.
+
+MCP/operator-agent tool: `machine_oom_kills` with required `machine_id` and no
+other arguments; read-only, forwarding to the same HTTP endpoint. The operator
+client validates the bounded typed response before returning it to the tool.

@@ -51,7 +51,7 @@ func attentionReasons(s state.State, credentials []state.CredFact, findings []st
 		if f.Severity < 2 && !f.Advisory {
 			continue
 		}
-		reason := map[string]string{"disk": "Disk space low", "workload": "OpenClaw needs attention", "agent": "Agent needs attention", "clock": "Clock needs attention", "config": "Configuration needs attention", "credential": "Login needs attention", "machine": "Machine rebooting repeatedly"}[f.Kind]
+		reason := map[string]string{"memory": "Recent OOM kills", "disk": "Disk space low", "workload": "OpenClaw needs attention", "agent": "Agent needs attention", "clock": "Clock needs attention", "config": "Configuration needs attention", "credential": "Login needs attention", "machine": "Machine rebooting repeatedly"}[f.Kind]
 		if f.Kind == "credential" && credentialReasonCount > 0 {
 			continue
 		}

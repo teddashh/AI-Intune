@@ -152,6 +152,7 @@ func Tools() []Tool {
 			"channel": strEnum("any", "none", "canary", "stable"), "limit": machineLimit, "cursor": cursor,
 		}), Annotations: readAnn("machines_list")},
 		{Name: "machine_get", Description: "Read GET /v1/operator/machines/{id}. Reachability is Hub's judgement from outbound check-ins.", InputSchema: obj(map[string]any{"machine_id": id256}, "machine_id"), Annotations: readAnn("machine_get")},
+		{Name: "machine_oom_kills", Description: "Read recent OOM attribution shown on machine detail. Counter rows can overlap kernel kills; unknown identities must not be inferred.", InputSchema: obj(map[string]any{"machine_id": id256}, "machine_id"), Annotations: readAnn("machine_oom_kills")},
 		{Name: "machine_evidence", Description: "Read GET /v1/operator/machines/{id}/evidence. limit 0 uses the server default.", InputSchema: obj(map[string]any{"machine_id": id256, "limit": machineEvidenceLimit}, "machine_id"), Annotations: readAnn("machine_evidence")},
 		{Name: "jobs_list", Description: "Read GET /v1/operator/jobs.", InputSchema: obj(map[string]any{
 			"machine_id":    map[string]any{"type": "string", "description": "Optional. When set, Hub rejects surrounding whitespace. No maximum length is published for this filter."},

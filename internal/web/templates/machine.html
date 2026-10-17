@@ -12,10 +12,12 @@
   {{if $md.Checkins.Truncated}}<p class="small dim">{{$.CheckinWindowText}}內超過 {{$md.Disclosure.CheckinLimit}} 筆心跳。已取回最近 {{$md.Disclosure.CheckinLimit}} 筆，狀態條畫出其中最近 {{len $.Strip}} 筆。</p>{{end}}
   {{if $md.Checkins.Invalid}}<p class="small dim">已取回的心跳裡有 {{$md.Checkins.Invalid}} 筆無效，沒有畫進狀態條。</p>{{end}}
 </div></div>
+<p><a href="#oom-kills">Recent OOM kills</a></p>
 
 {{if eq $md.Judgement.State "Degraded"}}
 <div class="panel" id="attention-next-action"><h2>Next steps</h2>
 <p>Review the findings below and their observation times before acting. Check the affected service logs for agent or workload findings; use Disk usage and safe cleanup for disk findings. For login findings, ask the assigned service user to sign in through the provider's normal flow. After repair, wait for a fresh observation and confirm the reason clears.</p>
+<p><a href="#oom-kills">Review recent OOM kills and memory pressure</a>.</p>
 <p>State is based on the evidence currently available; a heartbeat alone does not prove workload recovery. Avoid restarting services or deleting files without reviewing impact and approval requirements.</p></div>
 {{end}}
 
@@ -165,6 +167,31 @@
   </tbody>
   </table>
   {{end}}
+  {{end}}
+</div>
+
+<h2 id="oom-kills">Recent OOM kills</h2>
+<div class="panel">
+  <p>Last hour, up to 64 events. Review service memory limits and workload demand before restarting affected services. Missing attribution is unavailable.</p>
+  {{if .OOMKills}}
+  <table>
+    <thead><tr><th>Time (UTC)</th><th>Source</th><th>Unit / container</th><th>Process</th><th>Memory pressure avg10</th><th>Counter delta</th></tr></thead>
+    <tbody>
+    {{range .OOMKills}}
+      <tr>
+        <td>{{.Time.UTC.Format "2006-01-02 15:04:05"}}</td>
+        <td>{{.Source}}</td>
+        <td>{{if .Unit}}{{.Unit}}{{else}}Unknown{{end}}</td>
+        <td>{{if .Process}}{{.Process}}{{else}}Unknown{{end}}</td>
+        <td>{{if .PressureAvg10}}{{.PressureAvg10}}%{{else}}Unavailable{{end}}</td>
+        <td>{{if .Count}}{{.Count}}{{else}}—{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  <p class="small dim">memcg rows show counter deltas at observation time, not exact kill times. They can overlap kernel evidence; do not sum rows. oomd kills a cgroup and does not establish an individual process.</p>
+  {{else}}
+  <p>No recent OOM kills reported. <a href="/updates">Review agent version</a> and ensure the agent can read the system journal and cgroup counters. Missing evidence does not prove no kills occurred.</p>
   {{end}}
 </div>
 
