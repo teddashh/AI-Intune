@@ -199,12 +199,13 @@ func TestDeliveredPagesExposeReachableSubNavigation(t *testing.T) {
 	// 同一台機器的兩頁要給同一份子選單。少一項的選單看起來像那一節在這裡不存在。
 	assertSubNavigation(t, s, detailBase+"/timeline", "裝置詳細資料子選單", "事件時間軸", detailNav)
 	assertSubNavigation(t, s, detailBase+"/data", "裝置詳細資料子選單", "資料", detailNav)
-	tenantNav := map[string]string{"/tenant/schedules": "Schedules", "/tenant/maintenance": "維護", "/tenant/disk-policies": "Disk policies", "/tenant/approvals": "Approvals", "/tenant/disk-alerts": "Disk alerts", "/tenant/data": "資料揭露"}
+	tenantNav := map[string]string{"/tenant/certificates": "Certificates", "/tenant/schedules": "Schedules", "/tenant/maintenance": "維護", "/tenant/disk-policies": "Disk policies", "/tenant/approvals": "Approvals", "/tenant/disk-alerts": "Disk alerts", "/tenant/data": "資料揭露"}
 	assertSubNavigation(t, s, "/tenant/maintenance", "租用戶子選單", "維護", tenantNav)
 	assertSubNavigation(t, s, "/tenant/data", "租用戶子選單", "資料揭露", tenantNav)
 	assertSubNavigation(t, s, "/tenant/disk-policies", "租用戶子選單", "Disk policies", tenantNav)
 	assertSubNavigation(t, s, "/tenant/approvals", "租用戶子選單", "Approvals", tenantNav)
 	assertSubNavigation(t, s, "/tenant/disk-alerts", "租用戶子選單", "Disk alerts", tenantNav)
+	assertSubNavigation(t, s, "/tenant/certificates", "租用戶子選單", "Certificates", tenantNav)
 	assertSubNavigation(t, s, "/reports/changes", "報告子選單", "變更", reportsNav)
 	assertSubNavigation(t, s, "/reports/tickets", "報告子選單", "票證使用量", reportsNav)
 	assertSubNavigation(t, s, "/reports/enrollment", "報告子選單", "註冊", reportsNav)

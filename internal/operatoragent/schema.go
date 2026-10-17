@@ -218,5 +218,5 @@ func Tools() []Tool {
 			"machine_id": id256, "profile_id": profileID, "profile_revision": profileRevision, "confirm_display_name": confirmName,
 			"preview_digest": digestField, "reason": reason, "idempotency_key": idemField,
 		}, "machine_id", "profile_id", "profile_revision", "confirm_display_name", "preview_digest", "reason", "idempotency_key"), Annotations: writeAnn("profile_assignment_apply", true)},
-	}, append(diskCleanTools(id256, idemField), append(append(scriptTools(), scheduleTools()...), append(append(diskPolicyTools(), diskApprovalTools()...), diskActionTools()...)...)...)...)
+	}, append(diskCleanTools(id256, idemField), append(append(append(scriptTools(), scheduleTools()...), certificateTools()...), append(append(diskPolicyTools(), diskApprovalTools()...), diskActionTools()...)...)...)...)
 }

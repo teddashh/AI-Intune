@@ -787,6 +787,7 @@ func serve(argv []string) {
 	go h.agentSessionRevocationLoop(ctx)
 	go h.jobReaperLoop(ctx)
 	go h.scheduleLoop(ctx)
+	go h.certificateLoop(ctx)
 	go h.reportLoop(ctx)
 	go h.pruneLoop(ctx)
 	go watchdogLoop(ctx, h)

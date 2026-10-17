@@ -268,7 +268,7 @@ func (s *Server) Routes(mux *http.ServeMux) []string {
 	mux.HandleFunc(patterns[38], s.terminalDocument)
 	mux.HandleFunc(patterns[39], s.downloadKeyedInstaller)
 	// Mutation routes are POST-only and delegate to the canonical operator service.
-	return append(append(append(append(append(patterns, s.channelRoutes(mux)...), "GET /secrets", "GET /v1/operator/secrets", "POST /secrets/test"), s.actionRoutes(mux)...), s.diskOpsRoutes(mux)...), append(s.scheduleRoutes(mux), s.loopRoutes(mux)...)...)
+	return append(append(append(append(append(patterns, s.channelRoutes(mux)...), "GET /secrets", "GET /v1/operator/secrets", "POST /secrets/test"), s.actionRoutes(mux)...), s.diskOpsRoutes(mux)...), append(append(s.scheduleRoutes(mux), s.loopRoutes(mux)...), s.certificateRoutes(mux)...)...)
 }
 
 type maintenancePageView struct {
@@ -395,6 +395,7 @@ type page struct {
 	DiskGrowth            []store.DiskGrowth
 	DiskBanner            *store.DiskAlertBannerCounts
 	Loops                 *loopsPage
+	Certificates          *certificatesPage
 	DiskAlerts            *diskAlertsPage
 	DiskMachine           *diskMachinePage
 	DiskPolicies          *diskPoliciesPage
@@ -1864,6 +1865,8 @@ func subNavigationFor(data page) subNavigation {
 		return reportsSubNavigation("發佈與指派")
 	case "audit":
 		return reportsSubNavigation("稽核記錄")
+	case "tenant-certificates":
+		return tenantSubNavigation("Certificates")
 	case "tenant-schedules":
 		return tenantSubNavigation("Schedules")
 	case "tenant-disk-policies":
@@ -1905,6 +1908,7 @@ func tenantSubNavigation(current string) subNavigation {
 		subNavigationItem{Label: "Approvals", Href: "/tenant/approvals"},
 		subNavigationItem{Label: "Disk alerts", Href: "/tenant/disk-alerts"},
 		subNavigationItem{Label: "Schedules", Href: "/tenant/schedules"},
+		subNavigationItem{Label: "Certificates", Href: "/tenant/certificates"},
 		subNavigationItem{Label: "資料揭露", Href: "/tenant/data"},
 	)
 }

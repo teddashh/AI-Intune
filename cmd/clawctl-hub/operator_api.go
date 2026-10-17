@@ -343,7 +343,7 @@ func (h *hub) operatorRoutes(mux *http.ServeMux) []string {
 		patterns = append(patterns, pattern)
 		mux.HandleFunc(pattern, h.handleDiskApprovalDecision)
 	}
-	return patterns
+	return append(patterns, h.certificateRoutes(mux)...)
 }
 
 func (h *hub) handleListOperatorJobs(w http.ResponseWriter, r *http.Request) {

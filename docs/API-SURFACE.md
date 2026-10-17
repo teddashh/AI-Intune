@@ -3,7 +3,7 @@
 > 這是控制面 parity 的帳本，不是行銷功能表。只要正常操作仍只有 CLI，
 > 就留在「缺口」欄；高風險不是把入口藏起來，而是補 RBAC、preview、確認、
 > 冪等與 audit。共同成功語意見 [CONTROL-PLANE-CONTRACT.md](CONTROL-PLANE-CONTRACT.md)。
-> 逐一對照 317 個 HTTP operations（30 non-operator＋287 operator；143 條 operator JSON）、
+> 逐一對照 325 個 HTTP operations（30 non-operator＋295 operator；149 條 operator JSON）、
 > native Store、UI／CLI 與 Intune-style submenu 的完整清單，
 > 見 [FEATURE-INVENTORY.md](FEATURE-INVENTORY.md)。
 
@@ -12,7 +12,7 @@ is off by default and uses its own signature/secret boundary. See [CHANNELS.md](
 
 ## Public local-account routes (Autopilot)
 
-These six operations are included in the 317-operation tally above (30 non-operator + 287 operator). The inventory/contract excludes these six public account operations and totals 311. Account routes return 404 in `tailscale` mode. In `local` / `both`, they pin Host to `CLAWCTL_PUBLIC_URL`, use locked security headers and Go CrossOriginProtection, and do not require an existing operator session.
+These six operations are included in the 325-operation tally above (30 non-operator + 295 operator). The inventory/contract excludes these six public account operations and totals 319. Account routes return 404 in `tailscale` mode. In `local` / `both`, they pin Host to `CLAWCTL_PUBLIC_URL`, use locked security headers and Go CrossOriginProtection, and do not require an existing operator session.
 
 | Method | Route | Authority / behavior |
 |---|---|---|
@@ -23,7 +23,7 @@ These six operations are included in the 317-operation tally above (30 non-opera
 
 | Method | Operator download route | Authority / behavior |
 |---|---|---|
-| `POST` | `/machines/{id}/keyed-installer` | Admin, locked browser security profile and CSRF checks; form `token` + Linux `arch` (`amd64` / `arm64`); returns no-store archive embedding Hub URL and pending one-time token without redeeming it. Already included in the 287 operator tally. |
+| `POST` | `/machines/{id}/keyed-installer` | Admin, locked browser security profile and CSRF checks; form `token` + Linux `arch` (`amd64` / `arm64`); returns no-store archive embedding Hub URL and pending one-time token without redeeming it. Already included in the 295 operator tally. |
 
 In local mode operator routes use a local admin session, including `/metrics`; in `both`, sessions precede eligible WhoIs fallback. Forwarded identity headers and machine/verifier bearers never authorize operators. The Tailscale-specific explanations below describe the advanced mode. See [Autopilot](AUTOPILOT.md) for setup, expiry, lockout and recovery.
 
@@ -971,8 +971,8 @@ for routes, human UI, recovery, readiness and metrics.
 ## Timer handoff and disk alerts (P2-05)
 
 Adds ten operator operations (six JSON, four HTML). The combined manifest totals
-317 including public accounts, 311 excluding them; 287 operator (143 JSON,
-144 HTML/plain), exact grants view=111 / operate=33 / admin=143.
+325 including public accounts, 319 excluding them; 295 operator (149 JSON,
+146 HTML/plain), exact grants view=114 / operate=33 / admin=148.
 
 | Method | Route | Admission |
 | --- | --- | --- |
@@ -1088,3 +1088,66 @@ second and expire outside the active window on activity ingestion. Baselines
 expire after 24 hours of inactivity; at most 64 tracked pairs per machine are
 accepted until old baselines expire. Additional pairs are ignored. These bounds
 and opt-in tool coverage mean missing episodes are never proof of health.
+
+## TLS certificate monitors
+
+Human workflow: **Tenant → Certificates** (`/tenant/certificates`). Viewers can
+inspect all evidence; human administrators can add, edit, remove, and request a
+probe using the server-rendered forms. Empty inventory links to the add form.
+The HTML and JSON adapters share the operator service; configuration mutations
+and their actor-attributed audit records commit atomically. Stale revisions are
+rejected. The existing operator boundary enforces authorization, same-origin
+writes, and locked response headers. No deployment or renewal is performed.
+
+| Method | Operator route | Permission / behavior |
+| --- | --- | --- |
+| GET | `/v1/operator/certificates` | View; `{items:[...]}`, unknown expiry first, then ascending whole days left |
+| GET | `/v1/operator/certificates/{id}` | View; monitor configuration, revision, latest evidence, flags and next action |
+| POST | `/v1/operator/certificates` | Human Admin; create a monitor |
+| PUT | `/v1/operator/certificates/{id}` | Human Admin; replace configuration with current `revision` |
+| DELETE | `/v1/operator/certificates/{id}` | Human Admin; JSON body `{ "revision": 1 }` |
+| POST | `/v1/operator/certificates/{id}/probe` | Human Admin; same revision body, queues a probe within a minute |
+
+Create/replace body (replace also requires `revision`):
+
+```json
+{
+  "endpoint": "example.test:443",
+  "expected": ["example.test", "www.example.test"],
+  "owner": "Example service team",
+  "notes": "Renew through the service certificate issuer; do not put secrets here.",
+  "days": [30, 14, 7]
+}
+```
+
+`endpoint` is `host:port` or `[IP]:port`, without a scheme, path, userinfo or
+credentials. Expected names are concrete DNS names/IPs, not wildcard patterns.
+`days` defaults to 30/14/7, accepts 1–10 thresholds between 1 and 3650, and reports
+the smallest applicable threshold. Limits: 200 monitors, 64 expected names,
+200 owner bytes, 2000 notes bytes. Mutations return `{id: "…"}`;
+invalid fields, missing/stale revisions or exhausted inventory return 400;
+missing single reads return 404. Unsupported queries/unknown JSON fields are
+rejected. These writes are human-only; service tokens can receive explicitly
+granted read routes. MCP tools `certificate_list` and `certificate_get` use those
+reads. Notes, issuer and certificate names are free text, **not secret-scanned**;
+only grant reads to trusted principals. Do not enter credentials or secrets.
+
+Hub sends TLS handshakes only, no HTTP payload or redirects. A dedicated loop
+checks due monitors every minute, probes hourly, allows four concurrent probes,
+and bounds each connection/handshake to five seconds. It collects the leaf's
+not-after, issuer, DNS/IP SANs and explicit chain verification error using system
+roots, intermediates, endpoint identity and current time. Expected hostnames are
+checked with Go `x509.VerifyHostname`, including single-label wildcard semantics
+and IP SAN matching. A private CA requires installation into Hub's system trust
+store; verification cannot be disabled by monitor configuration.
+
+Flags are independent: expired, expiring within the configured threshold, chain
+invalid, SAN gap, probe failed, and stale probe. No observed certificate or an
+observation older than three hours is stale. Failed connections retain the last
+certificate evidence, update the attempt/error, and never make it fresh. Editing
+configuration clears old evidence; revision fencing discards in-flight results
+from older configurations. A manual probe retains evidence and queues an attempt.
+The configured notifier and notification ledger receive condition-specific alerts
+with daily successful-delivery deduplication and existing failure backoff. New
+thresholds/conditions notify independently. Notification bodies contain generic
+flags and a link to `/tenant/certificates`, excluding owner/notes/endpoint text.

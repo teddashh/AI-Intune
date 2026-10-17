@@ -1859,3 +1859,11 @@ CREATE TABLE IF NOT EXISTS loop_samples(machine_id TEXT NOT NULL,process TEXT NO
 CREATE INDEX IF NOT EXISTS loop_samples_time ON loop_samples(received_at);
 CREATE TABLE IF NOT EXISTS loop_episodes(id INTEGER PRIMARY KEY AUTOINCREMENT,machine_id TEXT NOT NULL REFERENCES machine_registry(machine_id) ON DELETE CASCADE,process TEXT NOT NULL,signature TEXT NOT NULL,started_at TEXT NOT NULL,last_seen_at TEXT NOT NULL,last_progress TEXT,calls INTEGER NOT NULL,rate REAL NOT NULL,acknowledged_at TEXT,resolved_at TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS loop_episode_open ON loop_episodes(machine_id,process,signature) WHERE resolved_at IS NULL;
+
+-- TLS inventory is opt-in; configuration revisions fence in-flight probes.
+CREATE TABLE IF NOT EXISTS certificate_monitors (
+ id TEXT PRIMARY KEY,
+ revision INTEGER NOT NULL,
+ config TEXT NOT NULL,
+ result TEXT NOT NULL DEFAULT '{}'
+);

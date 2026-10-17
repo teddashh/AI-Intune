@@ -1,0 +1,19 @@
+{{define "certificates.html"}}{{template "head" .}}
+<h1>Certificates</h1>
+<p>Monitor TLS endpoints from the Hub network. Probes run hourly with a five-second timeout. Observations older than three hours are stale. Only administrators can configure network probes.</p>
+{{with .Certificates}}
+<div class="panel"><h2>Monitored endpoints</h2>
+<table><thead><tr><th>Endpoint / owner</th><th>Days left / expiry</th><th>Evidence</th><th>Flags / next action</th><th>Manage</th></tr></thead><tbody>
+{{range .Items}}<tr><td>{{.Endpoint}}<br>{{.Owner}}<p>{{.Notes}}</p></td><td>{{if .Result.NotAfter.IsZero}}Unknown{{else}}{{.DaysLeft}} days<br>{{.Result.NotAfter}}{{end}}</td><td>Last attempt: {{if .Result.AttemptedAt.IsZero}}Queued{{else}}{{.Result.AttemptedAt}}{{end}}<br>Last certificate: {{if .Result.ObservedAt.IsZero}}Not observed{{else}}{{.Result.ObservedAt}}{{end}}<br>Issuer: {{.Result.Issuer}}<br>SANs: {{range .Result.SANs}}{{.}} {{end}}<br>Expected: {{range .Expected}}{{.}} {{end}}<br>Missing: {{range .Result.Gaps}}{{.}} {{end}}<p>{{.Result.VerificationError}} {{.Result.ProbeError}}</p></td><td>{{range .Flags}}<strong>{{.}}</strong><br>{{else}}Healthy{{end}}<p>{{.NextAction}}</p></td><td>{{if $.Certificates.Manage}}<a href="/tenant/certificates?edit={{.ID}}#monitor-form">Edit</a><form method="post" action="/tenant/certificates"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="revision" value="{{.Revision}}"><button name="operation" value="probe">Probe within a minute</button><button class="secondary" name="operation" value="delete">Remove monitor</button></form>{{end}}</td></tr>
+{{else}}<tr><td colspan="5">No certificate endpoints configured. {{if .Manage}}<a href="#monitor-form">Add the first endpoint and its owner below</a>.{{else}}Ask a Hub administrator to add an endpoint and its owner.{{end}}</td></tr>{{end}}
+</tbody></table></div>
+{{if .Manage}}<div class="panel" id="monitor-form"><h2>{{if .Edit.ID}}Edit monitor{{else}}Add monitor{{end}}</h2>
+<form class="disk-form" method="post" action="/tenant/certificates"><input type="hidden" name="operation" value="save"><input type="hidden" name="id" value="{{.Edit.ID}}"><input type="hidden" name="revision" value="{{.Edit.Revision}}">
+<label><span class="field-label">Endpoint (host:port)</span><input name="endpoint" required placeholder="example.test:443" value="{{.Edit.Endpoint}}"></label>
+<label><span class="field-label">Expected hostnames (comma or space separated)</span><input name="expected" required value="{{range .Edit.Expected}}{{.}} {{end}}" placeholder="example.test www.example.test"></label>
+<label><span class="field-label">Owner</span><input name="owner" maxlength="200" value="{{.Edit.Owner}}"></label>
+<label><span class="field-label">Notes (do not include secrets)</span><textarea name="notes" maxlength="2000">{{.Edit.Notes}}</textarea></label>
+<label><span class="field-label">Expiry warning days</span><input name="days" required value="{{range .Edit.Days}}{{.}} {{end}}"></label>
+<button>Save monitor</button> <a href="/tenant/certificates#monitor-form">Cancel / add another</a>
+</form></div>{{end}}
+{{end}}{{template "foot" .}}{{end}}

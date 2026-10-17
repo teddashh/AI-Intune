@@ -273,3 +273,39 @@ Time-to-full is available only for positive growth and assumes a constant rate.
 Two fresh non-sustained readings at least five minutes apart clear an episode;
 unknown readings break that clearing sequence. Existing critical notification
 channels, six-hour repeats, and acknowledgement preview/apply apply unchanged.
+
+## Track TLS expiry and SAN gaps
+
+A generic incident: a site's certificate renewed successfully, but an alternate
+hostname was omitted from its SANs; clients failed while the primary name still
+worked. Track expected names explicitly instead of relying only on expiry.
+
+1. Open **Tenant → Certificates**. As a human administrator, add `example.test:443`,
+   expected names `example.test www.example.test`, an owner and renewal notes.
+   Keep credentials out of notes. Adjust warning days if needed (default 30/14/7).
+2. Save and wait up to one minute for the first probe. Hub probes from its own
+   network, so configure only destinations the Hub is authorized to contact.
+   For private issuers, install the CA into Hub's system trust store. A monitor
+   cannot bypass verification. No HTTP requests or redirects are followed.
+3. Review the table, ordered by unknown expiry first and then shortest days left.
+   Expired/expiry warnings require renewal; SAN gaps require reissuance covering
+   every expected name; chain errors require the correct full chain, issuer trust,
+   endpoint name and valid dates. `*.example.test` covers `www.example.test`, not
+   `deep.www.example.test` or `example.test`.
+4. A stale probe means no certificate evidence or evidence older than three hours.
+   Check Hub availability, DNS, network access and TLS listener. Failed probes
+   preserve the last certificate/expiry and show a separate failed attempt.
+5. After the owner repairs the service, use **Probe within a minute** and confirm
+   fresh evidence and cleared flags. Configure the existing Hub notifier to get
+   condition alerts; successful delivery is limited to once daily per condition,
+   with existing failure backoff. No recovery notification is emitted; the page
+   shows current recovery evidence. Review notification health if alerts do not
+   arrive. Alerts include generic flags and the authenticated Certificates link.
+6. Use **Edit** to change targets, names, owner/notes or thresholds; saved edits
+   reset observations. Reload and retry if a revision conflict occurs. **Remove
+   monitor** stops monitoring and deletes its latest evidence, without touching
+   the remote endpoint or changing existing notification/audit records.
+
+API details and read-only MCP tools are documented in `docs/API-SURFACE.md`.
+This workflow detects and tracks; the service owner still renews and installs
+certificates through the normal reviewed change process.

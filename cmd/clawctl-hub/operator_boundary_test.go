@@ -127,12 +127,12 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		t.Fatalf("non-operator registered=%d policies=%d, want 30/30",
 			len(nonOperatorRegistered), len(nonOperatorRoutePolicies))
 	}
-	if len(operatorRegistered) != 287 || len(operatorRoutePolicies) != 287 {
-		t.Fatalf("operator registered=%d policies=%d, want 287/287",
+	if len(operatorRegistered) != 295 || len(operatorRoutePolicies) != 295 {
+		t.Fatalf("operator registered=%d policies=%d, want 295/295",
 			len(operatorRegistered), len(operatorRoutePolicies))
 	}
-	if len(nonOperatorRegistered)+len(operatorRegistered) != 317 {
-		t.Fatalf("all registered routes=%d, 預期 317", len(nonOperatorRegistered)+len(operatorRegistered))
+	if len(nonOperatorRegistered)+len(operatorRegistered) != 325 {
+		t.Fatalf("all registered routes=%d, 預期 325", len(nonOperatorRegistered)+len(operatorRegistered))
 	}
 	counts := map[operatorauth.Permission]int{}
 	representations := map[operatorRepresentation]int{}
@@ -142,14 +142,14 @@ func TestOperatorRouteManifestMatchesAllRegisteredRoutes(t *testing.T) {
 		representations[policy.Representation]++
 		profiles[policy.SecurityProfile]++
 	}
-	if counts[operatorauth.View] != 111 || counts[operatorauth.Operate] != 33 || counts[operatorauth.Admin] != 143 {
-		t.Fatalf("permission counts=%v, want view=111 operate=33 admin=143", counts)
+	if counts[operatorauth.View] != 114 || counts[operatorauth.Operate] != 33 || counts[operatorauth.Admin] != 148 {
+		t.Fatalf("permission counts=%v, want view=114 operate=33 admin=148", counts)
 	}
-	if representations[operatorJSON] != 143 || representations[operatorHTML] != 143 || representations[operatorPlain] != 1 {
-		t.Fatalf("representation counts=%v, want JSON=143 HTML=143 plain=1", representations)
+	if representations[operatorJSON] != 149 || representations[operatorHTML] != 145 || representations[operatorPlain] != 1 {
+		t.Fatalf("representation counts=%v, want JSON=149 HTML=145 plain=1", representations)
 	}
-	if profiles[operatorSecurityLocked] != 286 || profiles[operatorSecurityTerminal] != 1 {
-		t.Fatalf("security profiles=%v, want locked=286 terminal=1", profiles)
+	if profiles[operatorSecurityLocked] != 294 || profiles[operatorSecurityTerminal] != 1 {
+		t.Fatalf("security profiles=%v, want locked=294 terminal=1", profiles)
 	}
 }
 
@@ -262,6 +262,14 @@ func TestEveryOperatorRouteRequestsItsExactPermission(t *testing.T) {
 		path    string
 		policy  operatorRoutePolicy
 	}{
+		{"GET /tenant/certificates", "/tenant/certificates", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, serviceIneligible}},
+		{"POST /tenant/certificates", "/tenant/certificates", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, serviceIneligible}},
+		{"GET /v1/operator/certificates", "/v1/operator/certificates", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, serviceEligible}},
+		{"GET /v1/operator/certificates/{id}", "/v1/operator/certificates/monitor-1", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, serviceEligible}},
+		{"POST /v1/operator/certificates", "/v1/operator/certificates", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, serviceIneligible}},
+		{"PUT /v1/operator/certificates/{id}", "/v1/operator/certificates/monitor-1", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, serviceIneligible}},
+		{"DELETE /v1/operator/certificates/{id}", "/v1/operator/certificates/monitor-1", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, serviceIneligible}},
+		{"POST /v1/operator/certificates/{id}/probe", "/v1/operator/certificates/monitor-1/probe", operatorRoutePolicy{operatorauth.Admin, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, serviceIneligible}},
 		{"GET /channels", "/channels", operatorRoutePolicy{operatorauth.View, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, serviceIneligible}},
 		{"GET /v1/operator/channels", "/v1/operator/channels", operatorRoutePolicy{operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, serviceIneligible}},
 		{"POST /channels/{operation}", "/channels/test", operatorRoutePolicy{operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, serviceIneligible}},
