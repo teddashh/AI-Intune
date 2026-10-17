@@ -1074,7 +1074,7 @@ func validMachineState(candidate state.State) bool {
 
 func validMachineFindingKind(kind string) bool {
 	switch kind {
-	case "agent", "clock", "config", "credential", "disk", "machine", "reachability", "workload":
+	case "memory", "agent", "clock", "config", "credential", "disk", "machine", "reachability", "workload":
 		return true
 	default:
 		return false

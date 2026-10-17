@@ -1864,6 +1864,14 @@ func nullInt(n int) any {
 }
 
 func (s *Store) RecordObservation(machineID string, b model.ObservationBatch, receivedAt time.Time) error {
+	if len(b.OOMKills) > 64 {
+		return model.ErrInvalidOOM
+	}
+	for _, e := range b.OOMKills {
+		if !model.ValidOOM(e, receivedAt) {
+			return model.ErrInvalidOOM
+		}
+	}
 	tx, err := s.beginWrite(context.Background(), "record_observation")
 	if err != nil {
 		return fmt.Errorf("store: begin: %w", err)
@@ -1903,6 +1911,11 @@ VALUES (?,?,?,?,?,?,?,?)`)
 		return nil
 	}
 
+	if b.OOMKills != nil {
+		if err := put("oom", "oom", b.OOMKills); err != nil {
+			return err
+		}
+	}
 	if err := put(KindIdentity, KindIdentity, b.Identity); err != nil {
 		return err
 	}
@@ -2929,6 +2942,11 @@ SELECT COUNT(DISTINCT agent_started_at), COUNT(agent_started_at) FROM machine_ch
 	}
 	f.AgentRestartSignalObserved = agentStartedRows > 0
 
+	events, err := s.RecentOOMKills(machineID, now)
+	if err != nil {
+		return state.Facts{}, err
+	}
+	f.RecentOOMKills = len(events)
 	// --- 完整觀測最後一次收到的時間。
 	var lastObs sql.NullString
 	if err := s.rdb.QueryRow(

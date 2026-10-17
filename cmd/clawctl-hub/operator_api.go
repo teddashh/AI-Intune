@@ -169,6 +169,8 @@ func (h *hub) operatorRoutes(mux *http.ServeMux) []string {
 		"POST /v1/operator/deployments/{id}/skip-failed-batch-preview",
 		"POST /v1/operator/deployments/{id}/skip-failed-batches",
 	}
+	patterns = append(patterns, "GET /v1/operator/machines/{id}/oom-kills")
+	mux.HandleFunc("GET /v1/operator/machines/{id}/oom-kills", h.handleOperatorOOMKills)
 	patterns = append(patterns, "GET /v1/operator/jobs-summary", "GET /v1/operator/approvals-summary", "GET /v1/operator/hub-status")
 	mux.HandleFunc("GET /v1/operator/jobs-summary", h.handleOperatorJobsSummary)
 	mux.HandleFunc("GET /v1/operator/approvals-summary", h.handleOperatorApprovalsSummary)
@@ -1219,4 +1221,22 @@ func (h *hub) rejectOperatorEnrollTokenRevocationTransport(w http.ResponseWriter
 
 func operatorActor(r *http.Request) operator.Actor {
 	return operator.ActorFromRequest(r, operator.SourceKindOperatorAPI)
+}
+
+func (h *hub) handleOperatorOOMKills(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if r.URL.RawQuery != "" {
+		writeErr(w, 400, "BAD_REQUEST", "query parameters are not supported")
+		return
+	}
+	events, err := operator.New(h.store).MachineOOMKills(r.PathValue("id"), time.Now().UTC())
+	if errors.Is(err, store.ErrNotFound) {
+		writeErr(w, 404, store.OperatorCodeMachineNotFound, "machine not found")
+		return
+	}
+	if err != nil {
+		writeErr(w, 500, "INTERNAL", "could not read OOM evidence")
+		return
+	}
+	writeJSON(w, 200, events)
 }

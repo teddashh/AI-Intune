@@ -277,7 +277,8 @@ type EventCount struct {
 }
 
 type Facts struct {
-	Now time.Time
+	RecentOOMKills int
+	Now            time.Time
 
 	// Artifacts 是這台機器上所有宣告過的期望 + 量測。
 	// ⚠ 空的代表**沒有人宣告過**，不代表「都通過了」。
@@ -883,6 +884,10 @@ func Derive(f Facts) Judgement {
 			humanDur(abs(f.ClockSkew)))
 	}
 
+	if f.RecentOOMKills > 0 {
+		add("memory", 2, false, "Recent OOM kills: review machine memory evidence")
+		promote(2, "Recent OOM kills: review machine memory evidence")
+	}
 	if degraded {
 		return Judgement{State: Degraded, Reason: primary, Findings: found}
 	}

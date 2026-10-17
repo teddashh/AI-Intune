@@ -1,0 +1,4 @@
+{"MESSAGE":"oom-kill:constraint=CONSTRAINT_MEMCG,oom_memcg=/parent.slice,task_memcg=/system.slice/example.service,task=worker,pid=123,uid=1000","SYSLOG_IDENTIFIER":"kernel","_TRANSPORT":"kernel","__REALTIME_TIMESTAMP":"1792234800000000"}
+{"MESSAGE":"Memory cgroup out of memory: Killed process 123 (worker) total-vm:42kB token=private","SYSLOG_IDENTIFIER":"kernel","_TRANSPORT":"kernel","__REALTIME_TIMESTAMP":"1792234800000001"}
+{"MESSAGE":"Killed /system.slice/example.service due to memory pressure for /system.slice being 81.25% > 60.00% for > 20s with reclaim activity","SYSLOG_IDENTIFIER":"systemd-oomd","_SYSTEMD_UNIT":"systemd-oomd.service","__REALTIME_TIMESTAMP":"1792234800000002"}
+{"MESSAGE":"Killed /system.slice/worker.service due to memory used (100) / total (100) and swap used (100) / total (100) being more than 90%","SYSLOG_IDENTIFIER":"systemd-oomd","_SYSTEMD_UNIT":"systemd-oomd.service","__REALTIME_TIMESTAMP":"1792234800000003"}

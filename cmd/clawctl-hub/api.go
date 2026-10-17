@@ -246,6 +246,10 @@ func (h *hub) handleObservations(w http.ResponseWriter, r *http.Request, machine
 		return
 	}
 	if err := h.store.RecordObservation(machineID, b, time.Now().UTC()); err != nil {
+		if errors.Is(err, model.ErrInvalidOOM) {
+			writeErr(w, 400, "BAD_REQUEST", "invalid OOM evidence")
+			return
+		}
 		h.writeStoreError(w, "寫入", machineID, err)
 		return
 	}

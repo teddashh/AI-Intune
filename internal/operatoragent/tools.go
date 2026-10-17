@@ -114,6 +114,8 @@ func (s *Service) Call(ctx context.Context, name string, raw json.RawMessage) (a
 		return s.machinesList(ctx, raw)
 	case "machine_get":
 		return s.machineGet(ctx, raw)
+	case "machine_oom_kills":
+		return s.machineOOMKills(ctx, raw)
 	case "machine_evidence":
 		return s.machineEvidence(ctx, raw)
 	case "jobs_list":

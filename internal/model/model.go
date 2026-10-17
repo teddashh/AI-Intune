@@ -456,6 +456,7 @@ type CapabilitiesResponse struct {
 // 因為「今天是綠的，星期三就死了」只有歷史答得出來，而上游的資料庫
 // 7 天 / 2000 筆就會把歷史吃掉。
 type ObservationBatch struct {
+	OOMKills      []OOMKill `json:"oom_kills,omitempty"`
 	SchemaVersion int       `json:"schema_version"`
 	MeasuredAt    time.Time `json:"measured_at"`
 

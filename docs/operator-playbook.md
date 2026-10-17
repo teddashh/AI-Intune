@@ -247,3 +247,35 @@ See [operator SSH](runbooks/OPERATOR-BOX-SSH.md).
 
 **Planned Hub feature:** Reachability/access-path evidence and readiness guidance
 that distinguishes jump-only bootstrap, agent transport and interactive sessions.
+
+### Investigate an OOM-killed workload
+
+For an incident where a worker disappears despite a healthy agent heartbeat,
+open **Machines → affected machine → Recent OOM kills** (also linked from
+attention next steps). Review UTC time, source, unit/container scope, process and
+pressure. oomd means userspace cgroup selection; kernel means a logged kernel
+victim; memcg means a local cgroup kill-counter increase. Unknown process
+attribution must not be guessed from the reporting service. Counter observations
+are not exact kill times and can overlap kernel events.
+
+Check the affected service's memory limit and workload demand before deciding
+whether to change limits or restart it. Recent events promote fleet attention for
+one hour; expiry is not proof of workload recovery. No restart or limit change
+is performed by this feature.
+
+If empty, use the linked Updates page to check the agent version and verify
+read access to the system journal and cgroup v2 counters. Do not grant broad sudo
+solely for collection. The collector runs without privilege escalation:
+journal query timeout 3 seconds, 256 records, 256 KiB output, one-hour lookback;
+capped dmesg fallback timeout 3 seconds, 256 records and 256 KiB when the journal
+contains no kernel victim;
+cgroup traversal at most 2,048 entries and 4 KiB counter files. First observation
+after agent restart establishes counter baselines, so earlier counter-only kills
+are unknown. Inaccessible journals, log rotation, busy hosts, old kernels and
+short-lived removed cgroups can leave gaps. oomd pressure is shown only if the
+kill record includes it; no current PSI sample is presented as historical
+pressure. Do not put secrets in unit or process names.
+
+For automation use GET /v1/operator/machines/{id}/oom-kills with a View principal
+and an exact route grant for service tokens. It is a read-only projection of the
+same evidence shown to humans.

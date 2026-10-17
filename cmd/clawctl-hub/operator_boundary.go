@@ -173,6 +173,7 @@ var nonOperatorRoutePolicies = map[string]nonOperatorRoutePolicy{
 // has a dedicated class checked against job kind and catalog mode at use time.
 // Lifecycle self/rotate are exceptions for the authenticated token itself.
 var operatorRoutePolicies = map[string]operatorRoutePolicy{
+	"GET /v1/operator/machines/{id}/oom-kills":         {operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, serviceEligible},
 	"GET /v1/operator/service-tokens/self":             {operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, serviceEligibleSelf},
 	"POST /v1/operator/service-tokens/rotate":          {operatorauth.View, operatorJSON, operator.SourceKindOperatorAPI, operatorSecurityLocked, serviceEligibleSelf},
 	"GET /account/service-tokens":                      {operatorauth.Admin, operatorHTML, operator.SourceKindWeb, operatorSecurityLocked, serviceIneligible},

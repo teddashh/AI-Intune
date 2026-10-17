@@ -194,6 +194,7 @@ func Collect(ctx context.Context) (model.ObservationBatch, error) {
 	units := systemdUnits(ctx, watchedUnits)
 
 	batch := model.ObservationBatch{
+		OOMKills:      collectOOM(ctx),
 		SchemaVersion: model.SchemaVersion,
 		MeasuredAt:    now,
 		Identity:      identity(ctx),
